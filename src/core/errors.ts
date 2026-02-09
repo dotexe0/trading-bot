@@ -58,3 +58,14 @@ export class IndicatorConfigError extends Error {
     this.issues = issues;
   }
 }
+
+/** Thrown when strategy configuration validation fails. */
+export class StrategyConfigError extends Error {
+  public readonly issues: string[];
+
+  constructor(message: string, issues: string[]) {
+    super(message);
+    this.name = 'StrategyConfigError';
+    this.issues = issues;
+  }
+}
