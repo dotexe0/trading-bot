@@ -47,3 +47,14 @@ export class DatabaseError extends Error {
     this.operation = operation;
   }
 }
+
+/** Thrown when indicator configuration validation fails. */
+export class IndicatorConfigError extends Error {
+  public readonly issues: string[];
+
+  constructor(message: string, issues: string[]) {
+    super(message);
+    this.name = 'IndicatorConfigError';
+    this.issues = issues;
+  }
+}
