@@ -1,0 +1,100 @@
+import { describe, it, expect } from 'vitest';
+import type { Candle, TradingPair, Timeframe } from '../../core/types.js';
+import type { Signal } from '../types.js';
+import { SmaCrossoverStrategy } from '../sma-crossover.js';
+
+function makeCandles(
+  closes: number[],
+  pair: TradingPair = 'BTC-USD',
+  timeframe: Timeframe = '1h',
+): Candle[] {
+  return closes.map((c, i) => ({
+    pair,
+    timeframe,
+    timestamp: 1_700_000_000_000 + i * 3_600_000,
+    open: String(c),
+    high: String(c + 1),
+    low: String(c - 1),
+    close: String(c),
+    volume: '100',
+  }));
+}
+
+function assertValidSignal(signal: Signal, expectedDirection?: 'long' | 'short' | 'close'): void {
+  expect(signal.confidence).toBeGreaterThanOrEqual(0);
+  expect(signal.confidence).toBeLessThanOrEqual(1);
+  expect(signal.reasoning).toBeTruthy();
+  expect(typeof signal.reasoning).toBe('string');
+  expect(signal.timestamp).toBeGreaterThan(0);
+  expect(['long', 'short', 'close']).toContain(signal.direction);
+  if (expectedDirection) expect(signal.direction).toBe(expectedDirection);
+}
+
+describe('SmaCrossoverStrategy', () => {
+  const strategy = new SmaCrossoverStrategy({ fastPeriod: 3, slowPeriod: 5 });
+
+  it('should have correct name', () => {
+    expect(strategy.name).toBe('sma-crossover');
+  });
+
+  it('should have minCandles = slowPeriod + 1', () => {
+    expect(strategy.minCandles).toBe(6);
+  });
+
+  it('should have requiredIndicators with 2 SMA configs', () => {
+    expect(strategy.requiredIndicators).toHaveLength(2);
+    expect(strategy.requiredIndicators[0]).toEqual({ name: 'SMA', period: 3 });
+    expect(strategy.requiredIndicators[1]).toEqual({ name: 'SMA', period: 5 });
+  });
+
+  it('should return empty array for insufficient data', () => {
+    const candles = makeCandles([100, 100, 100]);
+    const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+    expect(signals).toEqual([]);
+  });
+
+  it('should detect bullish crossover (fast crosses above slow)', () => {
+    // Steady decline then spike on last candle: fast SMA rises above slow
+    const closes = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 10, 16];
+    const candles = makeCandles(closes);
+    const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+
+    // Should have at least one long signal at some crossover point
+    const longSignals = signals.filter((s) => s.direction === 'long');
+    expect(longSignals.length).toBeGreaterThanOrEqual(1);
+    for (const s of longSignals) {
+      assertValidSignal(s, 'long');
+      expect(s.strategyName).toBe('sma-crossover');
+      expect(s.pair).toBe('BTC-USD');
+      expect(s.timeframe).toBe('1h');
+    }
+  });
+
+  it('should detect bearish crossover (fast crosses below slow)', () => {
+    // Steady rise then drop on last candle: fast SMA falls below slow
+    const closes = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 20, 14];
+    const candles = makeCandles(closes);
+    const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+
+    const shortSignals = signals.filter((s) => s.direction === 'short');
+    expect(shortSignals.length).toBeGreaterThanOrEqual(1);
+    for (const s of shortSignals) {
+      assertValidSignal(s, 'short');
+    }
+  });
+
+  it('should return empty array for flat prices (no crossover)', () => {
+    const closes = Array(15).fill(100);
+    const candles = makeCandles(closes);
+    const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+    expect(signals).toEqual([]);
+  });
+
+  it('should be deterministic (same input = same output)', () => {
+    const closes = [20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 10, 16];
+    const candles = makeCandles(closes);
+    const result1 = strategy.evaluate(candles, 'BTC-USD', '1h');
+    const result2 = strategy.evaluate(candles, 'BTC-USD', '1h');
+    expect(result1).toEqual(result2);
+  });
+});
