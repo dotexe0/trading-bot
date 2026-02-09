@@ -8,6 +8,8 @@
     "dev": "tsx src/cli/fetch-data.ts",
     "test": "vitest run",
     "test:watch": "vitest",
+    "fetch": "tsx src/cli/fetch-data.ts",
+    "check-gaps": "tsx src/cli/check-gaps.ts",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate"
   },
