@@ -13,6 +13,8 @@ import type { Candle, TradingPair, Timeframe } from '../../core/types.js';
 import type { IStrategy, Signal } from '../../strategies/types.js';
 import type { IndicatorConfig } from '../../indicators/types.js';
 import type { BacktestConfig } from '../types.js';
+import { RiskManager, parseRiskConfig } from '../../risk/index.js';
+import type { RiskConfig } from '../../risk/index.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -419,5 +421,244 @@ describe('BacktestEngine', () => {
     const result = eng.run(config, candles);
     // Should have fees > 0
     expect(result.totalFees.gt(d(0))).toBe(true);
+  });
+});
+
+// ── Engine with RiskManager Integration Tests ─────────────────────────
+
+describe('BacktestEngine with RiskManager', () => {
+  function makeRiskConfig(overrides: Partial<RiskConfig> = {}): RiskConfig {
+    return parseRiskConfig({
+      sizingMethod: 'fixed-fraction',
+      fixedFractionPct: 0.1, // 10% per trade (not the default 95%)
+      maxPositionPct: 0.25,
+      maxDrawdownPct: 0.15,
+      maxDailyLossPct: 0.05,
+      maxExposurePct: 0.95,
+      maxPositionCount: 4,
+      circuitBreakerCooldownMs: 3600000, // 1 hour for backtest
+      stopLoss: { type: 'fixed', percentage: 0.05 }, // 5% stop
+      ...overrides,
+    });
+  }
+
+  function createRiskEngine(strategy: IStrategy, riskConfig: RiskConfig) {
+    const registry = createMockRegistry(strategy);
+    const riskManager = new RiskManager(riskConfig);
+    return new BacktestEngine({
+      strategyRegistry: registry,
+      indicatorEngine: new IndicatorEngine(),
+      riskManager,
+      riskConfig,
+    });
+  }
+
+  it('risk-adjusted sizing produces smaller positions than 95% default', () => {
+    candleCounter = 0;
+    const recording = new RecordingStrategy(3, 'long');
+    const riskConfig = makeRiskConfig({ fixedFractionPct: 0.05 }); // 5%
+
+    const eng = createRiskEngine(recording, riskConfig);
+    const candles = makeCandles(10);
+    const config: BacktestConfig = {
+      ...makeDefaultConfig(),
+      strategyConfig: { strategy: 'recording' },
+      slippageBps: 0,
+      feeTierTaker: 0,
+      feeTierMaker: 0,
+    };
+
+    const result = eng.run(config, candles);
+
+    // Should have 1 trade (entry on bar 3 + force-close at end)
+    expect(result.trades).toHaveLength(1);
+
+    // The entry fill quantity should be ~5% of equity / price, not 95%
+    const entryQty = result.trades[0].entryFill.quantity.toNumber();
+    const entryPrice = result.trades[0].entryFill.fillPrice.toNumber();
+    const positionValue = entryQty * entryPrice;
+    const positionPct = positionValue / 10000; // initial capital
+
+    // Should be around 5%, definitely not 95%
+    expect(positionPct).toBeLessThan(0.15);
+    expect(positionPct).toBeGreaterThan(0.01);
+  });
+
+  it('stop-loss triggers position close when price drops', () => {
+    candleCounter = 0;
+
+    // Strategy signals long on bar 2
+    const recording = new RecordingStrategy(2, 'long');
+    const riskConfig = makeRiskConfig({
+      stopLoss: { type: 'fixed', percentage: 0.03 }, // 3% stop
+    });
+
+    const eng = createRiskEngine(recording, riskConfig);
+
+    // Craft candles: bar 2 signals long, bar 3 fills, then price drops
+    const candles: Candle[] = [];
+    for (let i = 0; i < 10; i++) {
+      const ts = 1700000000000 + i * 3600000;
+      if (i <= 3) {
+        // Stable price around 50000
+        candles.push({
+          pair: 'BTC-USD', timeframe: '1h', timestamp: ts,
+          open: '50000', high: '50500', low: '49500', close: '50200',
+          volume: '100',
+        });
+      } else if (i === 4) {
+        // Big drop: low goes below 3% stop (50000 * 0.97 = 48500)
+        candles.push({
+          pair: 'BTC-USD', timeframe: '1h', timestamp: ts,
+          open: '49500', high: '49700', low: '47000', close: '47500',
+          volume: '100',
+        });
+      } else {
+        // Recovery
+        candles.push({
+          pair: 'BTC-USD', timeframe: '1h', timestamp: ts,
+          open: '48000', high: '49000', low: '47500', close: '48500',
+          volume: '100',
+        });
+      }
+    }
+
+    const config: BacktestConfig = {
+      ...makeDefaultConfig(),
+      strategyConfig: { strategy: 'recording' },
+      slippageBps: 0,
+      feeTierTaker: 0,
+      feeTierMaker: 0,
+    };
+
+    const result = eng.run(config, candles);
+
+    // Should have a trade that was closed by stop-loss
+    expect(result.trades.length).toBeGreaterThanOrEqual(1);
+    const stopTrade = result.trades.find(
+      (t) => t.exitFill.signal.strategyName === '__stop-loss',
+    );
+    expect(stopTrade).toBeDefined();
+  });
+
+  it('circuit breaker blocks new entries after large drawdown', () => {
+    candleCounter = 0;
+
+    // Strategy that signals long on bar 2 and bar 6
+    class TwoSignalStrategy implements IStrategy {
+      readonly name = 'two-signal';
+      readonly minCandles = 2;
+      readonly requiredIndicators: IndicatorConfig[] = [];
+      evaluate(candles: Candle[], pair: TradingPair, timeframe: Timeframe): Signal[] {
+        const idx = candles.length - 1;
+        if (idx === 2 || idx === 7) {
+          return [{
+            strategyName: this.name, pair, timeframe,
+            timestamp: candles[idx].timestamp,
+            direction: 'long', confidence: 0.8, reasoning: 'test',
+          }];
+        }
+        // Close on bar 4 (after drawdown)
+        if (idx === 4) {
+          return [{
+            strategyName: this.name, pair, timeframe,
+            timestamp: candles[idx].timestamp,
+            direction: 'close', confidence: 1, reasoning: 'close',
+          }];
+        }
+        return [];
+      }
+    }
+
+    const riskConfig = makeRiskConfig({
+      maxDrawdownPct: 0.10, // 10% drawdown trips breaker
+      fixedFractionPct: 0.5, // Large position to amplify loss
+      maxPositionPct: 0.5,
+      circuitBreakerCooldownMs: 0, // Never auto-reset
+    });
+
+    const eng = createRiskEngine(new TwoSignalStrategy(), riskConfig);
+
+    // Craft candles with a crash that causes >10% drawdown
+    const candles: Candle[] = [];
+    for (let i = 0; i < 12; i++) {
+      const ts = 1700000000000 + i * 3600000;
+      if (i <= 3) {
+        candles.push({
+          pair: 'BTC-USD', timeframe: '1h', timestamp: ts,
+          open: '1000', high: '1020', low: '980', close: '1000',
+          volume: '100',
+        });
+      } else if (i === 4) {
+        // Crash: price drops 50%
+        candles.push({
+          pair: 'BTC-USD', timeframe: '1h', timestamp: ts,
+          open: '500', high: '520', low: '480', close: '500',
+          volume: '100',
+        });
+      } else if (i === 5) {
+        candles.push({
+          pair: 'BTC-USD', timeframe: '1h', timestamp: ts,
+          open: '500', high: '520', low: '480', close: '500',
+          volume: '100',
+        });
+      } else {
+        // Recovery
+        candles.push({
+          pair: 'BTC-USD', timeframe: '1h', timestamp: ts,
+          open: '900', high: '920', low: '880', close: '900',
+          volume: '100',
+        });
+      }
+    }
+
+    const config: BacktestConfig = {
+      ...makeDefaultConfig(),
+      strategyConfig: { strategy: 'two-signal' },
+      slippageBps: 0,
+      feeTierTaker: 0,
+      feeTierMaker: 0,
+    };
+
+    const result = eng.run(config, candles);
+
+    // First trade should exist (entry on bar 2, close on bar 4)
+    // Second trade (bar 7) should be blocked by circuit breaker
+    // So we expect only 1 trade
+    expect(result.trades).toHaveLength(1);
+  });
+
+  it('backward compatibility: engine without riskManager uses legacy sizing', () => {
+    candleCounter = 0;
+    const recording = new RecordingStrategy(3, 'long');
+    const registry = createMockRegistry(recording);
+
+    // No riskManager or riskConfig provided
+    const eng = new BacktestEngine({
+      strategyRegistry: registry,
+      indicatorEngine: new IndicatorEngine(),
+    });
+
+    const candles = makeCandles(10);
+    const config: BacktestConfig = {
+      ...makeDefaultConfig(),
+      strategyConfig: { strategy: 'recording' },
+      slippageBps: 0,
+      feeTierTaker: 0,
+      feeTierMaker: 0,
+      positionSizePct: 0.95,
+    };
+
+    const result = eng.run(config, candles);
+
+    // Should have 1 trade with 95% sizing
+    expect(result.trades).toHaveLength(1);
+    const entryQty = result.trades[0].entryFill.quantity.toNumber();
+    const entryPrice = result.trades[0].entryFill.fillPrice.toNumber();
+    const positionValue = entryQty * entryPrice;
+    const positionPct = positionValue / 10000;
+
+    // Should be around 95% (legacy behavior)
+    expect(positionPct).toBeGreaterThan(0.8);
   });
 });
