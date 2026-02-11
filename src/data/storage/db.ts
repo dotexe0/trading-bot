@@ -123,6 +123,87 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_paper_equity_session_ts
       ON paper_equity (session_id, timestamp);
+
+    -- Live trading tables
+    CREATE TABLE IF NOT EXISTS live_sessions (
+      id TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      strategy_name TEXT NOT NULL,
+      pair TEXT NOT NULL,
+      timeframe TEXT NOT NULL,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER,
+      initial_capital TEXT NOT NULL,
+      final_equity TEXT,
+      status TEXT NOT NULL DEFAULT 'running'
+    );
+
+    CREATE TABLE IF NOT EXISTS live_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      order_id TEXT NOT NULL,
+      client_order_id TEXT NOT NULL,
+      product_id TEXT NOT NULL,
+      side TEXT NOT NULL,
+      order_type TEXT NOT NULL,
+      status TEXT NOT NULL,
+      base_size TEXT NOT NULL,
+      limit_price TEXT,
+      stop_price TEXT,
+      filled_size TEXT NOT NULL DEFAULT '0',
+      filled_value TEXT NOT NULL DEFAULT '0',
+      average_fill_price TEXT,
+      total_fees TEXT NOT NULL DEFAULT '0',
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      purpose TEXT NOT NULL,
+      signal_json TEXT
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_live_orders_order_id
+      ON live_orders (order_id);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_live_orders_client_order_id
+      ON live_orders (client_order_id);
+
+    CREATE INDEX IF NOT EXISTS idx_live_orders_session
+      ON live_orders (session_id);
+
+    CREATE INDEX IF NOT EXISTS idx_live_orders_status
+      ON live_orders (status);
+
+    CREATE TABLE IF NOT EXISTS live_trades (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      entry_order_id TEXT NOT NULL,
+      exit_order_id TEXT NOT NULL,
+      entry_timestamp INTEGER NOT NULL,
+      entry_price TEXT NOT NULL,
+      entry_fee TEXT NOT NULL,
+      entry_side TEXT NOT NULL,
+      entry_quantity TEXT NOT NULL,
+      exit_timestamp INTEGER,
+      exit_price TEXT,
+      exit_fee TEXT,
+      exit_side TEXT,
+      exit_quantity TEXT,
+      pnl TEXT,
+      pnl_pct TEXT,
+      holding_period_ms INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_live_trades_session
+      ON live_trades (session_id);
+
+    CREATE TABLE IF NOT EXISTS live_equity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      equity TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_live_equity_session_ts
+      ON live_equity (session_id, timestamp);
   `);
 
   log.info('Database schema initialized');
