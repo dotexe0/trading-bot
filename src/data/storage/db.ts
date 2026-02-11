@@ -76,6 +76,53 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_candles_unique
       ON candles (pair, timeframe, timestamp);
+
+    -- Paper trading tables
+    CREATE TABLE IF NOT EXISTS paper_sessions (
+      id TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      strategy_name TEXT NOT NULL,
+      pair TEXT NOT NULL,
+      timeframe TEXT NOT NULL,
+      start_time INTEGER NOT NULL,
+      end_time INTEGER,
+      initial_capital TEXT NOT NULL,
+      final_equity TEXT,
+      status TEXT NOT NULL DEFAULT 'running'
+    );
+
+    CREATE TABLE IF NOT EXISTS paper_trades (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES paper_sessions(id),
+      entry_timestamp INTEGER NOT NULL,
+      entry_price TEXT NOT NULL,
+      entry_fee TEXT NOT NULL,
+      entry_side TEXT NOT NULL,
+      entry_quantity TEXT NOT NULL,
+      entry_signal_json TEXT NOT NULL,
+      exit_timestamp INTEGER,
+      exit_price TEXT,
+      exit_fee TEXT,
+      exit_side TEXT,
+      exit_quantity TEXT,
+      exit_signal_json TEXT,
+      pnl TEXT,
+      pnl_pct TEXT,
+      holding_period_ms INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_paper_trades_session
+      ON paper_trades (session_id);
+
+    CREATE TABLE IF NOT EXISTS paper_equity (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES paper_sessions(id),
+      timestamp INTEGER NOT NULL,
+      equity TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_paper_equity_session_ts
+      ON paper_equity (session_id, timestamp);
   `);
 
   log.info('Database schema initialized');
