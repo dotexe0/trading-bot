@@ -90,6 +90,7 @@ export class LiveTradingEngine extends EventEmitter {
   private reconciliationTimer: ReturnType<typeof setInterval> | null = null;
   private cashBalance: Decimal = ZERO;
   private peakEquity: Decimal = ZERO;
+  private recoveryFailed = false;
 
   constructor(options: LiveTradingEngineOptions) {
     super();
@@ -126,6 +127,10 @@ export class LiveTradingEngine extends EventEmitter {
     if (this.resumeSessionId) {
       // Restart recovery
       await this.recoverFromRestart(this.resumeSessionId);
+      if (this.recoveryFailed) {
+        // Recovery found unresolvable discrepancies -- don't start trading
+        return this.session!;
+      }
     } else {
       // Create new session
       this.session = this.stateStore.createSession(
@@ -866,6 +871,7 @@ export class LiveTradingEngine extends EventEmitter {
         'CRITICAL: Unresolvable discrepancies found during restart recovery -- NOT auto-trading',
       );
       this.isRunning = false;
+      this.recoveryFailed = true;
       this.emit('error', new Error('Unresolvable discrepancies during restart recovery'));
       return;
     }
