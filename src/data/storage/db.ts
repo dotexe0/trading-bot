@@ -204,6 +204,38 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_live_equity_session_ts
       ON live_equity (session_id, timestamp);
+
+    -- Tournament tables
+    CREATE TABLE IF NOT EXISTS tournaments (
+      id TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      leaderboard_json TEXT NOT NULL,
+      run_timestamp INTEGER NOT NULL,
+      duration_ms INTEGER NOT NULL,
+      strategies_evaluated INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tournaments_run_timestamp
+      ON tournaments (run_timestamp);
+
+    CREATE TABLE IF NOT EXISTS active_strategies (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      tournament_id TEXT NOT NULL,
+      strategy_name TEXT NOT NULL,
+      strategy_config_json TEXT NOT NULL,
+      rank INTEGER NOT NULL,
+      oos_sharpe TEXT NOT NULL,
+      activation_mode TEXT NOT NULL,
+      session_id TEXT,
+      activated_at INTEGER NOT NULL,
+      deactivated_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_active_strategies_tournament
+      ON active_strategies (tournament_id);
+
+    CREATE INDEX IF NOT EXISTS idx_active_strategies_mode_active
+      ON active_strategies (activation_mode, deactivated_at);
   `);
 
   log.info('Database schema initialized');

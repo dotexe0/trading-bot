@@ -174,3 +174,43 @@ export const liveEquity = sqliteTable(
     index('idx_live_equity_session_ts').on(table.sessionId, table.timestamp),
   ],
 );
+
+// ── Tournament Tables ──────────────────────────────────────────────
+
+export const tournaments = sqliteTable(
+  'tournaments',
+  {
+    id: text('id').primaryKey(),
+    configJson: text('config_json').notNull(),
+    leaderboardJson: text('leaderboard_json').notNull(),
+    runTimestamp: integer('run_timestamp').notNull(),
+    durationMs: integer('duration_ms').notNull(),
+    strategiesEvaluated: integer('strategies_evaluated').notNull(),
+  },
+  (table) => [
+    index('idx_tournaments_run_timestamp').on(table.runTimestamp),
+  ],
+);
+
+export const activeStrategies = sqliteTable(
+  'active_strategies',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    tournamentId: text('tournament_id').notNull(),
+    strategyName: text('strategy_name').notNull(),
+    strategyConfigJson: text('strategy_config_json').notNull(),
+    rank: integer('rank').notNull(),
+    oosSharpe: text('oos_sharpe').notNull(),
+    activationMode: text('activation_mode').notNull(),
+    sessionId: text('session_id'),
+    activatedAt: integer('activated_at').notNull(),
+    deactivatedAt: integer('deactivated_at'),
+  },
+  (table) => [
+    index('idx_active_strategies_tournament').on(table.tournamentId),
+    index('idx_active_strategies_mode_active').on(
+      table.activationMode,
+      table.deactivatedAt,
+    ),
+  ],
+);
