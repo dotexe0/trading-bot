@@ -91,6 +91,8 @@ export interface RiskStatus {
     maxDailyLossPct?: number;
     maxPositionCount?: number;
   };
+  currentDrawdownPct?: number;
+  currentExposurePct?: number;
 }
 
 export interface StrategyInfo {
