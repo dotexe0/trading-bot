@@ -1,12 +1,10 @@
 /**
- * CircuitBreakerBanner — Full-width alert banner shown when the circuit breaker trips.
+ * CircuitBreakerBanner — Full-width red banner shown when circuit breaker fires.
  *
- * Shows a prominent red banner below the header with:
- * - "CIRCUIT BREAKER TRIGGERED" label
- * - The triggering message
- * - Time since trigger
- * - Dismiss button
- * - Optional audio alert (plays when not muted)
+ * - Slides down from top with animation on activation
+ * - Plays Web Audio API alert (880/660/880Hz sine sequence) only on false->true transition
+ * - Sound is skipped when isMuted is true
+ * - Has an X dismiss button to hide the banner (but keeps isActive state in parent)
  */
 
 import React, { useEffect, useRef } from 'react';
@@ -27,6 +25,38 @@ function formatElapsed(ts: number): string {
   return `${Math.floor(mins / 60)}h ${mins % 60}m ago`;
 }
 
+function playAlertBeep(): void {
+  try {
+    const ctx = new AudioContext();
+    const frequencies = [880, 660, 880];
+
+    frequencies.forEach((freq, i) => {
+      const oscillator = ctx.createOscillator();
+      const gainNode = ctx.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(ctx.destination);
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.25);
+
+      gainNode.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.25);
+      gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.25 + 0.2);
+
+      oscillator.start(ctx.currentTime + i * 0.25);
+      oscillator.stop(ctx.currentTime + i * 0.25 + 0.2);
+
+      if (i === frequencies.length - 1) {
+        oscillator.onended = () => {
+          void ctx.close();
+        };
+      }
+    });
+  } catch {
+    // Audio API not available — silent fallback
+  }
+}
+
 export function CircuitBreakerBanner({
   isActive,
   message,
@@ -34,42 +64,15 @@ export function CircuitBreakerBanner({
   isMuted,
   onDismiss,
 }: CircuitBreakerBannerProps): React.ReactElement | null {
-  const audioRef = useRef<AudioContext | null>(null);
+  // Track previous isActive to detect false -> true transition
+  const prevActiveRef = useRef(false);
 
-  // Play alert tone when circuit breaker fires and not muted
   useEffect(() => {
-    if (!isActive || isMuted) return;
-
-    try {
-      const ctx = new AudioContext();
-      audioRef.current = ctx;
-
-      // Simple beep sequence
-      const frequencies = [880, 660, 880];
-      frequencies.forEach((freq, i) => {
-        const oscillator = ctx.createOscillator();
-        const gainNode = ctx.createGain();
-
-        oscillator.connect(gainNode);
-        gainNode.connect(ctx.destination);
-
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(freq, ctx.currentTime + i * 0.25);
-
-        gainNode.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.25);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.25 + 0.2);
-
-        oscillator.start(ctx.currentTime + i * 0.25);
-        oscillator.stop(ctx.currentTime + i * 0.25 + 0.2);
-      });
-    } catch {
-      // Audio API not available — silent fallback
+    // Only play sound on the transition from false to true
+    if (isActive && !prevActiveRef.current && !isMuted) {
+      playAlertBeep();
     }
-
-    return () => {
-      audioRef.current?.close().catch(() => undefined);
-      audioRef.current = null;
-    };
+    prevActiveRef.current = isActive;
   }, [isActive, isMuted]);
 
   if (!isActive) return null;
