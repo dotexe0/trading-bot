@@ -14,12 +14,25 @@ export async function registerRiskRoutes(
   deps: RouteDeps,
 ): Promise<void> {
   app.get('/api/risk', async (): Promise<ApiRiskStatus> => {
-    const cbState = deps.riskManager
-      ? deps.riskManager.getCircuitBreakerState()
-      : { tripped: false };
+    if (deps.riskManager) {
+      const state = deps.riskManager.getCurrentRiskState();
+      return {
+        circuitBreakerTripped: state.circuitBreakerTripped,
+        currentDrawdownPct: state.currentDrawdownPct,
+        currentExposurePct: state.currentExposurePct,
+        thresholds: {
+          maxDrawdownPct: state.thresholds.maxDrawdownPct,
+          maxExposurePct: state.thresholds.maxExposurePct,
+          maxDailyLossPct: state.thresholds.maxDailyLossPct,
+          maxPositionCount: state.thresholds.maxPositionCount,
+        },
+      };
+    }
 
     return {
-      circuitBreakerTripped: cbState.tripped,
+      circuitBreakerTripped: false,
+      currentDrawdownPct: 0,
+      currentExposurePct: 0,
       thresholds: {},
     };
   });

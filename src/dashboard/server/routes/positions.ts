@@ -6,15 +6,19 @@
 
 import type { FastifyInstance } from 'fastify';
 import type { RouteDeps } from '../index.js';
-import { toApiOrder } from '../types.js';
+import { d, ZERO } from '../../../core/decimal.js';
 
 export interface ApiPosition {
   sessionId: string;
   orderId: string;
-  productId: string;
+  pair: string;
   side: string;
   entryPrice: string;
+  currentPrice: string;
   quantity: string;
+  unrealizedPnl: string;
+  unrealizedPnlPct: string;
+  strategyName: string;
   createdAt: number;
 }
 
@@ -23,44 +27,38 @@ export async function registerPositionRoutes(
   deps: RouteDeps,
 ): Promise<void> {
   app.get('/api/positions', async () => {
-    // Get all running live sessions
     const runningSessions = deps.liveStateStore.listSessions('running');
     const positions: ApiPosition[] = [];
 
     for (const session of runningSessions) {
-      // Open orders with ENTRY purpose that haven't been exited
-      const openOrders = deps.liveStateStore.getOpenOrders(session.id);
       const trades = deps.liveStateStore.getSessionTrades(session.id);
-      const exitedEntryIds = new Set(trades.map((t) => t.entryOrderId));
 
-      for (const order of openOrders) {
-        if (order.purpose === 'ENTRY' && !exitedEntryIds.has(order.orderId) && order.status === 'FILLED') {
-          positions.push({
-            sessionId: session.id,
-            orderId: order.orderId,
-            productId: order.productId,
-            side: order.side,
-            entryPrice: order.averageFillPrice ?? order.baseSize,
-            quantity: order.filledSize,
-            createdAt: order.createdAt,
-          });
-        }
-      }
+      for (const trade of trades) {
+        if (trade.exitTimestamp) continue; // already closed
 
-      // Also check filled entry orders
-      const allTrades = deps.liveStateStore.getSessionTrades(session.id);
-      for (const trade of allTrades) {
-        if (!trade.exitTimestamp) {
-          positions.push({
-            sessionId: session.id,
-            orderId: trade.entryOrderId,
-            productId: session.pair,
-            side: trade.entrySide,
-            entryPrice: trade.entryPrice,
-            quantity: trade.entryQuantity,
-            createdAt: trade.entryTimestamp,
-          });
-        }
+        const entryPrice = d(trade.entryPrice);
+        const quantity = d(trade.entryQuantity);
+        const currentPrice = entryPrice; // best available without live feed access
+
+        const rawPnl = trade.entrySide === 'BUY'
+          ? currentPrice.minus(entryPrice).mul(quantity)
+          : entryPrice.minus(currentPrice).mul(quantity);
+        const cost = entryPrice.mul(quantity);
+        const pnlPct = cost.isZero() ? ZERO : rawPnl.div(cost).mul(100);
+
+        positions.push({
+          sessionId: session.id,
+          orderId: trade.entryOrderId,
+          pair: session.pair,
+          side: trade.entrySide,
+          entryPrice: trade.entryPrice,
+          currentPrice: currentPrice.toFixed(8),
+          quantity: trade.entryQuantity,
+          unrealizedPnl: rawPnl.toFixed(8),
+          unrealizedPnlPct: pnlPct.toFixed(4),
+          strategyName: session.strategyName,
+          createdAt: trade.entryTimestamp,
+        });
       }
     }
 

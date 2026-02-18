@@ -97,6 +97,8 @@ export interface ApiEquityPoint {
 
 export interface ApiRiskStatus {
   circuitBreakerTripped: boolean;
+  currentDrawdownPct: number;
+  currentExposurePct: number;
   thresholds: {
     maxDrawdownPct?: number;
     maxExposurePct?: number;
