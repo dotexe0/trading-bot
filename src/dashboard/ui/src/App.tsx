@@ -221,6 +221,23 @@ function App(): React.ReactElement {
           break;
         }
 
+        case 'shutdown': {
+          // Kill switch fired -- refresh positions and strategies to clear stale data
+          void fetch('/api/positions')
+            .then((r) => r.json())
+            .then((data) => setPositions(data as PositionData[]))
+            .catch(() => undefined);
+          void fetch('/api/strategies')
+            .then((r) => r.json())
+            .then((data) => setStrategies(data as StrategyInfo[]))
+            .catch(() => undefined);
+          void fetch('/api/sessions')
+            .then((r) => r.json())
+            .then((data) => setSessions(data as SessionData[]))
+            .catch(() => undefined);
+          break;
+        }
+
         default:
           break;
       }
