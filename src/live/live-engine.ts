@@ -316,6 +316,22 @@ export class LiveTradingEngine extends EventEmitter {
       candle.timestamp,
       equity.toFixed(2),
     );
+
+    this.emit('priceTick', {
+      pair: candle.pair,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+      timestamp: candle.timestamp,
+    });
+
+    this.emit('equityUpdate', {
+      sessionId: this.session.id,
+      timestamp: candle.timestamp,
+      equity: equity.toFixed(2),
+    });
   }
 
   // ── Private: signal processing ────────────────────────────────────
@@ -364,6 +380,14 @@ export class LiveTradingEngine extends EventEmitter {
           },
           'Risk manager rejected entry',
         );
+        if (this.riskManager!.getCircuitBreakerState().tripped) {
+          this.emit('circuitBreaker', {
+            type: 'MAX_DRAWDOWN',
+            message: decision.rejectReason ?? 'Circuit breaker tripped',
+            timestamp: candle.timestamp,
+            resolution: 'PENDING',
+          });
+        }
         return;
       }
 
