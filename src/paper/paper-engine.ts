@@ -128,6 +128,7 @@ export class PaperTradingEngine extends EventEmitter {
       'Paper trading engine started',
     );
 
+    this.emit('started', this.session);
     return this.session;
   }
 
@@ -171,6 +172,7 @@ export class PaperTradingEngine extends EventEmitter {
       'Paper trading engine stopped',
     );
 
+    this.emit('stopped', this.session);
     return result;
   }
 
@@ -264,6 +266,16 @@ export class PaperTradingEngine extends EventEmitter {
           // Record completed trade
           this.recordLatestTrade();
 
+          this.emit('orderFilled', {
+            purpose: 'STOP_LOSS',
+            pair: candle.pair,
+            side: 'SELL',
+            fillPrice: fill.fillPrice.toString(),
+            quantity: fill.quantity.toString(),
+            fee: fill.fee.toString(),
+            timestamp: candle.timestamp,
+          });
+
           this.stopLossTrackers.delete(trackerKey);
           this.positionDirection = null;
           break;
@@ -308,6 +320,22 @@ export class PaperTradingEngine extends EventEmitter {
       },
       'Equity recorded',
     );
+
+    this.emit('priceTick', {
+      pair: candle.pair,
+      open: candle.open,
+      high: candle.high,
+      low: candle.low,
+      close: candle.close,
+      volume: candle.volume,
+      timestamp: candle.timestamp,
+    });
+
+    this.emit('equityUpdate', {
+      sessionId: this.session!.id,
+      timestamp: candle.timestamp,
+      equity: currentEquity.toString(),
+    });
   }
 
   // ── Internal buffer access (for testing) ──────────────────────────
@@ -334,6 +362,16 @@ export class PaperTradingEngine extends EventEmitter {
 
     // Record completed trade
     this.recordLatestTrade();
+
+    this.emit('orderFilled', {
+      purpose: 'EXIT',
+      pair: candle.pair,
+      side: signal.direction === 'close' ? 'SELL' : 'BUY',
+      fillPrice: fill.fillPrice.toString(),
+      quantity: fill.quantity.toString(),
+      fee: fill.fee.toString(),
+      timestamp: candle.timestamp,
+    });
 
     // Clear stop-loss tracker
     this.stopLossTrackers.clear();
@@ -388,6 +426,14 @@ export class PaperTradingEngine extends EventEmitter {
           },
           'Risk manager rejected entry',
         );
+        if (this.riskManager!.getCircuitBreakerState().tripped) {
+          this.emit('circuitBreaker', {
+            type: 'MAX_DRAWDOWN',
+            message: decision.rejectReason ?? 'Circuit breaker tripped',
+            timestamp: candle.timestamp,
+            resolution: 'PENDING',
+          });
+        }
         return;
       }
 
@@ -406,6 +452,16 @@ export class PaperTradingEngine extends EventEmitter {
 
     const fill = this.fillSimulator.simulate(signal, fillCandle, quantity);
     this.portfolio.applyFill(fill);
+
+    this.emit('orderFilled', {
+      purpose: 'ENTRY',
+      pair: candle.pair,
+      side: signal.direction,
+      fillPrice: fill.fillPrice.toString(),
+      quantity: fill.quantity.toString(),
+      fee: fill.fee.toString(),
+      timestamp: candle.timestamp,
+    });
 
     // Set up stop-loss tracker if risk manager exists
     if (this.riskManager && this.config.riskConfig) {
