@@ -24,6 +24,7 @@ export class RiskManager {
   private readonly maxExposure: MaxExposureRule;
   private readonly maxPositionCount: MaxPositionCountRule;
   private readonly log;
+  private lastExposurePct = 0;
 
   constructor(config: RiskConfig) {
     this.config = config;
@@ -86,6 +87,9 @@ export class RiskManager {
       }
     }
 
+    // Track last known exposure for dashboard reporting
+    this.lastExposurePct = context.totalExposure.mul(100).toNumber();
+
     // If any rule rejected, the decision is rejected
     if (firstRejectReason) {
       return {
@@ -119,5 +123,34 @@ export class RiskManager {
   /** Manually reset the circuit breaker. */
   resetCircuitBreaker(): void {
     this.maxDrawdown.reset();
+  }
+
+  /**
+   * Return current risk metrics and configuration thresholds for the dashboard.
+   * Drawdown is tracked by MaxDrawdownRule across evaluations.
+   * Exposure reflects the last evaluated trade context.
+   */
+  getCurrentRiskState(): {
+    circuitBreakerTripped: boolean;
+    currentDrawdownPct: number;
+    currentExposurePct: number;
+    thresholds: {
+      maxDrawdownPct: number;
+      maxExposurePct: number;
+      maxDailyLossPct: number;
+      maxPositionCount: number;
+    };
+  } {
+    return {
+      circuitBreakerTripped: this.maxDrawdown.isTripped(),
+      currentDrawdownPct: this.maxDrawdown.getCurrentDrawdownPct(),
+      currentExposurePct: this.lastExposurePct,
+      thresholds: {
+        maxDrawdownPct: this.config.maxDrawdownPct * 100,
+        maxExposurePct: this.config.maxExposurePct * 100,
+        maxDailyLossPct: this.config.maxDailyLossPct * 100,
+        maxPositionCount: this.config.maxPositionCount,
+      },
+    };
   }
 }

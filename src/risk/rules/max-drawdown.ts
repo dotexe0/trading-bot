@@ -16,6 +16,7 @@ export class MaxDrawdownRule implements RiskRule {
   private tripped = false;
   private tripTimestamp = 0;
   private internalPeak = ZERO;
+  private lastDrawdownPct = 0;
 
   evaluate(context: RiskContext): RiskRuleResult {
     const { currentEquity, peakEquity, riskConfig, timestamp } = context;
@@ -36,6 +37,7 @@ export class MaxDrawdownRule implements RiskRule {
         const drawdown = effectivePeak.isZero()
           ? ZERO
           : effectivePeak.minus(currentEquity).div(effectivePeak);
+        this.lastDrawdownPct = drawdown.mul(100).toNumber();
         return {
           approved: false,
           rule: this.name,
@@ -59,6 +61,7 @@ export class MaxDrawdownRule implements RiskRule {
     const drawdown = this.internalPeak.isZero()
       ? ZERO
       : this.internalPeak.minus(currentEquity).div(this.internalPeak);
+    this.lastDrawdownPct = drawdown.mul(100).toNumber();
 
     const inputValues = {
       currentDrawdown: `${drawdown.mul(100).toFixed(2)}%`,
@@ -93,6 +96,11 @@ export class MaxDrawdownRule implements RiskRule {
   /** Check if the circuit breaker is currently tripped. */
   isTripped(): boolean {
     return this.tripped;
+  }
+
+  /** Get the last evaluated drawdown as a percentage (e.g., 5.23 for 5.23%). */
+  getCurrentDrawdownPct(): number {
+    return this.lastDrawdownPct;
   }
 
   /** Manually reset the circuit breaker. */
