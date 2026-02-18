@@ -537,6 +537,9 @@ export class LiveTradingEngine extends EventEmitter {
           exitSide: order.side,
           exitQuantity: exitQty.toFixed(8),
           pnl: pnl.toFixed(8),
+          pnlPct: entryPrice.mul(entryQty).isZero()
+            ? '0.0000'
+            : pnl.div(entryPrice.mul(entryQty)).mul(100).toFixed(4),
           holdingPeriodMs: order.updatedAt - order.createdAt,
         });
 
