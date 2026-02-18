@@ -17,7 +17,13 @@ import type { LiveStateStore } from '../../live/state-store.js';
 import type { SessionStore } from '../../paper/session-store.js';
 import type { ActivationBridge } from '../../tournament/activation-bridge.js';
 import type { RiskManager } from '../../risk/risk-manager.js';
-import type { WsCommand } from './types.js';
+import {
+  toApiSession,
+  toApiPaperSession,
+  toApiTrade,
+  toApiPaperTrade,
+} from './types.js';
+import type { ApiTrade, ApiEquityPoint, ApiStrategyInfo, WsCommand } from './types.js';
 import { WsBroadcaster } from './ws/broadcaster.js';
 import { wsHandler } from './ws/handler.js';
 import { registerSessionRoutes } from './routes/sessions.js';
@@ -70,6 +76,9 @@ const ENGINE_EVENT_MAP: Record<string, string> = {
   error: 'error',
   started: 'engineStarted',
   stopped: 'engineStopped',
+  priceTick: 'priceTick',
+  equityUpdate: 'equityUpdate',
+  circuitBreaker: 'circuitBreaker',
 };
 
 // ── Server Factory ───────────────────────────────────────────────────
@@ -172,17 +181,55 @@ export async function createDashboardServer(
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function buildSnapshot(deps: RouteDeps): unknown {
-  const liveSessions = deps.liveStateStore.listSessions('running');
-  const engines = deps.activationBridge.getActiveEngines();
+function buildSnapshot(deps: RouteDeps) {
+  const liveSessions = deps.liveStateStore.listSessions('running').map(toApiSession);
+  const paperSessions = deps.sessionStore.listSessions('running').map(toApiPaperSession);
+  const sessions = [...liveSessions, ...paperSessions];
 
-  return {
-    activeSessions: liveSessions.length,
-    activeEngines: engines.size,
-    riskStatus: deps.riskManager
-      ? deps.riskManager.getCircuitBreakerState()
-      : { tripped: false },
-  };
+  let trades: ApiTrade[] = [];
+  let equity: ApiEquityPoint[] = [];
+  if (sessions.length > 0) {
+    const activeId = sessions[0].id;
+    const activeMode = sessions[0].mode;
+    if (activeMode === 'live') {
+      trades = deps.liveStateStore.getSessionTrades(activeId).map(toApiTrade);
+      equity = deps.liveStateStore.getSessionEquity(activeId).map((ep) => ({
+        timestamp: ep.timestamp,
+        equity: ep.equity.toString(),
+      }));
+    } else {
+      trades = deps.sessionStore.getSessionTrades(activeId).map((t) => toApiPaperTrade(activeId, t));
+      equity = deps.sessionStore.getSessionEquity(activeId).map((ep) => ({
+        timestamp: ep.timestamp,
+        equity: ep.equity.toString(),
+      }));
+    }
+  }
+
+  const engines = deps.activationBridge.getActiveEngines();
+  const strategies: ApiStrategyInfo[] = [];
+  for (const [name, handle] of engines) {
+    strategies.push({ name, sessionId: handle.sessionId, status: 'running' as const });
+  }
+
+  const risk = deps.riskManager
+    ? (() => {
+        const state = deps.riskManager!.getCurrentRiskState();
+        return {
+          circuitBreakerTripped: state.circuitBreakerTripped,
+          currentDrawdownPct: state.currentDrawdownPct,
+          currentExposurePct: state.currentExposurePct,
+          thresholds: {
+            maxDrawdownPct: state.thresholds.maxDrawdownPct,
+            maxExposurePct: state.thresholds.maxExposurePct,
+            maxDailyLossPct: state.thresholds.maxDailyLossPct,
+            maxPositionCount: state.thresholds.maxPositionCount,
+          },
+        };
+      })()
+    : undefined;
+
+  return { sessions, trades, equity, strategies, risk };
 }
 
 async function handleCommand(
