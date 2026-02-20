@@ -336,6 +336,10 @@ export class PaperTradingEngine extends EventEmitter {
       timestamp: candle.timestamp,
       equity: currentEquity.toString(),
     });
+
+    if (this.riskManager) {
+      this.emit('riskUpdate', this.riskManager.getCurrentRiskState());
+    }
   }
 
   // ── Internal buffer access (for testing) ──────────────────────────

@@ -81,6 +81,8 @@ export interface PositionData {
   unrealizedPnl: string;
   unrealizedPnlPct: string;
   strategyName: string;
+  orderId?: string;
+  createdAt?: number;
 }
 
 export interface RiskStatus {

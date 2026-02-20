@@ -153,6 +153,15 @@ export class LiveTradingEngine extends EventEmitter {
     this.orderManager.on('orderFailed', (order: LiveOrder, error: Error) =>
       this.onOrderFailed(order, error),
     );
+    this.orderManager.on('orderSubmitted', (order: LiveOrder) =>
+      this.emit('orderSubmitted', order),
+    );
+    this.orderManager.on('orderCancelled', (order: LiveOrder) =>
+      this.emit('orderCancelled', order),
+    );
+    this.orderManager.on('reconciliation', (report: unknown) =>
+      this.emit('reconciliation', report),
+    );
 
     // Start orderManager tracking
     this.orderManager.startTracking();
@@ -332,6 +341,10 @@ export class LiveTradingEngine extends EventEmitter {
       timestamp: candle.timestamp,
       equity: equity.toFixed(2),
     });
+
+    if (this.riskManager) {
+      this.emit('riskUpdate', this.riskManager.getCurrentRiskState());
+    }
   }
 
   // ── Private: signal processing ────────────────────────────────────
@@ -653,6 +666,7 @@ export class LiveTradingEngine extends EventEmitter {
     }
 
     this.shutdownState = 'done';
+    this.emit('stopped', this.session!);
     this.emit('shutdown', this.shutdownState);
   }
 

@@ -38,8 +38,9 @@ export async function registerRiskRoutes(
   });
 
   app.get('/api/risk/events', async () => {
-    // Risk events log is not currently persisted by the RiskManager.
-    // Return empty array; future enhancement can add event persistence.
+    if (deps.riskManager) {
+      return deps.riskManager.getRiskEvents();
+    }
     return [];
   });
 }

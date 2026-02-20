@@ -126,6 +126,12 @@ function makeMockRiskManager() {
       ruleResults: [],
     }),
     getCircuitBreakerState: vi.fn().mockReturnValue({ tripped: false }),
+    getCurrentRiskState: vi.fn().mockReturnValue({
+      circuitBreakerTripped: false,
+      currentDrawdownPct: 0,
+      currentExposurePct: 0,
+      thresholds: { maxDrawdownPct: 20, maxExposurePct: 100, maxDailyLossPct: 5, maxPositionCount: 5 },
+    }),
     resetCircuitBreaker: vi.fn(),
   };
 }

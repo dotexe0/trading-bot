@@ -24,6 +24,7 @@ export { riskConfigSchema, parseRiskConfig } from './config.js';
 export { PositionSizer } from './position-sizer.js';
 export { StopLossTracker } from './stop-loss.js';
 export { RiskManager } from './risk-manager.js';
+export type { RiskEvent } from './risk-manager.js';
 
 // Individual rules
 export { MaxPositionSizeRule } from './rules/max-position-size.js';

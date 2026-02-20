@@ -241,6 +241,7 @@ export class OrderManager extends EventEmitter {
         // Persist the updated order (with real exchange orderId)
         this.stateStore.persistOrder(order);
 
+        this.emit('orderSubmitted', order);
         log.info(
           { clientOrderId, exchangeOrderId },
           'Market order submitted successfully',
@@ -356,6 +357,7 @@ export class OrderManager extends EventEmitter {
 
         this.stateStore.persistOrder(order);
 
+        this.emit('orderSubmitted', order);
         log.info(
           { clientOrderId, exchangeOrderId },
           'Stop-limit order submitted successfully',

@@ -16,6 +16,13 @@ import { DailyLossLimitRule } from './rules/daily-loss-limit.js';
 import { MaxExposureRule } from './rules/max-exposure.js';
 import { MaxPositionCountRule } from './rules/max-position-count.js';
 
+export interface RiskEvent {
+  timestamp: number;
+  type: string;
+  rule: string;
+  message: string;
+}
+
 export class RiskManager {
   private readonly config: RiskConfig;
   private readonly maxPositionSize: MaxPositionSizeRule;
@@ -25,6 +32,7 @@ export class RiskManager {
   private readonly maxPositionCount: MaxPositionCountRule;
   private readonly log;
   private lastExposurePct = 0;
+  private readonly riskEvents: RiskEvent[] = [];
 
   constructor(config: RiskConfig) {
     this.config = config;
@@ -90,6 +98,22 @@ export class RiskManager {
     // Track last known exposure for dashboard reporting
     this.lastExposurePct = context.totalExposure.mul(100).toNumber();
 
+    // Record risk events for rejected rules
+    for (const result of ruleResults) {
+      if (!result.approved) {
+        this.riskEvents.push({
+          timestamp: context.timestamp,
+          type: 'RULE_REJECTED',
+          rule: result.rule,
+          message: result.reason,
+        });
+      }
+    }
+    // Cap event log size
+    if (this.riskEvents.length > 100) {
+      this.riskEvents.splice(0, this.riskEvents.length - 100);
+    }
+
     // If any rule rejected, the decision is rejected
     if (firstRejectReason) {
       return {
@@ -130,6 +154,11 @@ export class RiskManager {
    * Drawdown is tracked by MaxDrawdownRule across evaluations.
    * Exposure reflects the last evaluated trade context.
    */
+  /** Return recent risk events (rule rejections, circuit breaker trips). */
+  getRiskEvents(): RiskEvent[] {
+    return [...this.riskEvents];
+  }
+
   getCurrentRiskState(): {
     circuitBreakerTripped: boolean;
     currentDrawdownPct: number;

@@ -79,6 +79,7 @@ const ENGINE_EVENT_MAP: Record<string, string> = {
   priceTick: 'priceTick',
   equityUpdate: 'equityUpdate',
   circuitBreaker: 'circuitBreaker',
+  riskUpdate: 'riskUpdate',
 };
 
 // ── Server Factory ───────────────────────────────────────────────────
