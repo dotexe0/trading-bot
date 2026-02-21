@@ -11,3 +11,5 @@ export {
   type MonteCarloResult,
   type PercentileDistribution,
 } from './types.js';
+
+export { MonteCarloEngine } from './monte-carlo-engine.js';

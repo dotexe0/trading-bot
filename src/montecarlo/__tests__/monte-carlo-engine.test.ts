@@ -312,16 +312,21 @@ describe('MonteCarloEngine', () => {
       // UUIDs should differ
       expect(result1.id).not.toBe(result2.id);
 
-      // At least one distribution should differ slightly
-      // (extremely unlikely for all percentiles to match with random shuffling)
-      const sharpe1 = result1.sharpeDistribution;
-      const sharpe2 = result2.sharpeDistribution;
+      // Total return and drawdown distributions depend on trade ordering
+      // (compounding makes different orderings produce different equity paths).
+      // Sharpe from per-trade returns is order-invariant (same mean/stddev),
+      // so we check totalReturn and maxDrawdown instead.
+      const ret1 = result1.totalReturnDistribution;
+      const ret2 = result2.totalReturnDistribution;
+      const dd1 = result1.maxDrawdownDistribution;
+      const dd2 = result2.maxDrawdownDistribution;
       const allSame =
-        sharpe1.p5 === sharpe2.p5 &&
-        sharpe1.p25 === sharpe2.p25 &&
-        sharpe1.p50 === sharpe2.p50 &&
-        sharpe1.p75 === sharpe2.p75 &&
-        sharpe1.p95 === sharpe2.p95;
+        ret1.p5 === ret2.p5 &&
+        ret1.p50 === ret2.p50 &&
+        ret1.p95 === ret2.p95 &&
+        dd1.p5 === dd2.p5 &&
+        dd1.p50 === dd2.p50 &&
+        dd1.p95 === dd2.p95;
       expect(allSame).toBe(false);
     });
   });
