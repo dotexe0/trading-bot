@@ -10,7 +10,7 @@
  * - daysToCandles utility
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { CorrelationCalculator } from '../calculator.js';
 import { daysToCandles } from '../types.js';
 import type { Candle } from '../../core/types.js';
@@ -316,7 +316,7 @@ describe('daysToCandles()', () => {
   });
 
   it('unknown timeframe defaults to 60-minute candles (1h assumption)', () => {
-    // @ts-expect-error - testing unknown timeframe fallback
+    // daysToCandles accepts string so no cast needed; 'unknown' is a valid string
     expect(daysToCandles(30, 'unknown')).toBe(720);
   });
 });
