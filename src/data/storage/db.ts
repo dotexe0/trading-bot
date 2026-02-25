@@ -236,6 +236,29 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_active_strategies_mode_active
       ON active_strategies (activation_mode, deactivated_at);
+
+    -- Monte Carlo tables
+    CREATE TABLE IF NOT EXISTS monte_carlo_results (
+      id TEXT PRIMARY KEY,
+      backtest_config_json TEXT NOT NULL,
+      strategy_name TEXT NOT NULL,
+      iterations INTEGER NOT NULL,
+      trade_count INTEGER NOT NULL,
+      sharpe_distribution_json TEXT NOT NULL,
+      drawdown_distribution_json TEXT NOT NULL,
+      return_distribution_json TEXT NOT NULL,
+      original_sharpe TEXT NOT NULL,
+      original_max_drawdown_pct TEXT NOT NULL,
+      original_total_return TEXT NOT NULL,
+      initial_capital TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_mc_results_strategy
+      ON monte_carlo_results (strategy_name);
+
+    CREATE INDEX IF NOT EXISTS idx_mc_results_created
+      ON monte_carlo_results (created_at);
   `);
 
   log.info('Database schema initialized');

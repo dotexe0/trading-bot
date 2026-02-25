@@ -214,3 +214,28 @@ export const activeStrategies = sqliteTable(
     ),
   ],
 );
+
+// ── Monte Carlo Tables ──────────────────────────────────────────────
+
+export const monteCarloResults = sqliteTable(
+  'monte_carlo_results',
+  {
+    id: text('id').primaryKey(),
+    backtestConfigJson: text('backtest_config_json').notNull(),
+    strategyName: text('strategy_name').notNull(),
+    iterations: integer('iterations').notNull(),
+    tradeCount: integer('trade_count').notNull(),
+    sharpeDistributionJson: text('sharpe_distribution_json').notNull(),
+    drawdownDistributionJson: text('drawdown_distribution_json').notNull(),
+    returnDistributionJson: text('return_distribution_json').notNull(),
+    originalSharpe: text('original_sharpe').notNull(),
+    originalMaxDrawdownPct: text('original_max_drawdown_pct').notNull(),
+    originalTotalReturn: text('original_total_return').notNull(),
+    initialCapital: text('initial_capital').notNull(),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_mc_results_strategy').on(table.strategyName),
+    index('idx_mc_results_created').on(table.createdAt),
+  ],
+);

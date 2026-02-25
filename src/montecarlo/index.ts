@@ -13,3 +13,5 @@ export {
 } from './types.js';
 
 export { MonteCarloEngine } from './monte-carlo-engine.js';
+
+export { MonteCarloStore } from './monte-carlo-store.js';
