@@ -14,7 +14,8 @@ export type IndicatorName =
   | 'MACD'
   | 'BollingerBands'
   | 'Stochastic'
-  | 'ATR';
+  | 'ATR'
+  | 'ADX';
 
 // ── Per-indicator config types ───────────────────────────────────────
 
@@ -57,6 +58,11 @@ export interface ATRConfig {
   period: number;
 }
 
+export interface ADXConfig {
+  name: 'ADX';
+  period: number;
+}
+
 /** Union of all indicator config types (discriminated on `name`). */
 export type IndicatorConfig =
   | SMAConfig
@@ -65,7 +71,8 @@ export type IndicatorConfig =
   | MACDConfig
   | BollingerBandsConfig
   | StochasticConfig
-  | ATRConfig;
+  | ATRConfig
+  | ADXConfig;
 
 // ── Result point types ───────────────────────────────────────────────
 
@@ -87,11 +94,17 @@ export interface StochasticPoint {
   d: number;
 }
 
+export interface ADXPoint {
+  adx: number | undefined;
+  pdi: number | undefined;
+  mdi: number | undefined;
+}
+
 // ── Generic output container ─────────────────────────────────────────
 
 export interface IndicatorOutput {
   /** Computed indicator values. Length <= input candle count. */
-  values: (number | MACDPoint | BollingerBandsPoint | StochasticPoint)[];
+  values: (number | MACDPoint | BollingerBandsPoint | StochasticPoint | ADXPoint)[];
   /** Candle index where the first valid value appears (period warm-up). */
   offset: number;
 }

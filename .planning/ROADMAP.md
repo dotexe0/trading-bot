@@ -29,7 +29,7 @@
 **Milestone Goal:** Make the bot runnable with a single command, add Monte Carlo robustness testing, market regime detection, correlation-aware sizing, and enhanced dashboard visualizations.
 
 - [x] **Phase 12: CLI & Operations** (2/2 plans) — completed 2026-02-21
-- [ ] **Phase 13: Monte Carlo Simulation** - Statistical robustness testing via trade-sequence randomization
+- [x] **Phase 13: Monte Carlo Simulation** (2/2 plans) — completed 2026-02-24
 - [ ] **Phase 14: Regime Detection** - Market state classification with backward-compatible strategy integration
 - [ ] **Phase 15: Correlation-Aware Sizing** - Cross-asset correlation adjustment for position sizing
 - [ ] **Phase 16: Enhanced Dashboard** - Backtest visualization, strategy hot-reload, and portfolio heat map
@@ -123,7 +123,7 @@ Plans:
 | 10. Dashboard API Data Fixes | v1.0 | 1/1 | Complete | 2026-02-18 |
 | 11. Dashboard WebSocket Pipeline | v1.0 | 2/2 | Complete | 2026-02-19 |
 | 12. CLI & Operations | v1.1 | 2/2 | Complete | 2026-02-21 |
-| 13. Monte Carlo Simulation | v1.1 | 0/2 | Planned | - |
+| 13. Monte Carlo Simulation | v1.1 | 2/2 | Complete | 2026-02-24 |
 | 14. Regime Detection | v1.1 | 0/2 | Not started | - |
 | 15. Correlation-Aware Sizing | v1.1 | 0/1 | Not started | - |
 | 16. Enhanced Dashboard | v1.1 | 0/3 | Not started | - |

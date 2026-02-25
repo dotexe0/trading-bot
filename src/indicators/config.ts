@@ -56,6 +56,11 @@ const atrSchema = z.object({
   period,
 });
 
+const adxSchema = z.object({
+  name: z.literal('ADX'),
+  period,
+});
+
 // ── Discriminated union ──────────────────────────────────────────────
 
 export const indicatorConfigSchema = z.discriminatedUnion('name', [
@@ -66,6 +71,7 @@ export const indicatorConfigSchema = z.discriminatedUnion('name', [
   bollingerBandsSchema,
   stochasticSchema,
   atrSchema,
+  adxSchema,
 ]);
 
 // ── Public helpers ───────────────────────────────────────────────────
@@ -114,5 +120,7 @@ export function minCandlesRequired(config: IndicatorConfig): number {
       return config.period + config.signalPeriod - 1;
     case 'ATR':
       return config.period + 1;
+    case 'ADX':
+      return config.period * 2;
   }
 }

@@ -9,7 +9,7 @@ import { createRequire } from 'module';
 import type { Candle } from '../core/types.js';
 import { extractCloses, extractOHLC } from './adapters.js';
 import { parseIndicatorConfig, minCandlesRequired } from './config.js';
-import type { IndicatorConfig, IndicatorOutput, MACDPoint } from './types.js';
+import type { IndicatorConfig, IndicatorOutput, MACDPoint, ADXPoint } from './types.js';
 
 // fast-technical-indicators has a broken ESM entry point (ESM syntax in a
 // CJS-typed package). Use createRequire to load the CJS bundle reliably.
@@ -22,6 +22,7 @@ const {
   bollingerbands,
   stochastic,
   atr,
+  adx,
 } = require('fast-technical-indicators') as {
   sma: (input: { period: number; values: number[] }) => number[];
   ema: (input: { period: number; values: number[] }) => number[];
@@ -52,6 +53,12 @@ const {
     low: number[];
     close: number[];
   }) => number[];
+  adx: (input: {
+    period: number;
+    high: number[];
+    low: number[];
+    close: number[];
+  }) => { adx?: number; pdi?: number; mdi?: number }[];
 };
 
 export class IndicatorEngine {
@@ -132,6 +139,22 @@ export class IndicatorEngine {
           low: ohlc.low,
           close: ohlc.close,
         });
+        return { values, offset: candles.length - values.length };
+      }
+
+      case 'ADX': {
+        const ohlc = extractOHLC(candles);
+        const rawValues = adx({
+          period: validConfig.period,
+          high: ohlc.high,
+          low: ohlc.low,
+          close: ohlc.close,
+        });
+        const values: ADXPoint[] = rawValues.map((v) => ({
+          adx: v.adx,
+          pdi: v.pdi,
+          mdi: v.mdi,
+        }));
         return { values, offset: candles.length - values.length };
       }
     }
