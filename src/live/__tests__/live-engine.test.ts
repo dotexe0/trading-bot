@@ -269,6 +269,8 @@ describe('LiveTradingEngine', () => {
       expect.any(Array),
       'BTC-USD',
       '5m',
+      undefined, // additionalCandles (not used by live engine)
+      undefined, // regime (undefined until enough candles for classification)
     );
   });
 

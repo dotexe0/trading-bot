@@ -14,6 +14,8 @@ import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { MonteCarloEngine } from '../montecarlo/monte-carlo-engine.js';
 import { MonteCarloStore } from '../montecarlo/monte-carlo-store.js';
+import { RegimeStore } from '../regime/regime-store.js';
+import { MarketRegime } from '../regime/types.js';
 
 const program = new Command();
 
@@ -80,6 +82,34 @@ program
       out.table('Final Equity', `$${result.finalEquity.toFixed(2)}`);
       out.table('Total Fees', `$${result.totalFees.toFixed(2)}`);
       out.success('Backtest complete');
+
+      // Display regime breakdown if available
+      if (result.regimeBreakdown && result.regimeBreakdown.length > 0) {
+        out.banner('Regime Breakdown');
+        for (const rb of result.regimeBreakdown) {
+          console.log(`  ${rb.regime}:`);
+          console.log(`    Time:       ${(rb.timePct * 100).toFixed(1)}%`);
+          console.log(`    Trades:     ${rb.tradeCount}`);
+          console.log(`    Win Rate:   ${(rb.winRate * 100).toFixed(1)}%`);
+          console.log(`    Sharpe:     ${rb.sharpeRatio.toFixed(4)}`);
+        }
+        console.log('');
+      }
+
+      // Persist regime history if available
+      if (result.regimeTimeline && result.regimeTimeline.length > 0) {
+        const regimeStore = new RegimeStore();
+        regimeStore.saveBatch(
+          result.regimeTimeline.map((r) => ({
+            pair,
+            timeframe,
+            timestamp: r.timestamp,
+            regime: r.regime as MarketRegime,
+          })),
+        );
+        regimeStore.close();
+        out.info(`${result.regimeTimeline.length} regime labels persisted`);
+      }
 
       // Optional Monte Carlo simulation
       if (runMC) {

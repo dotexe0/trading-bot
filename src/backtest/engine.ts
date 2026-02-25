@@ -30,6 +30,9 @@ import type { RiskConfig, RiskContext, StrategyStats } from '../risk/types.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { PositionSizer } from '../risk/position-sizer.js';
 import { StopLossTracker } from '../risk/stop-loss.js';
+import { RegimeClassifier } from '../regime/classifier.js';
+import { MetricsCalculator } from './metrics.js';
+import type { MarketRegime } from '../regime/types.js';
 
 export interface BacktestEngineOptions {
   strategyRegistry: StrategyRegistry;
@@ -43,6 +46,7 @@ export class BacktestEngine {
   private readonly indicatorEngine: IndicatorEngine;
   private readonly riskManager?: RiskManager;
   private readonly riskConfig?: RiskConfig;
+  private readonly classifier = new RegimeClassifier();
 
   constructor(deps: BacktestEngineOptions) {
     this.strategyRegistry = deps.strategyRegistry;
@@ -102,6 +106,8 @@ export class BacktestEngine {
     const startIdx = strategy.minCandles - 1;
     // Track position direction for stop-loss keying
     let positionDirection: 'long' | 'short' | null = null;
+    // Track regime per candle for breakdown and persistence
+    const regimePerCandle = new Map<number, MarketRegime>();
 
     for (let i = startIdx; i < candles.length; i++) {
       const currentPrice = d(candles[i].close);
@@ -148,6 +154,12 @@ export class BacktestEngine {
       // 6b. Structural lookahead prevention: only provide candles[0..i]
       const visibleCandles = candles.slice(0, i + 1);
 
+      // 6b-regime. Compute regime using only visible candles (no lookahead)
+      const regime = this.classifier.classify(visibleCandles);
+      if (regime !== undefined) {
+        regimePerCandle.set(candles[i].timestamp, regime);
+      }
+
       // 6c. Filter additional TF candles by timestamp
       let filteredAdditionalCandles: Map<Timeframe, Candle[]> | undefined;
       if (additionalCandlesMap) {
@@ -160,12 +172,13 @@ export class BacktestEngine {
         }
       }
 
-      // 6d. Evaluate strategy
+      // 6d. Evaluate strategy (pass regime as 5th argument)
       const signals = strategy.evaluate(
         visibleCandles,
         validConfig.pair,
         validConfig.timeframe,
         filteredAdditionalCandles,
+        regime,
       );
 
       // 6e. Process signals
@@ -293,6 +306,27 @@ export class BacktestEngine {
     const state = portfolio.getState();
     const lastPrice = d(candles[candles.length - 1].close);
 
+    // Compute regime breakdown if any regimes were classified
+    const metricsCalc = new MetricsCalculator();
+    const tradesCopy = [...state.trades];
+    const regimeBreakdown =
+      regimePerCandle.size > 0
+        ? metricsCalc.calculateRegimeBreakdown(
+            regimePerCandle,
+            tradesCopy,
+            candles.length,
+          )
+        : undefined;
+
+    // Build regime timeline for persistence
+    const regimeTimeline =
+      regimePerCandle.size > 0
+        ? Array.from(regimePerCandle.entries()).map(([ts, r]) => ({
+            timestamp: ts,
+            regime: r,
+          }))
+        : undefined;
+
     return {
       config: validConfig,
       trades: [...state.trades],
@@ -301,6 +335,8 @@ export class BacktestEngine {
       totalFees: state.totalFees,
       startTimestamp: candles[0].timestamp,
       endTimestamp: candles[candles.length - 1].timestamp,
+      regimeBreakdown,
+      regimeTimeline,
     };
   }
 

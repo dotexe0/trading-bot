@@ -31,6 +31,7 @@ import type {
   ShutdownState,
 } from './types.js';
 import { createModuleLogger } from '../core/logger.js';
+import { RegimeClassifier } from '../regime/classifier.js';
 
 const log = createModuleLogger('live-engine');
 
@@ -91,6 +92,7 @@ export class LiveTradingEngine extends EventEmitter {
   private cashBalance: Decimal = ZERO;
   private peakEquity: Decimal = ZERO;
   private recoveryFailed = false;
+  private readonly classifier = new RegimeClassifier();
 
   constructor(options: LiveTradingEngineOptions) {
     super();
@@ -289,11 +291,14 @@ export class LiveTradingEngine extends EventEmitter {
       }
     }
 
-    // 3. Strategy evaluation
+    // 3. Strategy evaluation (pass regime as 5th argument)
+    const regime = this.classifier.classify(buffer);
     const signals = this.strategy.evaluate(
       buffer,
       candle.pair,
       candle.timeframe,
+      undefined, // additionalCandles (not used by live engine)
+      regime,
     );
 
     // 4. Signal processing

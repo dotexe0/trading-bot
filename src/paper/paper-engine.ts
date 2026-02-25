@@ -31,6 +31,7 @@ import type { LiveDataFeed } from './live-data-feed.js';
 import type { SessionStore } from './session-store.js';
 import type { PaperTradingConfig, PaperSession, PaperTradingResult } from './types.js';
 import { createModuleLogger } from '../core/logger.js';
+import { RegimeClassifier } from '../regime/classifier.js';
 
 const log = createModuleLogger('paper-engine');
 
@@ -65,6 +66,7 @@ export class PaperTradingEngine extends EventEmitter {
   private session: PaperSession | null = null;
   private isRunning = false;
   private positionDirection: 'long' | 'short' | null = null;
+  private readonly classifier = new RegimeClassifier();
 
   constructor(options: PaperTradingEngineOptions) {
     super();
@@ -283,11 +285,14 @@ export class PaperTradingEngine extends EventEmitter {
       }
     }
 
-    // 3. Strategy evaluation (identical to BacktestEngine)
+    // 3. Strategy evaluation (pass regime as 5th argument)
+    const regime = this.classifier.classify(buffer);
     const signals = this.strategy.evaluate(
       buffer,
       candle.pair,
       candle.timeframe,
+      undefined, // additionalCandles (not used by paper engine)
+      regime,
     );
 
     // 4. Signal processing
