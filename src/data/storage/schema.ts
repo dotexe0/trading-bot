@@ -264,3 +264,26 @@ export const regimeHistory = sqliteTable(
     ),
   ],
 );
+
+// -- Correlation Snapshot Tables --
+
+export const correlationSnapshots = sqliteTable(
+  'correlation_snapshots',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    timeframe: text('timeframe').notNull(),
+    timestamp: integer('timestamp').notNull(),
+    correlation: text('correlation').notNull(), // stored as TEXT per project convention
+    windowSize: integer('window_size').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_corr_unique').on(
+      table.timeframe,
+      table.timestamp,
+    ),
+    index('idx_corr_tf_ts').on(
+      table.timeframe,
+      table.timestamp,
+    ),
+  ],
+);

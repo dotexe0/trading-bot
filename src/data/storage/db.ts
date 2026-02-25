@@ -274,6 +274,21 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_regime_pair_tf_ts
       ON regime_history (pair, timeframe, timestamp);
+
+    -- Correlation Snapshot tables
+    CREATE TABLE IF NOT EXISTS correlation_snapshots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timeframe TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      correlation TEXT NOT NULL,
+      window_size INTEGER NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_corr_unique
+      ON correlation_snapshots (timeframe, timestamp);
+
+    CREATE INDEX IF NOT EXISTS idx_corr_tf_ts
+      ON correlation_snapshots (timeframe, timestamp);
   `);
 
   log.info('Database schema initialized');
