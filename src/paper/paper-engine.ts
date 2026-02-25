@@ -32,6 +32,8 @@ import type { SessionStore } from './session-store.js';
 import type { PaperTradingConfig, PaperSession, PaperTradingResult } from './types.js';
 import { createModuleLogger } from '../core/logger.js';
 import { RegimeClassifier } from '../regime/classifier.js';
+import { CorrelationCalculator, CorrelationStore } from '../correlation/index.js';
+import type { CorrelationConfig } from '../correlation/index.js';
 
 const log = createModuleLogger('paper-engine');
 
@@ -46,6 +48,10 @@ export interface PaperTradingEngineOptions {
   indicatorEngine: IndicatorEngine;
   riskManager?: RiskManager;
   strategyStats?: StrategyStats;
+  /** When provided with enabled=true, activates correlation-aware position sizing. */
+  correlationConfig?: CorrelationConfig;
+  /** Path to the SQLite database for storing correlation snapshots. */
+  correlationDbPath?: string;
 }
 
 export class PaperTradingEngine extends EventEmitter {
@@ -67,6 +73,8 @@ export class PaperTradingEngine extends EventEmitter {
   private isRunning = false;
   private positionDirection: 'long' | 'short' | null = null;
   private readonly classifier = new RegimeClassifier();
+  private correlationCalculator?: CorrelationCalculator;
+  private correlationStore?: CorrelationStore;
 
   constructor(options: PaperTradingEngineOptions) {
     super();
@@ -77,6 +85,15 @@ export class PaperTradingEngine extends EventEmitter {
     this.indicatorEngine = options.indicatorEngine;
     this.riskManager = options.riskManager;
     this.strategyStats = options.strategyStats;
+
+    if (options.correlationConfig?.enabled) {
+      this.correlationCalculator = new CorrelationCalculator(
+        options.correlationConfig.windowCandles,
+      );
+      this.correlationStore = new CorrelationStore({
+        dbPath: options.correlationDbPath,
+      });
+    }
   }
 
   // ── Public API ─────────────────────────────────────────────────────
@@ -141,6 +158,7 @@ export class PaperTradingEngine extends EventEmitter {
   async stop(): Promise<PaperTradingResult> {
     this.isRunning = false;
     this.liveFeed.stop();
+    this.correlationStore?.close();
 
     if (!this.session) {
       throw new Error('No active session to stop');
@@ -396,12 +414,38 @@ export class PaperTradingEngine extends EventEmitter {
 
     let quantity: Decimal;
 
+    // Compute correlation discount scalar when in multi-pair mode.
+    // The discount fires when the other pair's candle buffer is populated
+    // (indicating multi-pair operation). This avoids requiring cross-engine
+    // state sharing to determine if the other pair is in a position.
+    let correlationScalar: Decimal | undefined;
+    if (this.correlationCalculator) {
+      const otherPair = this.config.pair === 'BTC-USD' ? 'ETH-USD' : 'BTC-USD';
+      const otherKey = `${otherPair}:${this.config.timeframe}`;
+      const thisKey = `${this.config.pair}:${this.config.timeframe}`;
+      const otherBuf = this.candleBuffer.get(otherKey) ?? [];
+      const thisBuf = this.candleBuffer.get(thisKey) ?? [];
+      if (otherBuf.length >= 2) {
+        const snapshot = this.correlationCalculator.compute(
+          this.config.pair === 'BTC-USD' ? thisBuf : otherBuf,
+          this.config.pair === 'BTC-USD' ? otherBuf : thisBuf,
+        );
+        if (snapshot) {
+          const r = snapshot.correlation;
+          const scalar = Math.max(0, 1 - Math.max(0, r));
+          correlationScalar = d(scalar);
+          this.correlationStore?.save(snapshot, this.config.timeframe);
+        }
+      }
+    }
+
     if (this.riskManager && this.positionSizer && this.config.riskConfig) {
-      // Risk-managed sizing
+      // Risk-managed sizing with optional correlation discount
       const sizeResult = this.positionSizer.calculate(
         currentEquity,
         currentPrice,
         this.strategyStats ?? null,
+        correlationScalar,
       );
       quantity = sizeResult.quantity;
 

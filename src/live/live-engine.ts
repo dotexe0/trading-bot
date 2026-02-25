@@ -32,6 +32,8 @@ import type {
 } from './types.js';
 import { createModuleLogger } from '../core/logger.js';
 import { RegimeClassifier } from '../regime/classifier.js';
+import { CorrelationCalculator, CorrelationStore } from '../correlation/index.js';
+import type { CorrelationConfig } from '../correlation/index.js';
 
 const log = createModuleLogger('live-engine');
 
@@ -56,6 +58,10 @@ export interface LiveTradingEngineOptions {
   riskManager?: RiskManager;
   strategyStats?: StrategyStats;
   resumeSessionId?: string;
+  /** When provided with enabled=true, activates correlation-aware position sizing. */
+  correlationConfig?: CorrelationConfig;
+  /** Path to the SQLite database for storing correlation snapshots. */
+  correlationDbPath?: string;
 }
 
 interface CurrentPosition {
@@ -93,6 +99,8 @@ export class LiveTradingEngine extends EventEmitter {
   private peakEquity: Decimal = ZERO;
   private recoveryFailed = false;
   private readonly classifier = new RegimeClassifier();
+  private correlationCalculator?: CorrelationCalculator;
+  private correlationStore?: CorrelationStore;
 
   constructor(options: LiveTradingEngineOptions) {
     super();
@@ -105,6 +113,15 @@ export class LiveTradingEngine extends EventEmitter {
     this.riskManager = options.riskManager;
     this.strategyStats = options.strategyStats;
     this.resumeSessionId = options.resumeSessionId;
+
+    if (options.correlationConfig?.enabled) {
+      this.correlationCalculator = new CorrelationCalculator(
+        options.correlationConfig.windowCandles,
+      );
+      this.correlationStore = new CorrelationStore({
+        dbPath: options.correlationDbPath,
+      });
+    }
   }
 
   // ── Public API ─────────────────────────────────────────────────────
@@ -362,12 +379,38 @@ export class LiveTradingEngine extends EventEmitter {
     let equity = this.cashBalance;
     let quantity: Decimal;
 
+    // Compute correlation discount scalar when in multi-pair mode.
+    // The discount fires when the other pair's candle buffer is populated
+    // (indicating multi-pair operation). This avoids requiring cross-engine
+    // state sharing to determine if the other pair is in a position.
+    let correlationScalar: Decimal | undefined;
+    if (this.correlationCalculator) {
+      const otherPair = this.config.pair === 'BTC-USD' ? 'ETH-USD' : 'BTC-USD';
+      const otherKey = `${otherPair}:${this.config.timeframe}`;
+      const thisKey = `${this.config.pair}:${this.config.timeframe}`;
+      const otherBuf = this.candleBuffer.get(otherKey) ?? [];
+      const thisBuf = this.candleBuffer.get(thisKey) ?? [];
+      if (otherBuf.length >= 2) {
+        const snapshot = this.correlationCalculator.compute(
+          this.config.pair === 'BTC-USD' ? thisBuf : otherBuf,
+          this.config.pair === 'BTC-USD' ? otherBuf : thisBuf,
+        );
+        if (snapshot) {
+          const r = snapshot.correlation;
+          const scalar = Math.max(0, 1 - Math.max(0, r));
+          correlationScalar = d(scalar);
+          this.correlationStore?.save(snapshot, this.config.timeframe);
+        }
+      }
+    }
+
     if (this.riskManager && this.positionSizer && this.config.riskConfig) {
-      // Risk-managed sizing
+      // Risk-managed sizing with optional correlation discount
       const sizeResult = this.positionSizer.calculate(
         equity,
         currentPrice,
         this.strategyStats ?? null,
+        correlationScalar,
       );
       quantity = sizeResult.quantity;
 
@@ -734,6 +777,7 @@ export class LiveTradingEngine extends EventEmitter {
     this.shutdownState = 'closing_connections';
     this.liveFeed.stop();
     this.orderManager.stopTracking();
+    this.correlationStore?.close();
 
     // Persist final state
     if (this.session) {
