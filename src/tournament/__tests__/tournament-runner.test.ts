@@ -226,4 +226,17 @@ describe('TournamentRunner', () => {
 
     expect(result.leaderboard[0].windowCount).toBe(3);
   });
+
+  it('tournament without MC config produces entries without mcResult', async () => {
+    mockWfRunner.run.mockReturnValue(makeWfResult(1.5, [1.5]));
+    mockRegistry.list.mockReturnValue(['test-strategy']);
+
+    // No monteCarlo config -- default behavior
+    const config = makeTournamentConfig();
+    const result = await runner.run(config, dummyCandles);
+
+    expect(result.leaderboard).toHaveLength(1);
+    expect(result.leaderboard[0].mcResult).toBeUndefined();
+    expect(result.leaderboard[0].mcAdjustedScore).toBeUndefined();
+  });
 });

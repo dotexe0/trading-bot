@@ -13,6 +13,7 @@ import type { StrategyRegistry } from '../strategies/registry.js';
 import type { TournamentConfig } from './config.js';
 import type { TournamentResult, LeaderboardEntry } from './types.js';
 import type { PerformanceMetrics } from '../backtest/metrics.js';
+import { MonteCarloEngine } from '../montecarlo/monte-carlo-engine.js';
 
 const log = createModuleLogger('tournament-runner');
 
@@ -101,6 +102,43 @@ export class TournamentRunner {
         windowCount: wfResult.windows.length,
       });
 
+      // Optional MC post-processing: run MC on last OOS window result
+      if (config.monteCarlo?.enabled) {
+        const mcEngine = new MonteCarloEngine({
+          iterations: config.monteCarlo.iterations,
+          minTrades: config.monteCarlo.minTrades,
+        });
+
+        const lastWindow = wfResult.windows[wfResult.windows.length - 1];
+        if (lastWindow && lastWindow.validateResult.trades.length >= config.monteCarlo.minTrades) {
+          const entry = entries[entries.length - 1];
+          try {
+            const mcResult = mcEngine.run(lastWindow.validateResult, strategyName);
+            entry.mcResult = mcResult;
+
+            // Composite score: blend OOS Sharpe with MC worst-case (p5) Sharpe
+            const w = config.monteCarlo.rankingWeight;
+            entry.mcAdjustedScore =
+              (1 - w) * entry.oosMetrics.sharpeRatio +
+              w * mcResult.sharpeDistribution.p5;
+
+            log.info(
+              {
+                strategy: strategyName,
+                mcP5Sharpe: mcResult.sharpeDistribution.p5.toFixed(4),
+                mcAdjustedScore: entry.mcAdjustedScore.toFixed(4),
+              },
+              'MC simulation complete for strategy',
+            );
+          } catch (err) {
+            log.warn(
+              { strategy: strategyName, error: (err as Error).message },
+              'MC skipped for strategy',
+            );
+          }
+        }
+      }
+
       log.info(
         {
           strategy: strategyName,
@@ -115,8 +153,16 @@ export class TournamentRunner {
       await new Promise((r) => setImmediate(r));
     }
 
-    // Sort by OOS Sharpe descending (higher is better)
-    entries.sort((a, b) => b.oosMetrics.sharpeRatio - a.oosMetrics.sharpeRatio);
+    // Sort by mcAdjustedScore when MC is enabled, otherwise by OOS Sharpe
+    if (config.monteCarlo?.enabled) {
+      entries.sort((a, b) => {
+        const scoreA = a.mcAdjustedScore ?? a.oosMetrics.sharpeRatio;
+        const scoreB = b.mcAdjustedScore ?? b.oosMetrics.sharpeRatio;
+        return scoreB - scoreA;
+      });
+    } else {
+      entries.sort((a, b) => b.oosMetrics.sharpeRatio - a.oosMetrics.sharpeRatio);
+    }
 
     // Assign ranks
     for (let i = 0; i < entries.length; i++) {

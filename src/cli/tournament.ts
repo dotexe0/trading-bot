@@ -26,6 +26,7 @@ program
   .option('--days <days>', 'Number of days of history to evaluate', '90')
   .option('--capital <amount>', 'Initial capital per strategy', '10000')
   .option('--top-n <n>', 'Number of top strategies to show', '3')
+  .option('--mc', 'Enable Monte Carlo simulation for tournament ranking')
   .action(async (opts) => {
     const { config, dbConn, repo, registry, indicatorEngine } = bootstrap();
 
@@ -87,6 +88,14 @@ program
           validateWindowMs,
           stepMs,
         },
+        monteCarlo: opts.mc
+          ? {
+              enabled: true,
+              iterations: 1000,
+              minTrades: 15,
+              rankingWeight: 0.3,
+            }
+          : undefined,
       });
 
       out.step(3, 3, `Running tournament (${registry.list().length} strategies)`);
@@ -104,6 +113,10 @@ program
 
         out.table(`#${entry.rank}`, entry.strategyName);
         out.table('  OOS Sharpe', sharpe);
+        if (opts.mc && entry.mcAdjustedScore !== undefined) {
+          out.table('  MC Adj Score', entry.mcAdjustedScore.toFixed(4));
+          out.table('  MC p5 Sharpe', entry.mcResult?.sharpeDistribution.p5.toFixed(4) ?? 'N/A');
+        }
         out.table('  Robustness', robustness);
         out.table('  Max DD', `${maxDd}%`);
         out.table('  Win Rate', `${winRate}%`);

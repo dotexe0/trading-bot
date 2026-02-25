@@ -37,6 +37,16 @@ export const tournamentConfigSchema = z
     activationMode: z.enum(['paper', 'live', 'none']).default('none'),
     /** Optional explicit strategy configs (overrides registry defaults) */
     strategyConfigs: z.array(z.record(z.string(), z.unknown())).optional(),
+    /** Optional Monte Carlo configuration for MC-adjusted ranking */
+    monteCarlo: z
+      .object({
+        enabled: z.boolean().default(false),
+        iterations: z.number().int().min(100).max(100000).default(1000),
+        minTrades: z.number().int().min(5).max(100).default(15),
+        /** Weight of MC p5 Sharpe in composite score (0-1). Default 0.3 = 30% MC, 70% OOS Sharpe */
+        rankingWeight: z.number().min(0).max(1).default(0.3),
+      })
+      .optional(),
   })
   .refine((d) => d.startMs < d.endMs, {
     message: 'startMs must be less than endMs',

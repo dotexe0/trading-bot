@@ -6,6 +6,7 @@
  */
 
 import type { PerformanceMetrics } from '../backtest/metrics.js';
+import type { MonteCarloResult } from '../montecarlo/types.js';
 
 // Re-export TournamentConfig from config module (Zod-inferred)
 export type { TournamentConfig } from './config.js';
@@ -26,6 +27,10 @@ export interface LeaderboardEntry {
   robustnessRatio: number;
   /** Number of walk-forward windows evaluated */
   windowCount: number;
+  /** Monte Carlo simulation result (if MC was run) */
+  mcResult?: MonteCarloResult;
+  /** MC-adjusted composite score: (1-w)*oosSharpe + w*mcP5Sharpe */
+  mcAdjustedScore?: number;
 }
 
 /** Complete result from a tournament run. */

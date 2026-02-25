@@ -12,6 +12,8 @@ import { BacktestEngine } from '../backtest/engine.js';
 import { parseBacktestConfig } from '../backtest/types.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
+import { MonteCarloEngine } from '../montecarlo/monte-carlo-engine.js';
+import { MonteCarloStore } from '../montecarlo/monte-carlo-store.js';
 
 const program = new Command();
 
@@ -24,6 +26,7 @@ program
   .option('--start <date>', 'Start date (YYYY-MM-DD)', '2025-01-01')
   .option('--end <date>', 'End date (YYYY-MM-DD)', new Date().toISOString().split('T')[0])
   .option('--capital <amount>', 'Initial capital', '10000')
+  .option('--mc [iterations]', 'Run Monte Carlo simulation after backtest (default: 1000 iterations)')
   .action(async (opts) => {
     const { config, dbConn, repo, registry, indicatorEngine } = bootstrap();
 
@@ -34,8 +37,10 @@ program
       const timeframe = opts.timeframe as '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
       const capital = opts.capital as string;
       const strategyName = opts.strategy as string;
+      const runMC = opts.mc !== undefined;
+      const totalSteps = runMC ? 3 : 2;
 
-      out.step(1, 2, `Loading candles for ${pair} ${timeframe}`);
+      out.step(1, totalSteps, `Loading candles for ${pair} ${timeframe}`);
       const candles = repo.getCandles(pair, timeframe, startMs, endMs);
       out.info(`${candles.length} candles loaded`);
 
@@ -44,7 +49,7 @@ program
         process.exit(1);
       }
 
-      out.step(2, 2, `Running backtest with strategy: ${strategyName}`);
+      out.step(2, totalSteps, `Running backtest with strategy: ${strategyName}`);
 
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
@@ -75,6 +80,61 @@ program
       out.table('Final Equity', `$${result.finalEquity.toFixed(2)}`);
       out.table('Total Fees', `$${result.totalFees.toFixed(2)}`);
       out.success('Backtest complete');
+
+      // Optional Monte Carlo simulation
+      if (runMC) {
+        const mcIterations =
+          typeof opts.mc === 'string' ? parseInt(opts.mc, 10) : 1000;
+        const mcMinTrades = 15;
+
+        out.step(3, totalSteps, `Running Monte Carlo simulation (${mcIterations} iterations)`);
+
+        if (result.trades.length < mcMinTrades) {
+          out.warn(
+            `Insufficient trades (${result.trades.length}) for Monte Carlo simulation. ` +
+            `Minimum required: ${mcMinTrades}`,
+          );
+        } else {
+          const mcEngine = new MonteCarloEngine({
+            iterations: mcIterations,
+            minTrades: mcMinTrades,
+          });
+
+          const mcResult = mcEngine.run(result, strategyName);
+
+          // Persist result
+          const mcStore = new MonteCarloStore();
+          mcStore.save(mcResult);
+          mcStore.close();
+
+          // Display results
+          out.banner('Monte Carlo Results');
+          out.table('Iterations', String(mcResult.iterations));
+          out.table('Trade Count', String(mcResult.tradeCount));
+
+          console.log('');
+          console.log('Sharpe Ratio Distribution:');
+          console.log(`  p5 (worst):   ${mcResult.sharpeDistribution.p5.toFixed(4)}`);
+          console.log(`  p25:          ${mcResult.sharpeDistribution.p25.toFixed(4)}`);
+          console.log(`  p50 (median): ${mcResult.sharpeDistribution.p50.toFixed(4)}`);
+          console.log(`  p75:          ${mcResult.sharpeDistribution.p75.toFixed(4)}`);
+          console.log(`  p95 (best):   ${mcResult.sharpeDistribution.p95.toFixed(4)}`);
+
+          console.log('');
+          console.log('Max Drawdown Distribution:');
+          console.log(`  p5 (best):    ${(mcResult.maxDrawdownDistribution.p5 * 100).toFixed(2)}%`);
+          console.log(`  p50 (median): ${(mcResult.maxDrawdownDistribution.p50 * 100).toFixed(2)}%`);
+          console.log(`  p95 (worst):  ${(mcResult.maxDrawdownDistribution.p95 * 100).toFixed(2)}%`);
+
+          console.log('');
+          console.log('Total Return Distribution:');
+          console.log(`  p5 (worst):   ${(mcResult.totalReturnDistribution.p5 * 100).toFixed(2)}%`);
+          console.log(`  p50 (median): ${(mcResult.totalReturnDistribution.p50 * 100).toFixed(2)}%`);
+          console.log(`  p95 (best):   ${(mcResult.totalReturnDistribution.p95 * 100).toFixed(2)}%`);
+
+          out.success('Monte Carlo simulation complete');
+        }
+      }
     } catch (error) {
       out.error(error instanceof Error ? error.message : String(error));
       process.exit(1);
