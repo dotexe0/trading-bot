@@ -28,24 +28,48 @@ export class PositionSizer {
    * @param equity - Current portfolio equity
    * @param price - Expected fill price
    * @param stats - Strategy statistics (null if no history)
+   * @param correlationScalar - Optional correlation discount in [0, 1].
+   *   Applied AFTER all other sizing caps. When < 1, reduces the position
+   *   by multiplying appliedPct by the scalar. When undefined or >= 1,
+   *   behavior is identical to v1.0 (zero regression).
    * @returns Position size result with method, percentages, and quantity
    */
   calculate(
     equity: Decimal,
     price: Decimal,
     stats: StrategyStats | null,
+    correlationScalar?: Decimal,
   ): PositionSizeResult {
+    let baseResult: PositionSizeResult;
+
     if (this.config.sizingMethod === 'fixed-fraction') {
-      return this.fixedFraction(equity, price);
+      baseResult = this.fixedFraction(equity, price);
+    } else if (!this.canUseKelly(stats)) {
+      // Kelly or half-kelly -- fall back when insufficient stats
+      baseResult = this.fixedFraction(equity, price);
+    } else {
+      // stats is guaranteed non-null here by canUseKelly
+      baseResult = this.kelly(equity, price, stats!);
     }
 
-    // Kelly or half-kelly -- check if we have sufficient stats
-    if (!this.canUseKelly(stats)) {
-      return this.fixedFraction(equity, price);
+    // Apply correlation discount AFTER all other sizing caps.
+    // Only fires when scalar is provided AND strictly less than 1.
+    if (
+      correlationScalar !== undefined &&
+      correlationScalar.lt(d(1)) &&
+      correlationScalar.gte(ZERO)
+    ) {
+      const appliedPct = baseResult.appliedPct.mul(correlationScalar);
+      const quantity = equity.mul(appliedPct).div(price);
+      return {
+        ...baseResult,
+        appliedPct,
+        quantity,
+        cappedBy: 'correlationDiscount',
+      };
     }
 
-    // stats is guaranteed non-null here by canUseKelly
-    return this.kelly(equity, price, stats!);
+    return baseResult;
   }
 
   /**
