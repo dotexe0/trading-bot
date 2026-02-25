@@ -30,7 +30,7 @@
 
 - [x] **Phase 12: CLI & Operations** (2/2 plans) — completed 2026-02-21
 - [x] **Phase 13: Monte Carlo Simulation** (2/2 plans) — completed 2026-02-24
-- [ ] **Phase 14: Regime Detection** - Market state classification with backward-compatible strategy integration
+- [x] **Phase 14: Regime Detection** - Market state classification with backward-compatible strategy integration
 - [ ] **Phase 15: Correlation-Aware Sizing** - Cross-asset correlation adjustment for position sizing
 - [ ] **Phase 16: Enhanced Dashboard** - Backtest visualization, strategy hot-reload, and portfolio heat map
 
@@ -87,10 +87,12 @@ Plans:
   1. System computes rolling Pearson correlation between BTC and ETH returns with a configurable window (minimum 30 days)
   2. When both BTC and ETH positions are open simultaneously, position sizes are reduced proportionally to their correlation coefficient
   3. Correlation snapshots are persisted to the database for auditing and historical analysis
-**Plans**: TBD
+**Plans**: 3 plans in 3 waves
 
 Plans:
-- [ ] 15-01: Correlation calculator, position sizer extension, and database persistence
+- [ ] 15-01-PLAN.md — CorrelationCalculator TDD: pure Pearson math, types, Zod config, daysToCandles utility
+- [ ] 15-02-PLAN.md — CorrelationStore + schema: correlation_snapshots table, Drizzle definition, raw SQL, store tests
+- [ ] 15-03-PLAN.md — Engine wiring: PositionSizer extension, paper/live integration, barrel export
 
 ### Phase 16: Enhanced Dashboard
 **Goal**: Dashboard gains backtest trade visualization, live strategy configuration changes, and a portfolio heat map — building on existing React + Lightweight Charts + WebSocket infrastructure
@@ -125,5 +127,5 @@ Plans:
 | 12. CLI & Operations | v1.1 | 2/2 | Complete | 2026-02-21 |
 | 13. Monte Carlo Simulation | v1.1 | 2/2 | Complete | 2026-02-24 |
 | 14. Regime Detection | v1.1 | 0/2 | Not started | - |
-| 15. Correlation-Aware Sizing | v1.1 | 0/1 | Not started | - |
+| 15. Correlation-Aware Sizing | v1.1 | 0/3 | Not started | - |
 | 16. Enhanced Dashboard | v1.1 | 0/3 | Not started | - |
