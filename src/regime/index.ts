@@ -6,6 +6,7 @@
 
 export { MarketRegime } from './types.js';
 export { RegimeClassifier } from './classifier.js';
+export { RegimeStore } from './regime-store.js';
 export {
   ADX_TREND_THRESHOLD,
   ATR_VOLATILE_MULTIPLIER,

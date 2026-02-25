@@ -9,6 +9,7 @@ import { z } from 'zod';
 import type { Decimal } from 'decimal.js';
 import type { TradingPair, Timeframe } from '../core/types.js';
 import type { Signal } from '../strategies/types.js';
+import type { MarketRegime } from '../regime/types.js';
 
 // ── Fee tier constants ────────────────────────────────────────────────
 
@@ -109,6 +110,19 @@ export interface EquityPoint {
   equity: Decimal;
 }
 
+/** Per-regime performance breakdown produced by regime-aware backtesting. */
+export interface RegimeBreakdown {
+  regime: MarketRegime;
+  /** Percentage of total candles classified as this regime */
+  timePct: number;
+  /** Number of trades that entered during this regime */
+  tradeCount: number;
+  /** Sharpe ratio for trades in this regime (annualized, sqrt(365)) */
+  sharpeRatio: number;
+  /** Win rate for trades in this regime */
+  winRate: number;
+}
+
 /** Complete result from running a backtest. */
 export interface BacktestResult {
   /** The config used for this backtest */
@@ -125,4 +139,8 @@ export interface BacktestResult {
   startTimestamp: number;
   /** Timestamp of last candle */
   endTimestamp: number;
+  /** Per-regime performance breakdown (populated when regime detection is active) */
+  regimeBreakdown?: RegimeBreakdown[];
+  /** Per-candle regime timeline for persistence (timestamp + regime label) */
+  regimeTimeline?: { timestamp: number; regime: string }[];
 }

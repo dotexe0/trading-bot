@@ -259,6 +259,21 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_mc_results_created
       ON monte_carlo_results (created_at);
+
+    -- Regime Detection tables
+    CREATE TABLE IF NOT EXISTS regime_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pair TEXT NOT NULL,
+      timeframe TEXT NOT NULL,
+      timestamp INTEGER NOT NULL,
+      regime TEXT NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_regime_unique
+      ON regime_history (pair, timeframe, timestamp);
+
+    CREATE INDEX IF NOT EXISTS idx_regime_pair_tf_ts
+      ON regime_history (pair, timeframe, timestamp);
   `);
 
   log.info('Database schema initialized');

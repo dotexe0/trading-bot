@@ -239,3 +239,28 @@ export const monteCarloResults = sqliteTable(
     index('idx_mc_results_created').on(table.createdAt),
   ],
 );
+
+// -- Regime Detection Tables --
+
+export const regimeHistory = sqliteTable(
+  'regime_history',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    pair: text('pair').notNull(),
+    timeframe: text('timeframe').notNull(),
+    timestamp: integer('timestamp').notNull(),
+    regime: text('regime').notNull(), // 'TRENDING' | 'RANGING' | 'VOLATILE'
+  },
+  (table) => [
+    uniqueIndex('idx_regime_unique').on(
+      table.pair,
+      table.timeframe,
+      table.timestamp,
+    ),
+    index('idx_regime_pair_tf_ts').on(
+      table.pair,
+      table.timeframe,
+      table.timestamp,
+    ),
+  ],
+);
