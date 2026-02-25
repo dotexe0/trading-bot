@@ -9,6 +9,7 @@
 import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import type { IndicatorConfig } from '../indicators/types.js';
 import { IndicatorEngine } from '../indicators/engine.js';
+import { MarketRegime } from '../regime/types.js';
 import type { IStrategy, Signal } from './types.js';
 
 interface SmaCrossoverParams {
@@ -40,8 +41,14 @@ export class SmaCrossoverStrategy implements IStrategy {
     pair: TradingPair,
     timeframe: Timeframe,
     _additionalCandles?: Map<Timeframe, Candle[]>,
+    regime?: MarketRegime,
   ): Signal[] {
     if (candles.length < this.minCandles) return [];
+
+    // Regime filter: only generate signals in TRENDING markets (per user decision)
+    if (regime !== undefined && regime !== MarketRegime.TRENDING) {
+      return [];
+    }
 
     const fastResult = this.engine.compute(
       { name: 'SMA', period: this.fastPeriod },

@@ -8,6 +8,7 @@
 
 import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import type { IndicatorConfig } from '../indicators/types.js';
+import type { MarketRegime } from '../regime/types.js';
 
 /** Signal direction -- what the strategy recommends */
 export type SignalDirection = 'long' | 'short' | 'close';
@@ -63,6 +64,8 @@ export interface IStrategy {
    * @param timeframe - The primary timeframe of the candles
    * @param additionalCandles - Optional map of other timeframe candles (for multi-TF strategies).
    *                            Single-timeframe strategies ignore this parameter.
+   * @param regime - Optional market regime classification. When provided, strategies
+   *                 may filter signals based on preferred market conditions.
    * @returns Array of signals (may be empty if no signal conditions met)
    */
   evaluate(
@@ -70,5 +73,6 @@ export interface IStrategy {
     pair: TradingPair,
     timeframe: Timeframe,
     additionalCandles?: Map<Timeframe, Candle[]>,
+    regime?: MarketRegime,
   ): Signal[];
 }

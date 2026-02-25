@@ -11,6 +11,7 @@
 import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import type { IndicatorConfig } from '../indicators/types.js';
 import { IndicatorEngine } from '../indicators/engine.js';
+import { MarketRegime } from '../regime/types.js';
 import type { IStrategy, Signal } from './types.js';
 
 interface MultiTimeframeTrendParams {
@@ -48,8 +49,14 @@ export class MultiTimeframeTrendStrategy implements IStrategy {
     pair: TradingPair,
     timeframe: Timeframe,
     additionalCandles?: Map<Timeframe, Candle[]>,
+    regime?: MarketRegime,
   ): Signal[] {
     if (candles.length < this.minCandles) return [];
+
+    // Regime filter: only generate signals in TRENDING markets (per user decision)
+    if (regime !== undefined && regime !== MarketRegime.TRENDING) {
+      return [];
+    }
 
     // Check additionalCandles for higher TF data
     if (!additionalCandles || !additionalCandles.has(this.trendTimeframe)) {

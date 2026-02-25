@@ -10,6 +10,7 @@
 import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import type { IndicatorConfig } from '../indicators/types.js';
 import { IndicatorEngine } from '../indicators/engine.js';
+import type { MarketRegime } from '../regime/types.js';
 import type { IStrategy, Signal } from './types.js';
 
 interface RsiMeanReversionParams {
@@ -41,6 +42,7 @@ export class RsiMeanReversionStrategy implements IStrategy {
     pair: TradingPair,
     timeframe: Timeframe,
     _additionalCandles?: Map<Timeframe, Candle[]>,
+    _regime?: MarketRegime,
   ): Signal[] {
     if (candles.length < this.minCandles) return [];
 
