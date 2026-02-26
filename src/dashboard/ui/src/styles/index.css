@@ -830,3 +830,47 @@ body {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Portfolio Stats Bar ──────────────────────────────────────────── */
+
+.portfolio-stats-bar {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: #12122a;
+  border-bottom: 1px solid #2a2a3e;
+  padding: 0.6rem 1.5rem;
+  flex-wrap: wrap;
+}
+
+.portfolio-stat {
+  display: flex;
+  flex-direction: column;
+  padding: 0 1.5rem;
+}
+
+.portfolio-stat:first-child {
+  padding-left: 0;
+}
+
+.portfolio-stat-label {
+  font-size: 0.7rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 0.15rem;
+}
+
+.portfolio-stat-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #e5e7eb;
+  font-variant-numeric: tabular-nums;
+}
+
+.portfolio-stat-divider {
+  width: 1px;
+  height: 2rem;
+  background: #2a2a3e;
+  flex-shrink: 0;
+}

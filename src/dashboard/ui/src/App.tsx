@@ -11,6 +11,7 @@ import { RiskPanel } from './components/RiskPanel.js';
 import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { BacktestViewer } from './components/BacktestViewer.js';
+import { PortfolioStats } from './components/PortfolioStats.js';
 import type {
   CircuitBreakerEvent,
   EquityPoint,
@@ -324,6 +325,8 @@ function App(): React.ReactElement {
   return (
     <>
       <Header status={status} isMuted={isMuted} onMuteToggle={() => setIsMuted((m) => !m)} />
+
+      <PortfolioStats equity={equity} sessions={sessions} />
 
       <CircuitBreakerBanner
         isActive={cbBannerActive}

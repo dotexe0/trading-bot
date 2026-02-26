@@ -15,15 +15,13 @@ export async function registerPortfolioRoutes(
   deps: RouteDeps,
 ): Promise<void> {
   app.get('/api/portfolio/heatmap', async () => {
-    // 1. Compute BTC/ETH allocation from open live positions
-    const sessions = deps.liveStateStore.listSessions('running');
+    // 1. Compute BTC/ETH position values from live and paper sessions
     let btcValueUsd = 0;
     let ethValueUsd = 0;
 
-    for (const session of sessions) {
-      const trades = deps.liveStateStore.getSessionTrades(session.id);
-      for (const trade of trades) {
-        // Open positions have no exitTimestamp
+    // Live positions
+    for (const session of deps.liveStateStore.listSessions('running')) {
+      for (const trade of deps.liveStateStore.getSessionTrades(session.id)) {
         if (trade.exitTimestamp !== undefined && trade.exitTimestamp !== null) continue;
         const value = Number(trade.entryPrice) * Number(trade.entryQuantity);
         if (session.pair === 'BTC-USD') btcValueUsd += value;
@@ -31,22 +29,46 @@ export async function registerPortfolioRoutes(
       }
     }
 
-    const totalValue = btcValueUsd + ethValueUsd;
-    const btcPct = totalValue > 0 ? (btcValueUsd / totalValue) * 100 : 0;
-    const ethPct = totalValue > 0 ? (ethValueUsd / totalValue) * 100 : 0;
+    // Paper positions (open trade = exitFill.fillTimestamp === 0)
+    for (const session of deps.sessionStore.listSessions('running')) {
+      for (const trade of deps.sessionStore.getSessionTrades(session.id)) {
+        if (trade.exitFill.fillTimestamp !== 0) continue;
+        const value = Number(trade.entryFill.fillPrice) * Number(trade.entryFill.quantity);
+        if (session.pair === 'BTC-USD') btcValueUsd += value;
+        else if (session.pair === 'ETH-USD') ethValueUsd += value;
+      }
+    }
 
-    // 2. Get latest correlation from CorrelationStore (1h timeframe)
+    // 2. Total portfolio equity (cash + positions) from latest equity point
+    let totalEquityUsd = 0;
+    for (const session of deps.sessionStore.listSessions('running')) {
+      const equityPoints = deps.sessionStore.getSessionEquity(session.id);
+      totalEquityUsd += equityPoints.length > 0
+        ? Number(equityPoints[equityPoints.length - 1].equity)
+        : Number(session.initialCapital);
+    }
+    for (const session of deps.liveStateStore.listSessions('running')) {
+      const eq = deps.liveStateStore.getSessionEquity(session.id);
+      if (eq.length > 0) totalEquityUsd += Number(eq[eq.length - 1].equity);
+    }
+
+    const positionTotal = btcValueUsd + ethValueUsd;
+    const base = totalEquityUsd > 0 ? totalEquityUsd : positionTotal;
+    const btcPct = base > 0 ? (btcValueUsd / base) * 100 : 0;
+    const ethPct = base > 0 ? (ethValueUsd / base) * 100 : 0;
+
+    // 3. Get latest correlation from CorrelationStore (1h timeframe)
     const corrSnapshot = deps.correlationStore?.getLatest('1h') ?? null;
 
-    log.debug({ btcPct, ethPct, correlation: corrSnapshot?.correlation ?? null }, 'Portfolio heatmap requested');
+    log.debug({ btcPct, ethPct, totalEquityUsd, correlation: corrSnapshot?.correlation ?? null }, 'Portfolio heatmap requested');
 
     return {
       assets: [
         { pair: 'BTC-USD', allocationPct: btcPct, valueUsd: btcValueUsd.toFixed(2) },
         { pair: 'ETH-USD', allocationPct: ethPct, valueUsd: ethValueUsd.toFixed(2) },
       ],
-      totalValueUsd: totalValue.toFixed(2),
-      noPositions: totalValue === 0,
+      totalValueUsd: (totalEquityUsd > 0 ? totalEquityUsd : positionTotal).toFixed(2),
+      noPositions: positionTotal === 0,
       correlation: corrSnapshot?.correlation ?? null,
       correlationTimestamp: corrSnapshot?.timestamp ?? null,
     };
