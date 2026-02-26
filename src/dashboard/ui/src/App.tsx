@@ -48,11 +48,18 @@ function App(): React.ReactElement {
   const [cbBannerMessage, setCbBannerMessage] = useState('');
   const [cbTriggeredAt, setCbTriggeredAt] = useState<number | undefined>(undefined);
   const [activePair, setActivePair] = useState<'BTC-USD' | 'ETH-USD'>('BTC-USD');
+  const [chartData, setChartData] = useState<CandlestickData[]>([]);
   const [isMuted, setIsMuted] = useState(false);
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
   const equityCurveRef = useRef<EquityCurveHandle>(null);
+
+  // ── Per-pair candle buffers (no re-render on tick) ────────────────
+  const candleBuffers = useRef<Record<'BTC-USD' | 'ETH-USD', CandlestickData[]>>({
+    'BTC-USD': [],
+    'ETH-USD': [],
+  });
 
   // ── Fetch initial data ────────────────────────────────────────────
   useEffect(() => {
@@ -127,14 +134,28 @@ function App(): React.ReactElement {
       switch (type) {
         case 'priceTick': {
           const tick = payload as PriceTickPayload;
+          const candle: CandlestickData = {
+            time: Math.floor(tick.timestamp / 1000) as Time,
+            open: parseFloat(tick.open),
+            high: parseFloat(tick.high),
+            low: parseFloat(tick.low),
+            close: parseFloat(tick.close),
+          };
+          // Buffer for every pair regardless of which is active
+          const pair = tick.pair as 'BTC-USD' | 'ETH-USD';
+          if (pair in candleBuffers.current) {
+            const buf = candleBuffers.current[pair];
+            const last = buf[buf.length - 1];
+            if (last && last.time === candle.time) {
+              buf[buf.length - 1] = candle; // update in-progress candle
+            } else {
+              buf.push(candle);
+              if (buf.length > 500) buf.shift(); // cap at 500 candles
+            }
+          }
+          // Push to chart only for the active pair
           if (priceChartRef.current && tick.pair === activePair) {
-            priceChartRef.current.update({
-              time: Math.floor(tick.timestamp / 1000) as Time,
-              open: parseFloat(tick.open),
-              high: parseFloat(tick.high),
-              low: parseFloat(tick.low),
-              close: parseFloat(tick.close),
-            });
+            priceChartRef.current.update(candle);
           }
           break;
         }
@@ -250,6 +271,12 @@ function App(): React.ReactElement {
 
   const { status, send } = useWebSocket(WS_URL, handleMessage);
 
+  // ── Pair switch: load buffered candles for the new pair ──────────
+  function handlePairChange(pair: 'BTC-USD' | 'ETH-USD') {
+    setActivePair(pair);
+    setChartData([...candleBuffers.current[pair]]);
+  }
+
   // ── Strategy control handlers ─────────────────────────────────────
   async function handleStrategyStart(name: string) {
     await fetch(`/api/strategies/${encodeURIComponent(name)}/start`, { method: 'POST' });
@@ -295,9 +322,9 @@ function App(): React.ReactElement {
             <div className="panel-title">Price Chart</div>
             <PriceChart
               ref={priceChartRef}
-              initialData={[]}
+              initialData={chartData}
               pair={activePair}
-              onPairChange={setActivePair}
+              onPairChange={handlePairChange}
             />
           </div>
 
