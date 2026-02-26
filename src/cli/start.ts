@@ -305,12 +305,49 @@ program
       // Collect engine EventEmitters from activated paper engines
       const engines: EventEmitter[] = paperEngines;
 
+      // Dashboard engine factory: supports hot-reload of strategy config via PATCH endpoint.
+      // Creates a new PaperTradingEngine with the supplied config override, then registers
+      // it as a stoppable resource so graceful shutdown covers the new engine.
+      const dashboardEngineFactory = async (
+        strategyName: string,
+        configOverride?: Record<string, unknown>,
+      ): Promise<{ sessionId: string }> => {
+        const stratConfig: Record<string, unknown> = configOverride ?? { strategy: strategyName };
+
+        const liveFeed = new LiveDataFeed({
+          apiKey: config.coinbase.apiKeyName,
+          apiSecret: config.coinbase.apiKeySecret,
+        });
+        const paperConfig = parsePaperConfig({
+          pair,
+          timeframe,
+          strategyConfig: stratConfig,
+          initialCapital: capital,
+        });
+        const engine = new PaperTradingEngine({
+          config: paperConfig,
+          liveFeed,
+          sessionStore,
+          strategyRegistry: registry,
+          indicatorEngine,
+          riskManager,
+        });
+        const session = await engine.start();
+        paperEngines.push(engine);
+        resources.push({
+          name: `paper-engine:${strategyName}`,
+          stop: async () => { await engine.stop(); },
+        });
+        return { sessionId: session.id };
+      };
+
       const server = await createDashboardServer(dashboardConfig, {
         liveStateStore,
         sessionStore,
         activationBridge,
         riskManager,
         engines,
+        engineFactory: dashboardEngineFactory,
       });
 
       await server.start();
