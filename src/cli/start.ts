@@ -11,8 +11,6 @@
  * order, closes the dashboard, and releases the database connection.
  */
 
-import fs from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { Command } from 'commander';
 import { bootstrap } from './shared/bootstrap.js';
 import { out } from './shared/output.js';
@@ -299,12 +297,6 @@ program
       // ── Step 4: Dashboard ──────────────────────────────────────
 
       out.step(4, totalSteps, 'Starting dashboard...');
-
-      // Auto-build UI if Vite bundle is missing
-      if (!fs.existsSync('dist/dashboard/index.html')) {
-        out.info('Building dashboard UI...');
-        spawnSync('npm', ['--prefix', 'src/dashboard/ui', 'run', 'build'], { stdio: 'inherit' });
-      }
 
       const liveStateStore = new LiveStateStore({
         dbPath: config.database.path,

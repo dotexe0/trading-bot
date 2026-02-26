@@ -17,7 +17,7 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: '../../dist/dashboard',
+    outDir: '../../../dist/dashboard',
     emptyOutDir: true,
   },
 });

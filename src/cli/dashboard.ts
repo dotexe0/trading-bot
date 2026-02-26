@@ -8,8 +8,7 @@
  * configured port.
  */
 
-import fs from 'node:fs';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { Command } from 'commander';
 import { bootstrap } from './shared/bootstrap.js';
 import { out } from './shared/output.js';
@@ -47,12 +46,6 @@ program
         });
         vite.on('error', (err) => out.warn(`Vite error: ${err.message}`));
         process.on('exit', () => { try { vite.kill(); } catch { /* ignore */ } });
-      }
-
-      // Prod mode: auto-build UI if Vite bundle is missing
-      if (!isDev && !fs.existsSync('dist/dashboard/index.html')) {
-        out.info('Building dashboard UI...');
-        spawnSync('npm', ['--prefix', 'src/dashboard/ui', 'run', 'build'], { stdio: 'inherit' });
       }
 
       const dashboardConfig = dashboardConfigSchema.parse({
