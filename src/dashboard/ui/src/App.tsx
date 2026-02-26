@@ -6,6 +6,7 @@ import { PositionsTable } from './components/PositionsTable.js';
 import { TradeHistory } from './components/TradeHistory.js';
 import { StrategyControls } from './components/StrategyControls.js';
 import { StrategyConfigEditor } from './components/StrategyConfigEditor.js';
+import { PortfolioHeatMap } from './components/PortfolioHeatMap.js';
 import { RiskPanel } from './components/RiskPanel.js';
 import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
@@ -318,6 +319,11 @@ function App(): React.ReactElement {
             riskConfig={riskConfig}
             circuitBreakerEvents={circuitBreakerEvents}
           />
+
+          <div className="panel">
+            <div className="panel-title">Portfolio Heat Map</div>
+            <PortfolioHeatMap />
+          </div>
 
           <StrategyControls
             strategies={strategies}
