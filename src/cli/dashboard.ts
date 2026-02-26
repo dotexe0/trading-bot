@@ -22,6 +22,8 @@ import { ActivationBridge } from '../tournament/activation-bridge.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { CorrelationStore } from '../correlation/correlation-store.js';
+import { BacktestStore } from '../backtest/backtest-store.js';
+import { CandleRepository } from '../data/storage/candle-repo.js';
 
 const program = new Command();
 
@@ -67,6 +69,8 @@ program
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
       const correlationStore = new CorrelationStore({ dbPath: config.database.path });
+      const backtestStore = new BacktestStore({ dbPath: config.database.path });
+      const repo = new CandleRepository(dbConn.db);
 
       out.step(1, 2, 'Creating dashboard server');
 
@@ -77,6 +81,8 @@ program
         riskManager,
         engines: [],
         correlationStore,
+        backtestStore,
+        repo,
       });
 
       // Register SIGINT handler for graceful shutdown
@@ -92,6 +98,7 @@ program
           out.error(err instanceof Error ? err.message : String(err));
         } finally {
           try { correlationStore.close(); } catch { /* ignore */ }
+          try { backtestStore.close(); } catch { /* ignore */ }
           dbConn.sqlite.close();
           process.exit(0);
         }
