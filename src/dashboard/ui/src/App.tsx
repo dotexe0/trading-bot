@@ -5,6 +5,7 @@ import { EquityCurve } from './components/EquityCurve.js';
 import { PositionsTable } from './components/PositionsTable.js';
 import { TradeHistory } from './components/TradeHistory.js';
 import { StrategyControls } from './components/StrategyControls.js';
+import { StrategyConfigEditor } from './components/StrategyConfigEditor.js';
 import { RiskPanel } from './components/RiskPanel.js';
 import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
@@ -323,6 +324,11 @@ function App(): React.ReactElement {
             onStart={handleStrategyStart}
             onStop={handleStrategyStop}
           />
+
+          <div className="panel">
+            <div className="panel-title">Strategy Config</div>
+            <StrategyConfigEditor strategies={strategies} />
+          </div>
 
           <div className="panel">
             <div className="panel-title">Sessions</div>
