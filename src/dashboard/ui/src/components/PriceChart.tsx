@@ -106,6 +106,13 @@ export const PriceChart = forwardRef<PriceChartHandle, PriceChartProps>(
       };
     }, []); // Intentionally no deps — chart created once
 
+    // Clear chart when pair changes so stale candles don't persist
+    useEffect(() => {
+      if (seriesRef.current) {
+        seriesRef.current.setData([]);
+      }
+    }, [pair]);
+
     // Update series when initialData changes
     useEffect(() => {
       if (seriesRef.current && initialData.length > 0) {
