@@ -17,6 +17,9 @@ import type { LiveStateStore } from '../../live/state-store.js';
 import type { SessionStore } from '../../paper/session-store.js';
 import type { ActivationBridge } from '../../tournament/activation-bridge.js';
 import type { RiskManager } from '../../risk/risk-manager.js';
+import type { BacktestStore } from '../../backtest/backtest-store.js';
+import type { CorrelationStore } from '../../correlation/correlation-store.js';
+import type { CandleRepository } from '../../data/storage/candle-repo.js';
 import {
   toApiSession,
   toApiPaperSession,
@@ -33,6 +36,7 @@ import { registerPositionRoutes } from './routes/positions.js';
 import { registerRiskRoutes } from './routes/risk.js';
 import { registerStrategyRoutes } from './routes/strategies.js';
 import { registerKillSwitchRoutes } from './routes/kill-switch.js';
+import { registerBacktestRoutes } from './routes/backtests.js';
 
 const log = createModuleLogger('dashboard-server');
 
@@ -46,7 +50,10 @@ export interface DashboardDeps {
   /** Engine event emitters to subscribe to for real-time broadcasting. */
   engines: EventEmitter[];
   /** Callback to start a strategy by name. Returns session info. */
-  engineFactory?: (strategyName: string) => Promise<{ sessionId: string }>;
+  engineFactory?: (strategyName: string, configOverride?: Record<string, unknown>) => Promise<{ sessionId: string }>;
+  backtestStore?: BacktestStore;
+  correlationStore?: CorrelationStore;
+  repo?: CandleRepository;
 }
 
 export interface RouteDeps {
@@ -54,7 +61,10 @@ export interface RouteDeps {
   sessionStore: SessionStore;
   activationBridge: ActivationBridge;
   riskManager?: RiskManager;
-  engineFactory?: (strategyName: string) => Promise<{ sessionId: string }>;
+  engineFactory?: (strategyName: string, configOverride?: Record<string, unknown>) => Promise<{ sessionId: string }>;
+  backtestStore?: BacktestStore;
+  correlationStore?: CorrelationStore;
+  repo?: CandleRepository;
 }
 
 export interface DashboardServer {
@@ -137,6 +147,9 @@ export async function createDashboardServer(
     activationBridge: deps.activationBridge,
     riskManager: deps.riskManager,
     engineFactory: deps.engineFactory,
+    backtestStore: deps.backtestStore,
+    correlationStore: deps.correlationStore,
+    repo: deps.repo,
   };
 
   // Register WebSocket handler
@@ -154,6 +167,7 @@ export async function createDashboardServer(
   await registerRiskRoutes(app, routeDeps);
   await registerStrategyRoutes(app, routeDeps);
   await registerKillSwitchRoutes(app, routeDeps);
+  await registerBacktestRoutes(app, routeDeps);
 
   // Health check
   app.get('/api/health', async () => {

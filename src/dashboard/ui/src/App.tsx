@@ -8,6 +8,7 @@ import { StrategyControls } from './components/StrategyControls.js';
 import { RiskPanel } from './components/RiskPanel.js';
 import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
+import { BacktestViewer } from './components/BacktestViewer.js';
 import type {
   CircuitBreakerEvent,
   EquityPoint,
@@ -360,6 +361,14 @@ function App(): React.ReactElement {
         <div className="panel">
           <div className="panel-title">Trade History</div>
           <TradeHistory trades={trades} />
+        </div>
+      </div>
+
+      {/* Backtest Viewer */}
+      <div className="dashboard-bottom">
+        <div className="panel">
+          <div className="panel-title">Backtest Viewer</div>
+          <BacktestViewer />
         </div>
       </div>
 
