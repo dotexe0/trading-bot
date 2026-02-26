@@ -9,6 +9,7 @@
  */
 
 import fs from 'node:fs';
+import { spawn, spawnSync } from 'node:child_process';
 import { Command } from 'commander';
 import { bootstrap } from './shared/bootstrap.js';
 import { out } from './shared/output.js';
@@ -28,7 +29,7 @@ program
   .name('dashboard')
   .description('Start the dashboard web server (REST API + WebSocket + UI)')
   .option('--port <port>', 'Server port', '3001')
-  .option('--dev', 'Enable development mode (CORS open, no static files)')
+  .option('--dev', 'Dev mode: spawn Vite dev server + API server (open http://localhost:5173)')
   .action(async (opts) => {
     const { config, dbConn } = bootstrap();
 
@@ -36,10 +37,20 @@ program
       const port = parseInt(opts.port, 10);
       const isDev = opts.dev === true;
 
-      // Warn if UI build is missing (non-dev mode)
+      // Dev mode: spawn Vite dev server alongside the API server
+      if (isDev) {
+        const vite = spawn('npm', ['--prefix', 'src/dashboard/ui', 'run', 'dev'], {
+          stdio: 'inherit',
+          shell: process.platform === 'win32',
+        });
+        vite.on('error', (err) => out.warn(`Vite error: ${err.message}`));
+        process.on('exit', () => { try { vite.kill(); } catch { /* ignore */ } });
+      }
+
+      // Prod mode: auto-build UI if dist is missing
       if (!isDev && !fs.existsSync('dist/dashboard')) {
-        out.warn('Dashboard UI not built. Run: npm --prefix src/dashboard/ui run build');
-        out.info('API endpoints will still work.');
+        out.info('Building dashboard UI...');
+        spawnSync('npm', ['--prefix', 'src/dashboard/ui', 'run', 'build'], { stdio: 'inherit' });
       }
 
       const dashboardConfig = dashboardConfigSchema.parse({
@@ -89,9 +100,11 @@ program
       out.step(2, 2, 'Starting server');
       const address = await server.start();
 
-      out.success(`Dashboard running at http://localhost:${port}`);
       if (isDev) {
-        out.info('Development mode: CORS enabled, no static files');
+        out.success(`API server running at http://localhost:${port}`);
+        out.info('UI dev server starting at http://localhost:5173 (open this in your browser)');
+      } else {
+        out.success(`Dashboard running at http://localhost:${port}`);
       }
       out.info('Press Ctrl+C to stop');
 
