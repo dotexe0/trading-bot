@@ -287,3 +287,30 @@ export const correlationSnapshots = sqliteTable(
     ),
   ],
 );
+
+// -- Backtest Run Tables --
+
+export const backtestRuns = sqliteTable(
+  'backtest_runs',
+  {
+    id: text('id').primaryKey(),
+    strategyName: text('strategy_name').notNull(),
+    pair: text('pair').notNull(),
+    timeframe: text('timeframe').notNull(),
+    startTimestamp: integer('start_timestamp').notNull(),
+    endTimestamp: integer('end_timestamp').notNull(),
+    initialCapital: text('initial_capital').notNull(),
+    finalEquity: text('final_equity').notNull(),
+    totalFees: text('total_fees').notNull(),
+    tradeCount: integer('trade_count').notNull(),
+    configJson: text('config_json').notNull(),
+    tradesJson: text('trades_json').notNull(),
+    equityJson: text('equity_json').notNull(),
+    regimeBreakdownJson: text('regime_breakdown_json'),
+    createdAt: integer('created_at').notNull(),
+  },
+  (table) => [
+    index('idx_backtest_runs_strategy').on(table.strategyName),
+    index('idx_backtest_runs_created').on(table.createdAt),
+  ],
+);

@@ -16,6 +16,7 @@ import { MonteCarloEngine } from '../montecarlo/monte-carlo-engine.js';
 import { MonteCarloStore } from '../montecarlo/monte-carlo-store.js';
 import { RegimeStore } from '../regime/regime-store.js';
 import { MarketRegime } from '../regime/types.js';
+import { BacktestStore } from '../backtest/backtest-store.js';
 
 const program = new Command();
 
@@ -72,6 +73,12 @@ program
       });
 
       const result = engine.run(backtestConfig, candles);
+
+      // Persist backtest result
+      const backtestStore = new BacktestStore();
+      const backtestId = backtestStore.save(result);
+      backtestStore.close();
+      out.info(`Backtest saved (id: ${backtestId})`);
 
       out.banner('Backtest Results');
       out.table('Strategy', strategyName);

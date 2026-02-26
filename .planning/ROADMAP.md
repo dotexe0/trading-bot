@@ -31,7 +31,7 @@
 - [x] **Phase 12: CLI & Operations** (2/2 plans) — completed 2026-02-21
 - [x] **Phase 13: Monte Carlo Simulation** (2/2 plans) — completed 2026-02-24
 - [x] **Phase 14: Regime Detection** - Market state classification with backward-compatible strategy integration
-- [ ] **Phase 15: Correlation-Aware Sizing** - Cross-asset correlation adjustment for position sizing
+- [x] **Phase 15: Correlation-Aware Sizing** - Cross-asset correlation adjustment for position sizing
 - [ ] **Phase 16: Enhanced Dashboard** - Backtest visualization, strategy hot-reload, and portfolio heat map
 
 ## Phase Details
@@ -102,12 +102,12 @@ Plans:
   1. User can view any backtest result as a price chart with trade entry/exit markers overlaid, showing where the strategy bought and sold
   2. User can modify strategy configuration parameters in the dashboard and apply changes without restarting the bot (hot-reload)
   3. User can view a portfolio heat map showing current allocation percentages and correlation strength between BTC and ETH
-**Plans**: TBD
+**Plans**: 3 plans in 2 waves
 
 Plans:
-- [ ] 16-01: Backtest visualization component and API endpoint
-- [ ] 16-02: Strategy hot-reload with chokidar file watching
-- [ ] 16-03: Portfolio heat map component
+- [ ] 16-01-PLAN.md — BacktestStore persistence, backtest_runs schema, /api/backtests routes, BacktestViewer component with LWC v5 createSeriesMarkers
+- [ ] 16-02-PLAN.md — PATCH /api/strategies/:name/config hot-reload, StrategyConfigEditor form, engineFactory configOverride wiring
+- [ ] 16-03-PLAN.md — GET /api/portfolio/heatmap, PortfolioHeatMap CSS tiles, CorrelationStore CLI wiring, human-verify checkpoint
 
 ## Progress
 

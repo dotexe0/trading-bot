@@ -289,6 +289,31 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_corr_tf_ts
       ON correlation_snapshots (timeframe, timestamp);
+
+    -- Backtest run tables
+    CREATE TABLE IF NOT EXISTS backtest_runs (
+      id TEXT PRIMARY KEY,
+      strategy_name TEXT NOT NULL,
+      pair TEXT NOT NULL,
+      timeframe TEXT NOT NULL,
+      start_timestamp INTEGER NOT NULL,
+      end_timestamp INTEGER NOT NULL,
+      initial_capital TEXT NOT NULL,
+      final_equity TEXT NOT NULL,
+      total_fees TEXT NOT NULL,
+      trade_count INTEGER NOT NULL,
+      config_json TEXT NOT NULL,
+      trades_json TEXT NOT NULL,
+      equity_json TEXT NOT NULL,
+      regime_breakdown_json TEXT,
+      created_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_backtest_runs_strategy
+      ON backtest_runs (strategy_name);
+
+    CREATE INDEX IF NOT EXISTS idx_backtest_runs_created
+      ON backtest_runs (created_at);
   `);
 
   log.info('Database schema initialized');
