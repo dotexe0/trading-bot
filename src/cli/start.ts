@@ -11,8 +11,9 @@
  * order, closes the dashboard, and releases the database connection.
  */
 
+import fs from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { Command } from 'commander';
-import pc from 'picocolors';
 import { bootstrap } from './shared/bootstrap.js';
 import { out } from './shared/output.js';
 import { DataPipeline } from '../data/pipeline.js';
@@ -33,6 +34,7 @@ import { dashboardConfigSchema } from '../dashboard/server/config.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { CorrelationStore } from '../correlation/correlation-store.js';
+import { BacktestStore } from '../backtest/backtest-store.js';
 import type { EventEmitter } from 'node:events';
 
 // ── Resource tracking ──────────────────────────────────────────────
@@ -45,6 +47,7 @@ interface Stoppable {
 const resources: Stoppable[] = [];
 let isShuttingDown = false;
 let correlationStore: CorrelationStore | undefined;
+let backtestStore: BacktestStore | undefined;
 
 // ── Graceful shutdown ──────────────────────────────────────────────
 
@@ -73,6 +76,7 @@ async function gracefulShutdown(
   }
 
   try { correlationStore?.close(); } catch { /* ignore */ }
+  try { backtestStore?.close(); } catch { /* ignore */ }
 
   try {
     dbClose();
@@ -296,6 +300,12 @@ program
 
       out.step(4, totalSteps, 'Starting dashboard...');
 
+      // Auto-build UI if dist is missing
+      if (!fs.existsSync('dist/dashboard')) {
+        out.info('Building dashboard UI...');
+        spawnSync('npm', ['--prefix', 'src/dashboard/ui', 'run', 'build'], { stdio: 'inherit' });
+      }
+
       const liveStateStore = new LiveStateStore({
         dbPath: config.database.path,
       });
@@ -309,8 +319,9 @@ program
       // Collect engine EventEmitters from activated paper engines
       const engines: EventEmitter[] = paperEngines;
 
-      // Instantiate CorrelationStore for portfolio heatmap endpoint
+      // Instantiate stores for dashboard routes
       correlationStore = new CorrelationStore({ dbPath: config.database.path });
+      backtestStore = new BacktestStore({ dbPath: config.database.path });
 
       // Dashboard engine factory: supports hot-reload of strategy config via PATCH endpoint.
       // Creates a new PaperTradingEngine with the supplied config override, then registers
@@ -356,6 +367,8 @@ program
         engines,
         engineFactory: dashboardEngineFactory,
         correlationStore,
+        backtestStore,
+        repo,
       });
 
       await server.start();
