@@ -62,8 +62,8 @@ async function gracefulShutdown(
     process.exit(1);
   }, 15_000);
 
-  // Stop resources in reverse order (dashboard first, then engines)
-  for (const r of [...resources].reverse()) {
+  // Stop engines first (cease trading), then dashboard
+  for (const r of resources) {
     try {
       out.info(`Stopping ${r.name}...`);
       await r.stop();
@@ -229,6 +229,12 @@ program
       const sessionStore = new SessionStore({
         dbPath: config.database.path,
       });
+
+      // Recover any sessions left running by a previous crashed/orphaned process
+      const recovered = sessionStore.recoverRunningSessions();
+      if (recovered > 0) {
+        out.warn(`Recovered ${recovered} orphaned session(s) from previous run`);
+      }
 
       if (mode === 'none') {
         out.info('Activation mode: none (display only)');

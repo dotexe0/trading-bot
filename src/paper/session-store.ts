@@ -219,6 +219,20 @@ export class SessionStore {
   }
 
   /**
+   * Mark all currently-running sessions as stopped.
+   * Called on startup to recover from crashes or orphaned processes.
+   * Returns the number of sessions recovered.
+   */
+  recoverRunningSessions(): number {
+    const result = this.db
+      .update(paperSessions)
+      .set({ status: 'stopped', endTime: Date.now() })
+      .where(eq(paperSessions.status, 'running'))
+      .run();
+    return result.changes;
+  }
+
+  /**
    * List sessions, optionally filtered by status.
    */
   listSessions(status?: string): PaperSession[] {
