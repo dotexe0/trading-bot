@@ -38,6 +38,7 @@ import { registerStrategyRoutes } from './routes/strategies.js';
 import { registerKillSwitchRoutes } from './routes/kill-switch.js';
 import { registerBacktestRoutes } from './routes/backtests.js';
 import { registerPortfolioRoutes } from './routes/portfolio.js';
+import { registerCandleRoutes } from './routes/candles.js';
 
 const log = createModuleLogger('dashboard-server');
 
@@ -170,6 +171,7 @@ export async function createDashboardServer(
   await registerKillSwitchRoutes(app, routeDeps);
   await registerBacktestRoutes(app, routeDeps);
   await registerPortfolioRoutes(app, routeDeps);
+  await registerCandleRoutes(app, routeDeps);
 
   // Health check
   app.get('/api/health', async () => {

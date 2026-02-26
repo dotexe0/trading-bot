@@ -61,6 +61,24 @@ function App(): React.ReactElement {
     'ETH-USD': [],
   });
 
+  // ── Fetch initial candle history for both pairs ───────────────────
+  useEffect(() => {
+    void (async () => {
+      for (const pair of ['BTC-USD', 'ETH-USD'] as const) {
+        try {
+          const res = await fetch(`/api/candles?pair=${pair}&timeframe=1h&limit=500`);
+          if (res.ok) {
+            const data = (await res.json()) as CandlestickData[];
+            candleBuffers.current[pair] = data;
+          }
+        } catch { /* API not ready yet */ }
+      }
+      // Seed chart with the active pair's history
+      setChartData([...candleBuffers.current[activePair]]);
+    })();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount
+
   // ── Fetch initial data ────────────────────────────────────────────
   useEffect(() => {
     void (async () => {
