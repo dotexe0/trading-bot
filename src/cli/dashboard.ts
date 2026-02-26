@@ -49,8 +49,8 @@ program
         process.on('exit', () => { try { vite.kill(); } catch { /* ignore */ } });
       }
 
-      // Prod mode: auto-build UI if dist is missing
-      if (!isDev && !fs.existsSync('dist/dashboard')) {
+      // Prod mode: auto-build UI if Vite bundle is missing
+      if (!isDev && !fs.existsSync('dist/dashboard/index.html')) {
         out.info('Building dashboard UI...');
         spawnSync('npm', ['--prefix', 'src/dashboard/ui', 'run', 'build'], { stdio: 'inherit' });
       }

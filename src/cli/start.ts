@@ -300,8 +300,8 @@ program
 
       out.step(4, totalSteps, 'Starting dashboard...');
 
-      // Auto-build UI if dist is missing
-      if (!fs.existsSync('dist/dashboard')) {
+      // Auto-build UI if Vite bundle is missing
+      if (!fs.existsSync('dist/dashboard/index.html')) {
         out.info('Building dashboard UI...');
         spawnSync('npm', ['--prefix', 'src/dashboard/ui', 'run', 'build'], { stdio: 'inherit' });
       }
