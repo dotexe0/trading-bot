@@ -20,6 +20,7 @@ import { TournamentStore } from '../tournament/tournament-store.js';
 import { ActivationBridge } from '../tournament/activation-bridge.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
+import { CorrelationStore } from '../correlation/correlation-store.js';
 
 const program = new Command();
 
@@ -54,6 +55,7 @@ program
 
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
+      const correlationStore = new CorrelationStore({ dbPath: config.database.path });
 
       out.step(1, 2, 'Creating dashboard server');
 
@@ -63,6 +65,7 @@ program
         activationBridge,
         riskManager,
         engines: [],
+        correlationStore,
       });
 
       // Register SIGINT handler for graceful shutdown
@@ -77,6 +80,7 @@ program
         } catch (err) {
           out.error(err instanceof Error ? err.message : String(err));
         } finally {
+          try { correlationStore.close(); } catch { /* ignore */ }
           dbConn.sqlite.close();
           process.exit(0);
         }

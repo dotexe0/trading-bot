@@ -32,6 +32,7 @@ import { createDashboardServer } from '../dashboard/server/index.js';
 import { dashboardConfigSchema } from '../dashboard/server/config.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
+import { CorrelationStore } from '../correlation/correlation-store.js';
 import type { EventEmitter } from 'node:events';
 
 // ── Resource tracking ──────────────────────────────────────────────
@@ -43,6 +44,7 @@ interface Stoppable {
 
 const resources: Stoppable[] = [];
 let isShuttingDown = false;
+let correlationStore: CorrelationStore | undefined;
 
 // ── Graceful shutdown ──────────────────────────────────────────────
 
@@ -69,6 +71,8 @@ async function gracefulShutdown(
       out.error(`Failed to stop ${r.name}: ${err}`);
     }
   }
+
+  try { correlationStore?.close(); } catch { /* ignore */ }
 
   try {
     dbClose();
@@ -305,6 +309,9 @@ program
       // Collect engine EventEmitters from activated paper engines
       const engines: EventEmitter[] = paperEngines;
 
+      // Instantiate CorrelationStore for portfolio heatmap endpoint
+      correlationStore = new CorrelationStore({ dbPath: config.database.path });
+
       // Dashboard engine factory: supports hot-reload of strategy config via PATCH endpoint.
       // Creates a new PaperTradingEngine with the supplied config override, then registers
       // it as a stoppable resource so graceful shutdown covers the new engine.
@@ -348,6 +355,7 @@ program
         riskManager,
         engines,
         engineFactory: dashboardEngineFactory,
+        correlationStore,
       });
 
       await server.start();
