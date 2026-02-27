@@ -4,7 +4,7 @@
  * Connects LiveDataFeed (data in) through strategy evaluation and risk
  * management to SessionStore (data out). Reuses all existing backtest
  * infrastructure: FillSimulator, PortfolioTracker, RiskManager,
- * PositionSizer, StopLossTracker.
+ * PositionSizer, StopLossTracker (or ExitLogicManager when exits config present).
  *
  * Key difference from BacktestEngine: signals are filled at the completed
  * candle's close price (with slippage), rather than next-bar open.
@@ -34,6 +34,8 @@ import { createModuleLogger } from '../core/logger.js';
 import { RegimeClassifier } from '../regime/classifier.js';
 import { CorrelationCalculator, CorrelationStore } from '../correlation/index.js';
 import type { CorrelationConfig } from '../correlation/index.js';
+import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
+import type { ExitConfig } from '../risk/exit-logic/types.js';
 
 const log = createModuleLogger('paper-engine');
 
@@ -68,6 +70,9 @@ export class PaperTradingEngine extends EventEmitter {
   private fillSimulator!: FillSimulator;
   private positionSizer?: PositionSizer;
   private stopLossTrackers: Map<string, StopLossTracker> = new Map();
+  private exitManager: ExitLogicManager | null = null;
+  private exitConfig: ExitConfig | null = null;
+  private hasExits = false;
   private candleBuffer: Map<string, Candle[]> = new Map();
   private session: PaperSession | null = null;
   private isRunning = false;
@@ -105,6 +110,12 @@ export class PaperTradingEngine extends EventEmitter {
   async start(): Promise<PaperSession> {
     // Create strategy from config
     this.strategy = this.strategyRegistry.create(this.config.strategyConfig);
+
+    // Extract exit config from strategy config
+    const rawExits = (this.config.strategyConfig as Record<string, unknown>).exits;
+    this.exitConfig = parseExitConfig(rawExits !== undefined ? { exits: rawExits } : {});
+    this.hasExits = this.exitConfig.exits.trailing.enabled || this.exitConfig.exits.partial.enabled ||
+                    this.exitConfig.exits.time.enabled || this.exitConfig.exits.atrStop.enabled;
 
     // Create session
     this.session = this.sessionStore.createSession(
@@ -242,52 +253,57 @@ export class PaperTradingEngine extends EventEmitter {
       return;
     }
 
-    // 2. Stop-loss check (before strategy evaluation)
-    if (this.riskManager && !this.portfolio.isFlat()) {
-      for (const [trackerKey, tracker] of this.stopLossTrackers) {
-        const check = tracker.check({
-          low: candle.low,
-          high: candle.high,
-          close: candle.close,
-        });
+    // 2. Exit logic / stop-loss check (before strategy evaluation)
+    if (!this.portfolio.isFlat()) {
+      if (this.hasExits && this.exitManager && this.exitConfig) {
+        // Compute ATR for exit logic
+        const atrOutput = this.indicatorEngine.compute(
+          { name: 'ATR', period: this.exitConfig.exits.atrStop.atrPeriod },
+          buffer,
+        );
+        const currentAtr = atrOutput.values.length > 0
+          ? d(atrOutput.values[atrOutput.values.length - 1] as number)
+          : null;
 
-        if (check.triggered) {
+        const exitAction = this.exitManager.check({
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          timestamp: candle.timestamp,
+        }, currentAtr);
+
+        if (exitAction.type === 'full_exit') {
           log.warn(
             {
               sessionId: this.session.id,
               pair: candle.pair,
-              stopPrice: check.stopPrice.toString(),
+              reason: exitAction.reason,
+              fillPrice: exitAction.fillPrice.toString(),
             },
-            'Stop-loss triggered',
+            'Exit logic triggered (full)',
           );
 
-          // Synthetic close signal at stop price
-          const stopSignal: Signal = {
-            strategyName: '__stop-loss',
+          const exitSignal: Signal = {
+            strategyName: `__exit-logic-${exitAction.reason}`,
             pair: candle.pair,
             timeframe: candle.timeframe,
             timestamp: candle.timestamp,
             direction: 'close',
             confidence: 1,
-            reasoning: `Stop-loss triggered at ${check.stopPrice.toFixed(2)}`,
+            reasoning: `Exit logic: ${exitAction.reason} at ${exitAction.fillPrice.toFixed(2)}`,
           };
 
           const positionSize = this.portfolio.getState().position.abs();
-
-          // Fill candle with open = stop price for realistic fill
-          const stopFillCandle: Candle = {
-            ...candle,
-            open: check.stopPrice.toFixed(8),
-          };
-
-          const fill = this.fillSimulator.simulate(stopSignal, stopFillCandle, positionSize);
+          const exitFillCandle: Candle = { ...candle, open: exitAction.fillPrice.toFixed(8) };
+          const fill = this.fillSimulator.simulate(exitSignal, exitFillCandle, positionSize);
           this.portfolio.applyFill(fill);
 
           // Record completed trade
           this.recordLatestTrade();
 
           this.emit('orderFilled', {
-            purpose: 'STOP_LOSS',
+            purpose: 'EXIT',
             pair: candle.pair,
             side: 'SELL',
             fillPrice: fill.fillPrice.toString(),
@@ -296,9 +312,107 @@ export class PaperTradingEngine extends EventEmitter {
             timestamp: candle.timestamp,
           });
 
-          this.stopLossTrackers.delete(trackerKey);
+          this.exitManager = null;
           this.positionDirection = null;
-          break;
+        } else if (exitAction.type === 'partial_exit') {
+          log.info(
+            {
+              sessionId: this.session.id,
+              pair: candle.pair,
+              fillPrice: exitAction.fillPrice.toString(),
+              fraction: exitAction.fraction.toString(),
+            },
+            'Exit logic triggered (partial)',
+          );
+
+          const partialSignal: Signal = {
+            strategyName: '__exit-logic-partial',
+            pair: candle.pair,
+            timeframe: candle.timeframe,
+            timestamp: candle.timestamp,
+            direction: 'close',
+            confidence: 1,
+            reasoning: `Partial exit at ${exitAction.fillPrice.toFixed(2)}`,
+          };
+
+          const positionSize = this.portfolio.getState().position.abs();
+          const partialFillCandle: Candle = { ...candle, open: exitAction.fillPrice.toFixed(8) };
+          const partialFill = this.fillSimulator.simulate(partialSignal, partialFillCandle, positionSize);
+          this.portfolio.applyPartialClose(partialFill, exitAction.fraction);
+
+          // Record the partial close trade
+          this.recordLatestTrade();
+
+          this.emit('orderFilled', {
+            purpose: 'PARTIAL_EXIT',
+            pair: candle.pair,
+            side: 'SELL',
+            fillPrice: partialFill.fillPrice.toString(),
+            quantity: partialFill.quantity.toString(),
+            fee: partialFill.fee.toString(),
+            timestamp: candle.timestamp,
+          });
+
+          // Do NOT clear exitManager -- position still open
+        }
+      } else if (!this.hasExits && this.riskManager) {
+        // Backward-compat: use existing StopLossTracker path
+        for (const [trackerKey, tracker] of this.stopLossTrackers) {
+          const check = tracker.check({
+            low: candle.low,
+            high: candle.high,
+            close: candle.close,
+          });
+
+          if (check.triggered) {
+            log.warn(
+              {
+                sessionId: this.session.id,
+                pair: candle.pair,
+                stopPrice: check.stopPrice.toString(),
+              },
+              'Stop-loss triggered',
+            );
+
+            // Synthetic close signal at stop price
+            const stopSignal: Signal = {
+              strategyName: '__stop-loss',
+              pair: candle.pair,
+              timeframe: candle.timeframe,
+              timestamp: candle.timestamp,
+              direction: 'close',
+              confidence: 1,
+              reasoning: `Stop-loss triggered at ${check.stopPrice.toFixed(2)}`,
+            };
+
+            const positionSize = this.portfolio.getState().position.abs();
+
+            // Fill candle with open = stop price for realistic fill
+            const stopFillCandle: Candle = {
+              ...candle,
+              open: check.stopPrice.toFixed(8),
+            };
+
+            const fill = this.fillSimulator.simulate(stopSignal, stopFillCandle, positionSize);
+            this.portfolio.applyFill(fill);
+
+            // Record completed trade
+            this.recordLatestTrade();
+
+            this.emit('orderFilled', {
+              purpose: 'STOP_LOSS',
+              pair: candle.pair,
+              side: 'SELL',
+              fillPrice: fill.fillPrice.toString(),
+              quantity: fill.quantity.toString(),
+              fee: fill.fee.toString(),
+              timestamp: candle.timestamp,
+            });
+
+            this.stopLossTrackers.delete(trackerKey);
+            this.positionDirection = null;
+            break;
+          }
         }
       }
     }
@@ -400,8 +514,9 @@ export class PaperTradingEngine extends EventEmitter {
       timestamp: candle.timestamp,
     });
 
-    // Clear stop-loss tracker
+    // Clear stop-loss tracker and exit manager
     this.stopLossTrackers.clear();
+    this.exitManager = null;
     this.positionDirection = null;
   }
 
@@ -516,10 +631,27 @@ export class PaperTradingEngine extends EventEmitter {
       timestamp: candle.timestamp,
     });
 
-    // Set up stop-loss tracker if risk manager exists
-    if (this.riskManager && this.config.riskConfig) {
-      const direction = signal.direction as 'long' | 'short';
-      this.positionDirection = direction;
+    // Set up exit logic or stop-loss tracker for new position
+    const direction = signal.direction as 'long' | 'short';
+    this.positionDirection = direction;
+
+    if (this.hasExits && this.exitConfig) {
+      const key = `${candle.pair}:${candle.timeframe}`;
+      const buf = this.candleBuffer.get(key) ?? [];
+      const entryAtrOutput = this.indicatorEngine.compute(
+        { name: 'ATR', period: this.exitConfig.exits.atrStop.atrPeriod },
+        buf,
+      );
+      const entryAtr = entryAtrOutput.values.length > 0
+        ? d(entryAtrOutput.values[entryAtrOutput.values.length - 1] as number)
+        : null;
+      this.exitManager = new ExitLogicManager(
+        this.exitConfig,
+        fill.fillPrice,
+        direction,
+        entryAtr,
+      );
+    } else if (this.riskManager && this.config.riskConfig) {
       const tracker = new StopLossTracker(
         {
           type: this.config.riskConfig.stopLoss.type,
@@ -529,8 +661,6 @@ export class PaperTradingEngine extends EventEmitter {
         direction,
       );
       this.stopLossTrackers.set(this.config.pair, tracker);
-    } else {
-      this.positionDirection = signal.direction as 'long' | 'short';
     }
 
     log.info(
@@ -581,6 +711,7 @@ export class PaperTradingEngine extends EventEmitter {
     this.recordLatestTrade();
 
     this.stopLossTrackers.clear();
+    this.exitManager = null;
     this.positionDirection = null;
 
     log.info(
