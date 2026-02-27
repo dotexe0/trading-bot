@@ -50,10 +50,11 @@ describe('TrailingProfitExit', () => {
       const trail = new TrailingProfitExit(defaultConfig, d(100), 'long');
       trail.check({ high: '102', low: '99', close: '101.5' }, d(1));
 
-      // Next candle: high=104, low=101, ATR=1.0
+      // Next candle: high=104, low=102.5, ATR=1.0
       // → HWM=104, trailingStop = 104 - 2*1 = 102
+      // low=102.5 stays above stop=102 → no exit
       const result = trail.check(
-        { high: '104', low: '101', close: '103' },
+        { high: '104', low: '102.5', close: '103' },
         d(1),
       );
       expect(result.type).toBe('none');
@@ -63,11 +64,9 @@ describe('TrailingProfitExit', () => {
     it('returns none when low stays above trailing stop', () => {
       const trail = new TrailingProfitExit(defaultConfig, d(100), 'long');
       trail.check({ high: '102', low: '99', close: '101.5' }, d(1));
-      trail.check({ high: '104', low: '101', close: '103' }, d(1));
+      trail.check({ high: '104', low: '102.5', close: '103' }, d(1));
 
-      // trailingStop=102, candle low=101.9 (not breached, 101.9 > 102 is false but 101.9 < 102 is true)
-      // Wait: 101.9 < 102 → would trigger
-      // Let's use low=102.1 which stays above 102
+      // trailingStop=102, candle low=102.1 stays above 102 → no exit
       const result = trail.check(
         { high: '104', low: '102.1', close: '103' },
         d(1),
@@ -78,7 +77,7 @@ describe('TrailingProfitExit', () => {
     it('triggers full_exit when low breaches trailing stop', () => {
       const trail = new TrailingProfitExit(defaultConfig, d(100), 'long');
       trail.check({ high: '102', low: '99', close: '101.5' }, d(1));
-      trail.check({ high: '104', low: '101', close: '103' }, d(1));
+      trail.check({ high: '104', low: '102.5', close: '103' }, d(1));
 
       // trailingStop=102, candle low=101.5 (< 102) → triggers
       const result = trail.check(
