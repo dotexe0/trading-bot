@@ -50,6 +50,7 @@ function App(): React.ReactElement {
   const [cbTriggeredAt, setCbTriggeredAt] = useState<number | undefined>(undefined);
   const [activePair, setActivePair] = useState<'BTC-USD' | 'ETH-USD'>('BTC-USD');
   const [chartData, setChartData] = useState<CandlestickData[]>([]);
+  const [equityVersion, setEquityVersion] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
 
   // ── Chart refs for imperative updates ────────────────────────────
@@ -186,6 +187,7 @@ function App(): React.ReactElement {
             equity: eq.equity,
           };
           setEquity((prev) => [...prev, point]);
+          setEquityVersion((v) => v + 1); // trigger PortfolioStats refresh
           if (equityCurveRef.current) {
             equityCurveRef.current.update({
               time: Math.floor(eq.timestamp / 1000) as Time,
@@ -326,7 +328,10 @@ function App(): React.ReactElement {
     <>
       <Header status={status} isMuted={isMuted} onMuteToggle={() => setIsMuted((m) => !m)} />
 
-      <PortfolioStats equity={equity} sessions={sessions} />
+      <PortfolioStats
+        mode={sessions.find((s) => s.status === 'running')?.mode ?? 'paper'}
+        refreshToken={equityVersion}
+      />
 
       <CircuitBreakerBanner
         isActive={cbBannerActive}
