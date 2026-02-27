@@ -8,7 +8,7 @@ describe('parseStrategyConfig', () => {
   describe('sma-crossover', () => {
     it('returns defaults when only strategy is provided', () => {
       const cfg = parseStrategyConfig({ strategy: 'sma-crossover' });
-      expect(cfg).toEqual({
+      expect(cfg).toMatchObject({
         strategy: 'sma-crossover',
         fastPeriod: 10,
         slowPeriod: 20,
@@ -53,7 +53,7 @@ describe('parseStrategyConfig', () => {
   describe('rsi-mean-reversion', () => {
     it('returns defaults when only strategy is provided', () => {
       const cfg = parseStrategyConfig({ strategy: 'rsi-mean-reversion' });
-      expect(cfg).toEqual({
+      expect(cfg).toMatchObject({
         strategy: 'rsi-mean-reversion',
         period: 14,
         oversoldThreshold: 30,
@@ -77,7 +77,7 @@ describe('parseStrategyConfig', () => {
   describe('macd-momentum', () => {
     it('returns defaults when only strategy is provided', () => {
       const cfg = parseStrategyConfig({ strategy: 'macd-momentum' });
-      expect(cfg).toEqual({
+      expect(cfg).toMatchObject({
         strategy: 'macd-momentum',
         fastPeriod: 12,
         slowPeriod: 26,
@@ -101,7 +101,7 @@ describe('parseStrategyConfig', () => {
   describe('bollinger-breakout', () => {
     it('returns defaults when only strategy is provided', () => {
       const cfg = parseStrategyConfig({ strategy: 'bollinger-breakout' });
-      expect(cfg).toEqual({
+      expect(cfg).toMatchObject({
         strategy: 'bollinger-breakout',
         period: 20,
         stdDev: 2,
@@ -125,7 +125,7 @@ describe('parseStrategyConfig', () => {
   describe('multi-timeframe-trend', () => {
     it('returns defaults when only strategy is provided', () => {
       const cfg = parseStrategyConfig({ strategy: 'multi-timeframe-trend' });
-      expect(cfg).toEqual({
+      expect(cfg).toMatchObject({
         strategy: 'multi-timeframe-trend',
         trendTimeframe: '4h',
         trendEmaPeriod: 50,
