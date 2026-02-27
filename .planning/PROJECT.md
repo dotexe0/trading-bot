@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A quant-grade cryptocurrency trading bot targeting Coinbase Advanced Trade API, built with TypeScript/Node.js. It runs automated trading strategies on BTC and ETH pairs, selected through empirical backtesting tournaments. The system covers the full lifecycle: historical data collection, backtesting, paper trading, live trading, and a web dashboard for monitoring and control.
+A quant-grade cryptocurrency trading bot targeting Coinbase Advanced Trade API, built with TypeScript/Node.js. It runs automated trading strategies on BTC-USD and ETH-USD, selected through empirical backtesting tournaments with walk-forward validation. The system covers the full lifecycle: historical data ingestion, technical indicator computation, strategy evaluation, backtesting, Monte Carlo robustness testing, risk management with correlation-aware sizing, paper trading, live trading, tournament-based strategy selection with regime detection, and a real-time web dashboard with backtest visualization and portfolio heat map.
 
 ## Core Value
 
@@ -12,58 +12,86 @@ The bot must reliably execute trades with correct position sizing, risk limits, 
 
 ### Validated
 
-(None yet — ship to validate)
+- ✓ Historical data pipeline with multi-timeframe aggregation and validation — v1.0
+- ✓ 7 technical indicators (SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, ATR) with multi-timeframe support — v1.0
+- ✓ 5 built-in strategies with typed interface and schema-validated configuration — v1.0
+- ✓ Event-driven backtesting with walk-forward optimization and no lookahead bias — v1.0
+- ✓ Full risk framework: Kelly criterion sizing, trailing stops, drawdown circuit breaker, exposure caps — v1.0
+- ✓ Paper trading with local simulation and Coinbase sandbox integration — v1.0
+- ✓ Live trading with crash recovery, reconciliation, and graceful shutdown — v1.0
+- ✓ Tournament-based strategy selection with automated deployment — v1.0
+- ✓ Real-time web dashboard with price charts, equity curves, strategy controls, and kill switch — v1.0
+- ✓ All financial math uses decimal precision (decimal.js, 20-digit precision) — v1.0
+- ✓ Single CLI orchestrator (`npm start`) starts entire system in dependency order — v1.1
+- ✓ Individual CLI commands (`npm run sync/backtest/tournament/paper/live/dashboard`) for each subsystem — v1.1
+- ✓ Monte Carlo simulation with Fisher-Yates shuffling and percentile distributions for strategy robustness — v1.1
+- ✓ Tournament ranking uses MC-adjusted composite p5 Sharpe scoring — v1.1
+- ✓ Market regime classification (TRENDING/RANGING/VOLATILE) via ADX+ATR, backward-compatible — v1.1
+- ✓ Rolling Pearson correlation between BTC and ETH with configurable window — v1.1
+- ✓ Correlation-aware position sizing (PositionSizer scales down when assets are correlated) — v1.1
+- ✓ Backtest visualization in dashboard with BacktestViewer — v1.1
+- ✓ Strategy hot-reload via PATCH API without bot restart — v1.1
+- ✓ Portfolio heat map with HSL tile colors and correlation badge overlay — v1.1
 
 ### Active
 
-- [ ] Backtest multiple strategies against historical BTC/ETH data
-- [ ] Tournament-based strategy selection — data picks the winners
-- [ ] Multi-timeframe analysis (1m to 1D candles)
-- [ ] Full risk framework: position-level stops + portfolio-level circuit breakers
-- [ ] Paper trading with local simulation and Coinbase sandbox
-- [ ] Fully automated live trading via Coinbase Advanced Trade API
-- [ ] Web dashboard with PnL metrics, equity curves, and strategy controls
-- [ ] Historical data pipeline: external providers for bulk + Coinbase for recent, cached locally
-- [ ] Kelly criterion or fixed-fraction position sizing
-- [ ] Max drawdown circuit breaker and exposure caps
+_(None — v1.1 complete. Define with `/gsd:new-milestone` for v1.2+)_
 
 ### Out of Scope
 
-- Mobile app — web dashboard is sufficient for v1
+- Mobile app — web dashboard works on mobile browser
 - Altcoins beyond BTC/ETH — keeping universe small for reliability
 - High-frequency/market-making — latency requirements incompatible with local deployment
-- Push notifications (Discord/Telegram/email) — dashboard-only monitoring for v1
+- Push notifications (Discord/Telegram) — dashboard-only monitoring, deferred to v2.0+
 - Cloud deployment — runs locally, cloud is a future consideration
-- Manual trade approval workflow — fully automated, no semi-auto mode
+- AI/ML price prediction — overfitting trap for personal use
+- Multi-exchange support — Coinbase only reduces complexity
+- Options/futures — different instruments with different risk models
+- Advanced analytics (Sortino, Calmar, Omega) — deferred to v2.0+
 
 ## Context
 
-- **Exchange**: Coinbase Advanced Trade (REST + WebSocket APIs)
-- **Asset universe**: BTC-USD and ETH-USD pairs only
-- **Capital range**: $1K-$10K — meaningful but manageable risk
-- **Deployment**: Local machine, always-on during trading
-- **Data sources**: CryptoCompare or similar for deep historical data, Coinbase API for recent/live data, SQLite or similar for local cache
-- **Strategy philosophy**: Strategy-agnostic framework. Momentum, mean reversion, and other approaches compete in backtesting tournaments. Best empirical performers get deployed.
-- **Paper trading**: Dual-mode — local simulation engine for fast iteration, plus Coinbase sandbox for realistic order fill testing
+Shipped v1.1 with ~27,300 LOC TypeScript across ~170 files.
+
+**v1.0 baseline:** 55,764 LOC, 149 files, 773 tests
+**v1.1 additions:** +5,520 net lines, 68 files changed, 444 tests passing
+
+**Tech stack:** TypeScript/Node.js (ESM), better-sqlite3 + Drizzle ORM, Fastify + React 19 + Vite 6, Lightweight Charts v5, decimal.js, simple-statistics, fast-technical-indicators, coinbase-api (tiagosiebler), Zod v4, Pino, Vitest.
+
+**Architecture:** Event-driven with interface abstraction — strategy code runs identically in backtest, paper, and live modes. EventEmitter pipeline connects trading engines to dashboard via WebSocket. All subsystems in a single Node.js process (avoids SQLite BUSY).
+
+**Test coverage:** 444 tests across 40 test files (all passing).
 
 ## Constraints
 
 - **Tech stack**: TypeScript/Node.js — developer preference
-- **Exchange**: Coinbase Advanced Trade API only — no multi-exchange support
+- **Exchange**: Coinbase Advanced Trade API only
 - **Latency**: Not optimized for sub-second execution; intraday to swing timeframes
-- **Budget**: Minimal infrastructure cost — local deployment, free data tiers where possible
-- **Security**: API keys must be stored securely, never in source control
+- **Budget**: Minimal infrastructure cost — local deployment, free data tiers
+- **Security**: API keys in .env, never in source control
 
 ## Key Decisions
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| TypeScript/Node.js | Developer preference, good async I/O for WebSocket streams | — Pending |
-| Coinbase Advanced Trade API | Current primary Coinbase trading API | — Pending |
-| BTC + ETH only | High liquidity, simpler universe management, lower complexity | — Pending |
-| Tournament-based strategy selection | Let data decide — removes emotional bias from strategy choice | — Pending |
-| Local deployment | Lower cost, acceptable for non-HFT strategies | — Pending |
-| Full risk framework | $1K-$10K capital requires disciplined risk management | — Pending |
+| TypeScript/Node.js | Developer preference, good async I/O for WebSocket streams | ✓ Good — 27K LOC, type safety caught many bugs |
+| Coinbase Advanced Trade API | Current primary Coinbase trading API | ✓ Good — REST + WebSocket worked well |
+| BTC + ETH only | High liquidity, simpler universe management | ✓ Good — kept scope manageable |
+| better-sqlite3 | Synchronous API fast for backtest loops | ✓ Good — zero overhead in hot path |
+| decimal.js (20-digit precision) | Financial math must not use floats | ✓ Good — 0.1+0.2=0.3 confirmed |
+| Custom backtest engine | No good TS backtesting library exists | ✓ Good — full control over event replay |
+| fast-technical-indicators | ESM-compatible drop-in for technicalindicators | ⚠️ Revisit — required createRequire workaround for broken ESM entry |
+| Fastify + React + Lightweight Charts | Dashboard stack | ✓ Good — fast server, imperative chart refs for real-time updates |
+| coinbase-api (tiagosiebler) | Well-maintained Coinbase SDK | ✓ Good — handles auth, WebSocket reconnect |
+| Event-driven architecture | Strategy code identical in backtest/paper/live | ✓ Good — core architectural win |
+| Tournament-based strategy selection | Let data decide — removes emotional bias | ✓ Good — walk-forward prevents overfitting |
+| Kelly criterion position sizing | Optimal geometric growth rate | ✓ Good — half-Kelly default is conservative |
+| Single-process architecture (v1.1) | All subsystems in one Node.js process | ✓ Good — avoids SQLite BUSY errors, simplifies shutdown |
+| Push-order shutdown (v1.1) | Engines stop before dashboard | ✓ Good — avoids race conditions on Ctrl+C |
+| Composite MC p5 Sharpe (v1.1) | 30% MC weight, penalize unstable strategies | ✓ Good — conservative default from research |
+| Optional regime param on IStrategy (v1.1) | Backward-compatible regime detection | ✓ Good — all 5 strategies work unchanged |
+| Native number in MC hot loop (v1.1) | Performance in simulation loop | ✓ Good — 1000 iter × 50 trades < 5ms |
+| Conditional pre-script UI build (v1.1) | Only rebuild when index.html missing | ✓ Good — fast `npm start` on subsequent runs |
 
 ---
-*Last updated: 2026-02-09 after initialization*
+*Last updated: 2026-02-26 after v1.1 milestone*
