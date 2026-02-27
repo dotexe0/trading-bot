@@ -34,6 +34,8 @@ import { createModuleLogger } from '../core/logger.js';
 import { RegimeClassifier } from '../regime/classifier.js';
 import { CorrelationCalculator, CorrelationStore } from '../correlation/index.js';
 import type { CorrelationConfig } from '../correlation/index.js';
+import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
+import type { ExitConfig } from '../risk/exit-logic/types.js';
 
 const log = createModuleLogger('live-engine');
 
@@ -70,6 +72,7 @@ interface CurrentPosition {
   quantity: Decimal;
   entryPrice: Decimal;
   pending: boolean;
+  partialExitFired: boolean;
 }
 
 // ── LiveTradingEngine ───────────────────────────────────────────────
@@ -88,6 +91,9 @@ export class LiveTradingEngine extends EventEmitter {
   private strategy!: IStrategy;
   private positionSizer?: PositionSizer;
   private stopLossTracker: StopLossTracker | null = null;
+  private exitManager: ExitLogicManager | null = null;
+  private exitConfig: ExitConfig | null = null;
+  private hasExits = false;
   private candleBuffer: Map<string, Candle[]> = new Map();
   private session: LiveSession | null = null;
   private isRunning = false;
@@ -133,6 +139,12 @@ export class LiveTradingEngine extends EventEmitter {
   async start(): Promise<LiveSession> {
     // Create strategy from config
     this.strategy = this.strategyRegistry.create(this.config.strategyConfig);
+
+    // Extract exit config from strategy config
+    const rawExits = (this.config.strategyConfig as Record<string, unknown>).exits;
+    this.exitConfig = parseExitConfig(rawExits !== undefined ? { exits: rawExits } : {});
+    this.hasExits = this.exitConfig.exits.trailing.enabled || this.exitConfig.exits.partial.enabled ||
+                    this.exitConfig.exits.time.enabled || this.exitConfig.exits.atrStop.enabled;
 
     // Set up position sizer if risk manager available
     if (this.riskManager && this.config.riskConfig) {
@@ -272,39 +284,114 @@ export class LiveTradingEngine extends EventEmitter {
       return;
     }
 
-    // 2. Stop-loss check (before strategy evaluation)
-    if (this.currentPosition && !this.currentPosition.pending && this.stopLossTracker) {
-      const check = this.stopLossTracker.check({
-        low: candle.low,
-        high: candle.high,
-        close: candle.close,
-      });
-
-      if (check.triggered) {
-        log.warn(
-          {
-            sessionId: this.session.id,
-            pair: candle.pair,
-            stopPrice: check.stopPrice.toString(),
-          },
-          'Stop-loss triggered',
+    // 2. Exit logic / stop-loss check (before strategy evaluation)
+    if (this.currentPosition && !this.currentPosition.pending) {
+      if (this.hasExits && this.exitManager && this.exitConfig) {
+        // Compute ATR for exit logic
+        const atrOutput = this.indicatorEngine.compute(
+          { name: 'ATR', period: this.exitConfig.exits.atrStop.atrPeriod },
+          buffer,
         );
+        const currentAtr = atrOutput.values.length > 0
+          ? d(atrOutput.values[atrOutput.values.length - 1] as number)
+          : null;
 
-        // Submit close order via OrderManager
-        const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
-        this.orderManager
-          .submitMarketOrder({
-            pair: candle.pair,
-            side: closeSide,
-            baseSize: this.currentPosition.quantity.toFixed(8),
-            purpose: 'STOP_LOSS',
-          })
-          .catch((err) => {
-            log.error({ err }, 'Failed to submit stop-loss close order');
-          });
+        const exitAction = this.exitManager.check({
+          open: candle.open,
+          high: candle.high,
+          low: candle.low,
+          close: candle.close,
+          timestamp: candle.timestamp,
+        }, currentAtr);
 
-        this.stopLossTracker = null;
-        return; // Don't evaluate strategy after stop-loss
+        if (exitAction.type === 'full_exit') {
+          log.warn(
+            {
+              sessionId: this.session.id,
+              pair: candle.pair,
+              reason: exitAction.reason,
+              fillPrice: exitAction.fillPrice.toString(),
+            },
+            'Exit logic triggered (full)',
+          );
+
+          const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
+          this.orderManager
+            .submitMarketOrder({
+              pair: candle.pair,
+              side: closeSide,
+              baseSize: this.currentPosition.quantity.toFixed(8),
+              purpose: 'EXIT',
+            })
+            .catch((err) => {
+              log.error({ err }, 'Failed to submit exit order');
+            });
+
+          this.exitManager = null;
+          return; // Don't evaluate strategy after exit
+        } else if (exitAction.type === 'partial_exit') {
+          log.info(
+            {
+              sessionId: this.session.id,
+              pair: candle.pair,
+              fillPrice: exitAction.fillPrice.toString(),
+              fraction: exitAction.fraction.toString(),
+            },
+            'Exit logic triggered (partial)',
+          );
+
+          const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
+          const partialQuantity = this.currentPosition.quantity.mul(exitAction.fraction);
+          this.orderManager
+            .submitMarketOrder({
+              pair: candle.pair,
+              side: closeSide,
+              baseSize: partialQuantity.toFixed(8),
+              purpose: 'PARTIAL_EXIT',
+            })
+            .catch((err) => {
+              log.error({ err }, 'Failed to submit partial exit order');
+            });
+
+          // Reduce local quantity tracking (optimistic -- reconciliation corrects if fill differs)
+          this.currentPosition.quantity = this.currentPosition.quantity.minus(partialQuantity);
+          this.currentPosition.partialExitFired = true;
+          // Do NOT return -- continue to strategy evaluation
+        }
+      } else if (!this.hasExits && this.stopLossTracker) {
+        // Backward-compat: use existing StopLossTracker path
+        const check = this.stopLossTracker.check({
+          low: candle.low,
+          high: candle.high,
+          close: candle.close,
+        });
+
+        if (check.triggered) {
+          log.warn(
+            {
+              sessionId: this.session.id,
+              pair: candle.pair,
+              stopPrice: check.stopPrice.toString(),
+            },
+            'Stop-loss triggered',
+          );
+
+          // Submit close order via OrderManager
+          const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
+          this.orderManager
+            .submitMarketOrder({
+              pair: candle.pair,
+              side: closeSide,
+              baseSize: this.currentPosition.quantity.toFixed(8),
+              purpose: 'STOP_LOSS',
+            })
+            .catch((err) => {
+              log.error({ err }, 'Failed to submit stop-loss close order');
+            });
+
+          this.stopLossTracker = null;
+          return; // Don't evaluate strategy after stop-loss
+        }
       }
     }
 
@@ -478,6 +565,7 @@ export class LiveTradingEngine extends EventEmitter {
       quantity: d(roundedQty),
       entryPrice: currentPrice,
       pending: true,
+      partialExitFired: false,
     };
     this.positionDirection = signal.direction as 'long' | 'short';
 
@@ -494,9 +582,25 @@ export class LiveTradingEngine extends EventEmitter {
           this.currentPosition.orderId = order.orderId;
         }
 
-        // Set up stop-loss tracker
-        if (this.riskManager && this.config.riskConfig) {
-          const direction = signal.direction as 'long' | 'short';
+        // Set up exit logic or stop-loss tracker for new position
+        const direction = signal.direction as 'long' | 'short';
+        if (this.hasExits && this.exitConfig) {
+          const bufKey = `${candle.pair}:${candle.timeframe}`;
+          const buf = this.candleBuffer.get(bufKey) ?? [];
+          const entryAtrOutput = this.indicatorEngine.compute(
+            { name: 'ATR', period: this.exitConfig.exits.atrStop.atrPeriod },
+            buf,
+          );
+          const entryAtr = entryAtrOutput.values.length > 0
+            ? d(entryAtrOutput.values[entryAtrOutput.values.length - 1] as number)
+            : null;
+          this.exitManager = new ExitLogicManager(
+            this.exitConfig,
+            currentPrice,
+            direction,
+            entryAtr,
+          );
+        } else if (this.riskManager && this.config.riskConfig) {
           this.stopLossTracker = new StopLossTracker(
             {
               type: this.config.riskConfig.stopLoss.type,
@@ -548,8 +652,9 @@ export class LiveTradingEngine extends EventEmitter {
         log.error({ err }, 'Failed to submit exit order');
       });
 
-    // Clear stop-loss tracker
+    // Clear stop-loss tracker and exit manager
     this.stopLossTracker = null;
+    this.exitManager = null;
   }
 
   // ── Order event handlers ──────────────────────────────────────────
@@ -568,6 +673,7 @@ export class LiveTradingEngine extends EventEmitter {
         quantity: fillQty,
         entryPrice: fillPrice,
         pending: false,
+        partialExitFired: false,
       };
 
       // Update cash balance (deduct cost + fees)
@@ -585,6 +691,28 @@ export class LiveTradingEngine extends EventEmitter {
         },
         'Entry order filled',
       );
+    } else if (order.purpose === 'PARTIAL_EXIT') {
+      // Partial close was submitted; quantity already reduced optimistically
+      // Do not clear currentPosition
+      if (this.currentPosition) {
+        const exitPrice = d(order.averageFillPrice ?? '0');
+        const exitQty = d(order.filledSize);
+        const fees = d(order.totalFees);
+
+        // Credit cash for partial exit
+        const exitValue = exitPrice.mul(exitQty);
+        this.cashBalance = this.cashBalance.plus(exitValue).minus(fees);
+
+        log.info(
+          {
+            sessionId: this.session.id,
+            pair: order.productId,
+            filledSize: exitQty.toString(),
+            fillPrice: exitPrice.toString(),
+          },
+          'Partial exit filled',
+        );
+      }
     } else if (order.purpose === 'EXIT' || order.purpose === 'STOP_LOSS') {
       // Compute PnL
       if (this.currentPosition) {
@@ -642,6 +770,7 @@ export class LiveTradingEngine extends EventEmitter {
       this.currentPosition = null;
       this.positionDirection = null;
       this.stopLossTracker = null;
+      this.exitManager = null;
     }
 
     this.emit('orderFilled', order);
@@ -664,7 +793,7 @@ export class LiveTradingEngine extends EventEmitter {
       // Clear pending position state
       this.currentPosition = null;
       this.positionDirection = null;
-    } else if (order.purpose === 'EXIT' || order.purpose === 'STOP_LOSS') {
+    } else if (order.purpose === 'EXIT' || order.purpose === 'STOP_LOSS' || order.purpose === 'PARTIAL_EXIT') {
       // CRITICAL: Position may be stuck -- trigger reconciliation
       log.error(
         {
@@ -929,11 +1058,20 @@ export class LiveTradingEngine extends EventEmitter {
           quantity: d(trade.entryQuantity),
           entryPrice: d(trade.entryPrice),
           pending: false,
+          partialExitFired: false,
         };
         this.positionDirection = trade.entrySide === 'BUY' ? 'long' : 'short';
 
-        // Re-create StopLossTracker
-        if (this.riskManager && this.config.riskConfig) {
+        // Re-create exit logic or stop-loss tracker
+        if (this.hasExits && this.exitConfig) {
+          // Re-create ExitLogicManager (ATR unavailable at recovery, pass null)
+          this.exitManager = new ExitLogicManager(
+            this.exitConfig,
+            d(trade.entryPrice),
+            this.positionDirection,
+            null, // ATR unavailable at recovery; first candle will provide it
+          );
+        } else if (this.riskManager && this.config.riskConfig) {
           this.stopLossTracker = new StopLossTracker(
             {
               type: this.config.riskConfig.stopLoss.type,

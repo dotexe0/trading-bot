@@ -27,7 +27,7 @@ export type OrderStatus =
   | 'FAILED'
   | 'CANCEL_QUEUED'
   | 'EXPIRED';
-export type OrderPurpose = 'ENTRY' | 'EXIT' | 'STOP_LOSS';
+export type OrderPurpose = 'ENTRY' | 'EXIT' | 'STOP_LOSS' | 'PARTIAL_EXIT';
 
 // ── Session ─────────────────────────────────────────────────────────
 
