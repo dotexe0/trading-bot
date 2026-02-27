@@ -8,6 +8,9 @@
  *
  * Optionally integrates RiskManager for position sizing, risk rules,
  * and stop-loss enforcement between signal and fill.
+ *
+ * When the strategy config includes an `exits` block with any exit type
+ * enabled, ExitLogicManager replaces StopLossTracker for that run.
  */
 
 import { d, ZERO } from '../core/decimal.js';
@@ -33,6 +36,8 @@ import { StopLossTracker } from '../risk/stop-loss.js';
 import { RegimeClassifier } from '../regime/classifier.js';
 import { MetricsCalculator } from './metrics.js';
 import type { MarketRegime } from '../regime/types.js';
+import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
+import type { ExitConfig } from '../risk/exit-logic/types.js';
 
 export interface BacktestEngineOptions {
   strategyRegistry: StrategyRegistry;
@@ -101,6 +106,13 @@ export class BacktestEngine {
     const positionSizer = hasRisk ? new PositionSizer(this.riskConfig!) : null;
     const stopLossTrackers = new Map<string, StopLossTracker>();
 
+    // 5b. Exit logic setup: extract exits config from strategy config
+    const rawExits = (validConfig.strategyConfig as Record<string, unknown>).exits;
+    const exitConfig: ExitConfig = parseExitConfig(rawExits !== undefined ? { exits: rawExits } : {});
+    const hasExits = exitConfig.exits.trailing.enabled || exitConfig.exits.partial.enabled ||
+                     exitConfig.exits.time.enabled || exitConfig.exits.atrStop.enabled;
+    let exitManager: ExitLogicManager | null = null;
+
     // 6. Main loop
     const equityCurve: EquityPoint[] = [];
     const startIdx = strategy.minCandles - 1;
@@ -113,46 +125,100 @@ export class BacktestEngine {
       const currentPrice = d(candles[i].close);
       const currentEquity = portfolio.equity(currentPrice);
 
-      // 6a. Stop-loss check for open positions (before signal evaluation)
-      if (hasRisk && !portfolio.isFlat() && i + 1 < candles.length) {
-        for (const [key, tracker] of stopLossTrackers) {
-          const check = tracker.check({
-            low: candles[i].low,
-            high: candles[i].high,
-            close: candles[i].close,
-          });
+      // 6a-pre. Compute visible candles BEFORE exit check (needed for ATR computation)
+      const visibleCandles = candles.slice(0, i + 1);
 
-          if (check.triggered) {
-            // Generate synthetic close signal at stop price
-            const stopSignal: Signal = {
-              strategyName: '__stop-loss',
+      // 6a. Exit logic / stop-loss check for open positions (before signal evaluation)
+      if (!portfolio.isFlat() && i + 1 < candles.length) {
+        if (hasExits && exitManager) {
+          // ATR recomputed per candle; acceptable for v1 backtests up to ~10k candles
+          const atrOutput = this.indicatorEngine.compute(
+            { name: 'ATR', period: exitConfig.exits.atrStop.atrPeriod },
+            visibleCandles,
+          );
+          const currentAtr = atrOutput.values.length > 0
+            ? d(atrOutput.values[atrOutput.values.length - 1] as number)
+            : null;
+
+          const exitAction = exitManager.check({
+            open: candles[i].open,
+            high: candles[i].high,
+            low: candles[i].low,
+            close: candles[i].close,
+            timestamp: candles[i].timestamp,
+          }, currentAtr);
+
+          if (exitAction.type === 'full_exit') {
+            const exitSignal: Signal = {
+              strategyName: `__exit-logic-${exitAction.reason}`,
               pair: validConfig.pair,
               timeframe: validConfig.timeframe,
               timestamp: candles[i].timestamp,
               direction: 'close',
               confidence: 1,
-              reasoning: `Stop-loss triggered at ${check.stopPrice.toFixed(2)}`,
+              reasoning: `Exit logic: ${exitAction.reason} at ${exitAction.fillPrice.toFixed(2)}`,
             };
-
             const positionSize = portfolio.getState().position.abs();
-
-            // Create a synthetic fill candle with open = stop price for realistic fill
-            const stopFillCandle: Candle = {
-              ...candles[i],
-              open: check.stopPrice.toFixed(8),
-            };
-
-            const fill = fillSimulator.simulate(stopSignal, stopFillCandle, positionSize);
+            const exitFillCandle: Candle = { ...candles[i], open: exitAction.fillPrice.toFixed(8) };
+            const fill = fillSimulator.simulate(exitSignal, exitFillCandle, positionSize);
             portfolio.applyFill(fill);
-            stopLossTrackers.delete(key);
+            exitManager = null;
             positionDirection = null;
-            break; // Position closed, no more stop-loss checks needed
+          } else if (exitAction.type === 'partial_exit') {
+            const partialSignal: Signal = {
+              strategyName: '__exit-logic-partial',
+              pair: validConfig.pair,
+              timeframe: validConfig.timeframe,
+              timestamp: candles[i].timestamp,
+              direction: 'close',
+              confidence: 1,
+              reasoning: `Partial exit at ${exitAction.fillPrice.toFixed(2)}`,
+            };
+            const positionSize = portfolio.getState().position.abs();
+            const partialFillCandle: Candle = { ...candles[i], open: exitAction.fillPrice.toFixed(8) };
+            const partialFill = fillSimulator.simulate(partialSignal, partialFillCandle, positionSize);
+            portfolio.applyPartialClose(partialFill, exitAction.fraction);
+            // ExitLogicManager handles breakeven floor internally via newStopPrice
+            // The next check() call will use the updated stop price in the manager's ATR stop
+          }
+        } else if (!hasExits && hasRisk) {
+          // Backward-compat: use existing StopLossTracker path
+          for (const [key, tracker] of stopLossTrackers) {
+            const check = tracker.check({
+              low: candles[i].low,
+              high: candles[i].high,
+              close: candles[i].close,
+            });
+
+            if (check.triggered) {
+              // Generate synthetic close signal at stop price
+              const stopSignal: Signal = {
+                strategyName: '__stop-loss',
+                pair: validConfig.pair,
+                timeframe: validConfig.timeframe,
+                timestamp: candles[i].timestamp,
+                direction: 'close',
+                confidence: 1,
+                reasoning: `Stop-loss triggered at ${check.stopPrice.toFixed(2)}`,
+              };
+
+              const positionSize = portfolio.getState().position.abs();
+
+              // Create a synthetic fill candle with open = stop price for realistic fill
+              const stopFillCandle: Candle = {
+                ...candles[i],
+                open: check.stopPrice.toFixed(8),
+              };
+
+              const fill = fillSimulator.simulate(stopSignal, stopFillCandle, positionSize);
+              portfolio.applyFill(fill);
+              stopLossTrackers.delete(key);
+              positionDirection = null;
+              break; // Position closed, no more stop-loss checks needed
+            }
           }
         }
       }
-
-      // 6b. Structural lookahead prevention: only provide candles[0..i]
-      const visibleCandles = candles.slice(0, i + 1);
 
       // 6b-regime. Compute regime using only visible candles (no lookahead)
       const regime = this.classifier.classify(visibleCandles);
@@ -203,8 +269,9 @@ export class BacktestEngine {
           const fill = fillSimulator.simulate(signal, candles[i + 1], quantity);
           portfolio.applyFill(fill);
 
-          // Clean up stop-loss tracker
+          // Clean up stop-loss tracker and exit manager
           stopLossTrackers.clear();
+          exitManager = null;
           positionDirection = null;
         } else {
           // Entry signal -- use risk manager if available
@@ -260,8 +327,24 @@ export class BacktestEngine {
           const fill = fillSimulator.simulate(signal, candles[i + 1], quantity);
           portfolio.applyFill(fill);
 
-          // Set up stop-loss tracker for new position
-          if (hasRisk && this.riskConfig) {
+          // Set up exit logic or stop-loss tracker for new position
+          if (hasExits) {
+            const direction = signal.direction as 'long' | 'short';
+            positionDirection = direction;
+            const entryAtrOutput = this.indicatorEngine.compute(
+              { name: 'ATR', period: exitConfig.exits.atrStop.atrPeriod },
+              candles.slice(0, i + 1),
+            );
+            const entryAtr = entryAtrOutput.values.length > 0
+              ? d(entryAtrOutput.values[entryAtrOutput.values.length - 1] as number)
+              : null;
+            exitManager = new ExitLogicManager(
+              exitConfig,
+              fill.fillPrice,
+              direction,
+              entryAtr,
+            );
+          } else if (hasRisk && this.riskConfig) {
             const direction = signal.direction as 'long' | 'short';
             positionDirection = direction;
             const tracker = new StopLossTracker(
