@@ -11,6 +11,7 @@
     "fetch": "tsx src/cli/fetch-data.ts",
     "sync": "tsx src/cli/fetch-data.ts",
     "backtest": "tsx src/cli/backtest.ts",
+    "report": "tsx src/cli/report.ts",
     "tournament": "tsx src/cli/tournament.ts",
     "paper": "tsx src/cli/paper.ts",
     "live": "tsx src/cli/live.ts",
