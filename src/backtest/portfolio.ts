@@ -120,6 +120,81 @@ export class PortfolioTracker {
     return this.position.lt(ZERO);
   }
 
+  /**
+   * Close a fraction of the current position.
+   *
+   * Creates a Trade with the fractional quantity and PnL. Does NOT modify
+   * avgEntryPrice or clear currentEntryFill (position stays open).
+   *
+   * @param fill - The simulated fill (used for fillPrice, fee, timestamps)
+   * @param fraction - Fraction of current position to close (0 to 1.0)
+   * @returns The Trade record, or null if portfolio is flat
+   */
+  applyPartialClose(fill: SimulatedFill, fraction: Decimal): Trade | null {
+    if (this.isFlat()) return null;
+
+    const entryFill = this.currentEntryFill;
+    if (!entryFill) return null;
+
+    // Calculate closing quantity as fraction of absolute position
+    const closingQuantity = this.position.abs().mul(fraction);
+
+    // Create a new fill with the correct closing quantity (do not mutate original)
+    const partialFill: SimulatedFill = {
+      ...fill,
+      quantity: closingQuantity,
+    };
+
+    // Calculate PnL based on direction
+    let pnl: Decimal;
+    if (this.isLong()) {
+      // Long PnL: (fillPrice - avgEntryPrice) * closingQuantity - fee
+      pnl = fill.fillPrice
+        .minus(this.avgEntryPrice)
+        .mul(closingQuantity)
+        .minus(fill.fee);
+      // Cash increases by closingQuantity * fillPrice - fee
+      this.cashBalance = this.cashBalance.plus(
+        closingQuantity.mul(fill.fillPrice).minus(fill.fee),
+      );
+      // Reduce position
+      this.position = this.position.minus(closingQuantity);
+    } else {
+      // Short PnL: (avgEntryPrice - fillPrice) * closingQuantity - fee
+      pnl = this.avgEntryPrice
+        .minus(fill.fillPrice)
+        .mul(closingQuantity)
+        .minus(fill.fee);
+      // Cash decreases by closingQuantity * fillPrice + fee
+      this.cashBalance = this.cashBalance.minus(
+        closingQuantity.mul(fill.fillPrice).plus(fill.fee),
+      );
+      // Reduce short position (add toward zero)
+      this.position = this.position.plus(closingQuantity);
+    }
+
+    this.totalFees = this.totalFees.plus(fill.fee);
+
+    const pnlPct = pnl
+      .div(closingQuantity.mul(this.avgEntryPrice))
+      .mul(100);
+
+    const trade: Trade = {
+      entryFill,
+      exitFill: partialFill,
+      pnl,
+      pnlPct,
+      holdingPeriodMs: fill.fillTimestamp - entryFill.fillTimestamp,
+    };
+
+    this._trades.push(trade);
+
+    // Do NOT modify avgEntryPrice
+    // Do NOT clear currentEntryFill
+
+    return trade;
+  }
+
   // ── Private helpers ─────────────────────────────────────────────────
 
   private openLong(fill: SimulatedFill): void {

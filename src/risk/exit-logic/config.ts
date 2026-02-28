@@ -74,39 +74,30 @@ const atrStopSchema = z
 // ── Main exit config schema ─────────────────────────────────────────
 
 /**
- * Exit configuration schema.
+ * Exit configuration schema (merge-compatible).
  *
- * Shape: { exits: { trailing, partial, time, atrStop } }
- * All fields have sensible defaults. Passing {} or undefined yields
- * a fully-defaulted config with all exit types disabled.
+ * Shape: z.object({ exits: z.object({ trailing, partial, time, atrStop }).default(...) })
  *
  * This schema can be merged into strategy schemas:
- *   strategySchema.merge(exitConfigSchema)
+ *   strategySchema.merge(exitConfigSchema).refine(...)
+ *
+ * The `exits` field defaults to a fully-disabled config when not provided.
  */
-export const exitConfigSchema = z
-  .object({
-    exits: z
-      .object({
-        trailing: trailingExitSchema,
-        partial: partialExitSchema,
-        time: timeExitSchema,
-        atrStop: atrStopSchema,
-      })
-      .default({
-        trailing: TRAILING_DEFAULTS,
-        partial: PARTIAL_DEFAULTS,
-        time: TIME_DEFAULTS,
-        atrStop: ATR_STOP_DEFAULTS,
-      }),
-  })
-  .default({
-    exits: {
+export const exitConfigSchema = z.object({
+  exits: z
+    .object({
+      trailing: trailingExitSchema,
+      partial: partialExitSchema,
+      time: timeExitSchema,
+      atrStop: atrStopSchema,
+    })
+    .default({
       trailing: TRAILING_DEFAULTS,
       partial: PARTIAL_DEFAULTS,
       time: TIME_DEFAULTS,
       atrStop: ATR_STOP_DEFAULTS,
-    },
-  });
+    }),
+});
 
 // ── Parse function ──────────────────────────────────────────────────
 

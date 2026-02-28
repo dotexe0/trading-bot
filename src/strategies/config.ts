@@ -7,8 +7,11 @@
 
 import { z } from 'zod';
 import { StrategyConfigError } from '../core/errors.js';
+import { exitConfigSchema } from '../risk/exit-logic/config.js';
 
 // -- Per-strategy schemas -------------------------------------------------
+// Pattern: z.object({...}).merge(exitConfigSchema).refine(...)
+// The .merge() adds the exits block, then .refine() validates strategy params.
 
 const smaCrossoverSchema = z
   .object({
@@ -16,6 +19,7 @@ const smaCrossoverSchema = z
     fastPeriod: z.number().int().positive().default(10),
     slowPeriod: z.number().int().positive().default(20),
   })
+  .merge(exitConfigSchema)
   .refine((d) => d.fastPeriod < d.slowPeriod, {
     message: 'fastPeriod must be less than slowPeriod',
   });
@@ -27,6 +31,7 @@ const rsiMeanReversionSchema = z
     oversoldThreshold: z.number().min(0).max(100).default(30),
     overboughtThreshold: z.number().min(0).max(100).default(70),
   })
+  .merge(exitConfigSchema)
   .refine((d) => d.oversoldThreshold < d.overboughtThreshold, {
     message: 'oversoldThreshold must be less than overboughtThreshold',
   });
@@ -38,24 +43,29 @@ const macdMomentumSchema = z
     slowPeriod: z.number().int().positive().default(26),
     signalPeriod: z.number().int().positive().default(9),
   })
+  .merge(exitConfigSchema)
   .refine((d) => d.fastPeriod < d.slowPeriod, {
     message: 'fastPeriod must be less than slowPeriod',
   });
 
-const bollingerBreakoutSchema = z.object({
-  strategy: z.literal('bollinger-breakout'),
-  period: z.number().int().positive().default(20),
-  stdDev: z.number().positive().default(2),
-  breakoutMode: z.boolean().default(true),
-});
+const bollingerBreakoutSchema = z
+  .object({
+    strategy: z.literal('bollinger-breakout'),
+    period: z.number().int().positive().default(20),
+    stdDev: z.number().positive().default(2),
+    breakoutMode: z.boolean().default(true),
+  })
+  .merge(exitConfigSchema);
 
-const multiTimeframeTrendSchema = z.object({
-  strategy: z.literal('multi-timeframe-trend'),
-  trendTimeframe: z.enum(['1h', '4h', '1D']).default('4h'),
-  trendEmaPeriod: z.number().int().positive().default(50),
-  entryEmaPeriod: z.number().int().positive().default(20),
-  atrPeriod: z.number().int().positive().default(14),
-});
+const multiTimeframeTrendSchema = z
+  .object({
+    strategy: z.literal('multi-timeframe-trend'),
+    trendTimeframe: z.enum(['1h', '4h', '1D']).default('4h'),
+    trendEmaPeriod: z.number().int().positive().default(50),
+    entryEmaPeriod: z.number().int().positive().default(20),
+    atrPeriod: z.number().int().positive().default(14),
+  })
+  .merge(exitConfigSchema);
 
 // -- Discriminated union --------------------------------------------------
 
