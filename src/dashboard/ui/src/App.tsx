@@ -8,6 +8,7 @@ import { StrategyControls } from './components/StrategyControls.js';
 import { StrategyConfigEditor } from './components/StrategyConfigEditor.js';
 import { PortfolioHeatMap } from './components/PortfolioHeatMap.js';
 import { RiskPanel } from './components/RiskPanel.js';
+import { PerformancePanel } from './components/PerformancePanel.js';
 import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { BacktestViewer } from './components/BacktestViewer.js';
@@ -199,11 +200,19 @@ function App(): React.ReactElement {
 
         case 'orderFilled':
         case 'orderCancelled': {
-          // Refresh positions and trades after an order event
+          // Refresh positions after an order event
           void fetch('/api/positions')
             .then((r) => r.json())
             .then((data) => setPositions(data as PositionData[]))
             .catch(() => undefined);
+          // Also refresh trades for the active session so PerformancePanel updates
+          const activeSession = sessions.find((s) => s.status === 'running');
+          if (activeSession) {
+            void fetch(`/api/sessions/${activeSession.id}/trades`)
+              .then((r) => r.json())
+              .then((data) => setTrades(data as TradeData[]))
+              .catch(() => undefined);
+          }
           break;
         }
 
@@ -287,7 +296,7 @@ function App(): React.ReactElement {
           break;
       }
     },
-    [activePair],
+    [activePair, sessions],
   );
 
   const { status, send } = useWebSocket(WS_URL, handleMessage);
@@ -372,6 +381,8 @@ function App(): React.ReactElement {
             riskConfig={riskConfig}
             circuitBreakerEvents={circuitBreakerEvents}
           />
+
+          <PerformancePanel trades={trades} />
 
           <div className="panel">
             <div className="panel-title">Portfolio Heat Map</div>
