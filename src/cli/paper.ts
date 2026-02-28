@@ -25,7 +25,7 @@ program
   .option('-t, --timeframe <tf>', 'Candle timeframe', '1h')
   .option('--capital <amount>', 'Initial capital', '10000')
   .action(async (opts) => {
-    const { config, dbConn, registry, indicatorEngine } = bootstrap();
+    const { config, dbConn, repo, registry, indicatorEngine } = bootstrap();
 
     try {
       const pair = opts.pair as 'BTC-USD' | 'ETH-USD';
@@ -52,6 +52,7 @@ program
         sessionStore,
         strategyRegistry: registry,
         indicatorEngine,
+        candleRepo: repo,
       });
 
       // Register SIGINT handler for graceful shutdown

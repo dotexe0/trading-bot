@@ -16,6 +16,7 @@
 import { EventEmitter } from 'node:events';
 import { d, ZERO } from '../core/decimal.js';
 import type Decimal from 'decimal.js';
+import { TIMEFRAME_MS } from '../core/types.js';
 import type { Candle } from '../core/types.js';
 import type { Signal } from '../strategies/types.js';
 import type { IStrategy } from '../strategies/types.js';
@@ -30,6 +31,7 @@ import type { RiskContext, StrategyStats } from '../risk/types.js';
 import type { LiveDataFeed } from './live-data-feed.js';
 import type { SessionStore } from './session-store.js';
 import type { PaperTradingConfig, PaperSession, PaperTradingResult } from './types.js';
+import type { CandleRepository } from '../data/storage/candle-repo.js';
 import { createModuleLogger } from '../core/logger.js';
 import { RegimeClassifier } from '../regime/classifier.js';
 import { CorrelationCalculator, CorrelationStore } from '../correlation/index.js';
@@ -54,6 +56,8 @@ export interface PaperTradingEngineOptions {
   correlationConfig?: CorrelationConfig;
   /** Path to the SQLite database for storing correlation snapshots. */
   correlationDbPath?: string;
+  /** Candle repository for preloading historical buffer on startup. */
+  candleRepo?: CandleRepository;
 }
 
 export class PaperTradingEngine extends EventEmitter {
@@ -80,6 +84,7 @@ export class PaperTradingEngine extends EventEmitter {
   private readonly classifier = new RegimeClassifier();
   private correlationCalculator?: CorrelationCalculator;
   private correlationStore?: CorrelationStore;
+  private readonly candleRepo?: CandleRepository;
 
   constructor(options: PaperTradingEngineOptions) {
     super();
@@ -90,6 +95,7 @@ export class PaperTradingEngine extends EventEmitter {
     this.indicatorEngine = options.indicatorEngine;
     this.riskManager = options.riskManager;
     this.strategyStats = options.strategyStats;
+    this.candleRepo = options.candleRepo;
 
     if (options.correlationConfig?.enabled) {
       this.correlationCalculator = new CorrelationCalculator(
@@ -136,6 +142,9 @@ export class PaperTradingEngine extends EventEmitter {
     if (this.riskManager && this.config.riskConfig) {
       this.positionSizer = new PositionSizer(this.config.riskConfig);
     }
+
+    // Preload historical candles into buffer so signals can fire immediately
+    this.preloadBuffer();
 
     // Wire live feed events
     this.liveFeed.on('candle', (candle: Candle) => this.onCandle(candle));
@@ -484,6 +493,64 @@ export class PaperTradingEngine extends EventEmitter {
   /** Get the current buffer size for a given key. For testing only. */
   getBufferSize(key: string): number {
     return this.candleBuffer.get(key)?.length ?? 0;
+  }
+
+  // ── Private: buffer preload ────────────────────────────────────────
+
+  /**
+   * Seed the candle buffer with historical data from the database.
+   *
+   * Without preloading, the buffer starts empty and must accumulate candles
+   * from the live feed in real time — meaning strategies that need 34+ candles
+   * won't fire signals for 34+ hours on a 1h timeframe.
+   *
+   * Fetches up to bufferSize recent candles and populates the buffer so
+   * signals can fire as soon as the first live candle arrives.
+   */
+  private preloadBuffer(): void {
+    if (!this.candleRepo) {
+      log.warn(
+        { pair: this.config.pair, timeframe: this.config.timeframe },
+        'No candleRepo provided — buffer starts empty, signals will be delayed until warm-up completes',
+      );
+      return;
+    }
+
+    const { pair, timeframe, bufferSize } = this.config;
+    const timeframeMs = TIMEFRAME_MS[timeframe];
+    const now = Date.now();
+    const startMs = now - timeframeMs * bufferSize;
+
+    const historical = this.candleRepo.getCandles(pair, timeframe, startMs, now);
+
+    if (historical.length === 0) {
+      log.warn(
+        { pair, timeframe },
+        'No historical candles found in database — run `npm run sync` first. Buffer starts empty.',
+      );
+      return;
+    }
+
+    // Enforce bufferSize cap (getCandles returns ascending order)
+    const seeded = historical.length > bufferSize
+      ? historical.slice(historical.length - bufferSize)
+      : historical;
+
+    const key = `${pair}:${timeframe}`;
+    this.candleBuffer.set(key, seeded);
+
+    log.info(
+      {
+        pair,
+        timeframe,
+        seeded: seeded.length,
+        minCandles: this.strategy.minCandles,
+        ready: seeded.length >= this.strategy.minCandles,
+      },
+      seeded.length >= this.strategy.minCandles
+        ? 'Buffer preloaded — strategy ready to signal immediately'
+        : 'Buffer preloaded — still warming up, signals fire after more candles arrive',
+    );
   }
 
   // ── Private: signal processing ────────────────────────────────────
