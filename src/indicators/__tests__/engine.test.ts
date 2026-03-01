@@ -14,7 +14,7 @@ import {
   validateIndicatorConfigs,
   minCandlesRequired,
 } from '../config.js';
-import { extractCloses, extractOHLC } from '../adapters.js';
+import { extractCloses, extractOHLC, extractVolumes } from '../adapters.js';
 import { IndicatorEngine } from '../engine.js';
 import type {
   MACDPoint,
@@ -57,6 +57,25 @@ function makeOHLCCandles(
     low: String(d.l),
     close: String(d.c),
     volume: '100',
+  }));
+}
+
+function makeCandlesWithVolumes(
+  closes: number[],
+  volumes: number[],
+  pair: TradingPair = 'BTC-USD',
+  timeframe: Timeframe = '1h',
+): Candle[] {
+  const baseTs = 1_700_000_000_000;
+  return closes.map((c, i) => ({
+    pair,
+    timeframe,
+    timestamp: baseTs + i * 3_600_000,
+    open: String(c),
+    high: String(c + 1),
+    low: String(c - 1),
+    close: String(c),
+    volume: String(volumes[i] ?? 100),
   }));
 }
 
@@ -114,6 +133,25 @@ describe('Config validation', () => {
       ]),
     ).toThrow(IndicatorConfigError);
   });
+
+  it('parses valid SD config', () => {
+    const config = parseIndicatorConfig({ name: 'SD', period: 20 });
+    expect(config).toEqual({ name: 'SD', period: 20 });
+  });
+
+  it('parses valid Highest config', () => {
+    const config = parseIndicatorConfig({ name: 'Highest', period: 14 });
+    expect(config).toEqual({ name: 'Highest', period: 14 });
+  });
+
+  it('parses valid Lowest config', () => {
+    const config = parseIndicatorConfig({ name: 'Lowest', period: 14 });
+    expect(config).toEqual({ name: 'Lowest', period: 14 });
+  });
+
+  it('rejects SD period = 1', () => {
+    expect(() => parseIndicatorConfig({ name: 'SD', period: 1 })).toThrow(IndicatorConfigError);
+  });
 });
 
 // ── 2. minCandlesRequired ────────────────────────────────────────────
@@ -152,6 +190,18 @@ describe('minCandlesRequired', () => {
 
   it('ATR(14) -> 15', () => {
     expect(minCandlesRequired({ name: 'ATR', period: 14 })).toBe(15);
+  });
+
+  it('SD(10) -> 10', () => {
+    expect(minCandlesRequired({ name: 'SD', period: 10 })).toBe(10);
+  });
+
+  it('Highest(14) -> 14', () => {
+    expect(minCandlesRequired({ name: 'Highest', period: 14 })).toBe(14);
+  });
+
+  it('Lowest(14) -> 14', () => {
+    expect(minCandlesRequired({ name: 'Lowest', period: 14 })).toBe(14);
   });
 });
 
@@ -424,5 +474,143 @@ describe('Multi-timeframe', () => {
     const last1h = rsi1h.values[rsi1h.values.length - 1] as number;
     const last4h = rsi4h.values[rsi4h.values.length - 1] as number;
     expect(last1h).not.toBeCloseTo(last4h, 0);
+  });
+});
+
+// ── 13. extractVolumes adapter ───────────────────────────────────────
+
+describe('extractVolumes', () => {
+  it('returns volume values as number[]', () => {
+    const candles = makeCandlesWithVolumes(
+      [10, 20, 30],
+      [1500.5, 2300.75, 890.25],
+    );
+    expect(extractVolumes(candles)).toEqual([1500.5, 2300.75, 890.25]);
+  });
+
+  it('handles zero volume', () => {
+    const candles = makeCandlesWithVolumes([10], [0]);
+    expect(extractVolumes(candles)).toEqual([0]);
+  });
+
+  it('returns empty array for empty candles', () => {
+    expect(extractVolumes([])).toEqual([]);
+  });
+});
+
+// ── 14. SD ───────────────────────────────────────────────────────────
+
+describe('SD', () => {
+  it('SD(3) returns correct standard deviation values', () => {
+    // Known values: SD of [1,2,3] with population formula
+    const candles = makeCandles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const result = engine.compute({ name: 'SD', period: 3 }, candles);
+    expect(result.values.length).toBeGreaterThan(0);
+    // All SD values should be positive (varying data)
+    for (const v of result.values) {
+      expect(v as number).toBeGreaterThan(0);
+    }
+  });
+
+  it('SD offset matches input minus output length', () => {
+    const candles = makeCandles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const result = engine.compute({ name: 'SD', period: 4 }, candles);
+    expect(result.offset).toBe(candles.length - result.values.length);
+  });
+
+  it('SD on constant prices returns zero values', () => {
+    const candles = makeCandles([50, 50, 50, 50, 50, 50, 50, 50]);
+    const result = engine.compute({ name: 'SD', period: 3 }, candles);
+    expect(result.values.length).toBeGreaterThan(0);
+    for (const v of result.values) {
+      expect(v as number).toBeCloseTo(0, 5);
+    }
+  });
+
+  it('SD insufficient data returns empty', () => {
+    const candles = makeCandles([1, 2]);
+    const result = engine.compute({ name: 'SD', period: 5 }, candles);
+    expect(result.values).toEqual([]);
+    expect(result.offset).toBe(0);
+  });
+});
+
+// ── 15. Highest ──────────────────────────────────────────────────────
+
+describe('Highest', () => {
+  it('Highest(3) returns highest HIGH over 3-candle window', () => {
+    // makeCandles sets high = close + 1
+    // closes: [5,3,8,2,9,1,7] -> highs: [6,4,9,3,10,2,8]
+    // Highest(3) windows: [6,4,9]=9, [4,9,3]=9, [9,3,10]=10, [3,10,2]=10, [10,2,8]=10
+    const candles = makeCandles([5, 3, 8, 2, 9, 1, 7]);
+    const result = engine.compute({ name: 'Highest', period: 3 }, candles);
+    expect(result.values.length).toBeGreaterThan(0);
+    // Each value should be the max HIGH in its window
+    for (const v of result.values) {
+      expect(v as number).toBeGreaterThan(0);
+    }
+  });
+
+  it('Highest offset matches input minus output length', () => {
+    const candles = makeCandles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const result = engine.compute({ name: 'Highest', period: 4 }, candles);
+    expect(result.offset).toBe(candles.length - result.values.length);
+  });
+
+  it('Highest on ascending highs returns each window max', () => {
+    // closes: [10,20,30,40,50] -> highs: [11,21,31,41,51]
+    // Highest(3): [11,21,31]=31, [21,31,41]=41, [31,41,51]=51
+    const candles = makeCandles([10, 20, 30, 40, 50]);
+    const result = engine.compute({ name: 'Highest', period: 3 }, candles);
+    const expected = [31, 41, 51];
+    expect(result.values).toHaveLength(expected.length);
+    for (let i = 0; i < expected.length; i++) {
+      expect(result.values[i]).toBeCloseTo(expected[i], 5);
+    }
+  });
+
+  it('Highest insufficient data returns empty', () => {
+    const candles = makeCandles([1, 2]);
+    const result = engine.compute({ name: 'Highest', period: 5 }, candles);
+    expect(result.values).toEqual([]);
+    expect(result.offset).toBe(0);
+  });
+});
+
+// ── 16. Lowest ───────────────────────────────────────────────────────
+
+describe('Lowest', () => {
+  it('Lowest(3) returns lowest LOW over 3-candle window', () => {
+    // makeCandles sets low = close - 1
+    // closes: [5,3,8,2,9,1,7] -> lows: [4,2,7,1,8,0,6]
+    // Lowest(3) windows: [4,2,7]=2, [2,7,1]=1, [7,1,8]=1, [1,8,0]=0, [8,0,6]=0
+    const candles = makeCandles([5, 3, 8, 2, 9, 1, 7]);
+    const result = engine.compute({ name: 'Lowest', period: 3 }, candles);
+    expect(result.values.length).toBeGreaterThan(0);
+  });
+
+  it('Lowest on descending lows returns each window min', () => {
+    // closes: [50,40,30,20,10] -> lows: [49,39,29,19,9]
+    // Lowest(3): [49,39,29]=29, [39,29,19]=19, [29,19,9]=9
+    const candles = makeCandles([50, 40, 30, 20, 10]);
+    const result = engine.compute({ name: 'Lowest', period: 3 }, candles);
+    const expected = [29, 19, 9];
+    expect(result.values).toHaveLength(expected.length);
+    for (let i = 0; i < expected.length; i++) {
+      expect(result.values[i]).toBeCloseTo(expected[i], 5);
+    }
+  });
+
+  it('Lowest offset matches input minus output length', () => {
+    const candles = makeCandles([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    const result = engine.compute({ name: 'Lowest', period: 4 }, candles);
+    expect(result.offset).toBe(candles.length - result.values.length);
+  });
+
+  it('Lowest insufficient data returns empty', () => {
+    const candles = makeCandles([1, 2]);
+    const result = engine.compute({ name: 'Lowest', period: 5 }, candles);
+    expect(result.values).toEqual([]);
+    expect(result.offset).toBe(0);
   });
 });
