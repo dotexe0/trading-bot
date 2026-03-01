@@ -23,6 +23,9 @@ const {
   stochastic,
   atr,
   adx,
+  sd,
+  highest,
+  lowest,
 } = require('fast-technical-indicators') as {
   sma: (input: { period: number; values: number[] }) => number[];
   ema: (input: { period: number; values: number[] }) => number[];
@@ -59,6 +62,9 @@ const {
     low: number[];
     close: number[];
   }) => { adx?: number; pdi?: number; mdi?: number }[];
+  sd: (input: { period: number; values: number[] }) => number[];
+  highest: (input: { period: number; values: number[] }) => number[];
+  lowest: (input: { period: number; values: number[] }) => number[];
 };
 
 export class IndicatorEngine {
@@ -155,6 +161,24 @@ export class IndicatorEngine {
           pdi: v.pdi,
           mdi: v.mdi,
         }));
+        return { values, offset: candles.length - values.length };
+      }
+
+      case 'SD': {
+        const closes = extractCloses(candles);
+        const values = sd({ period: validConfig.period, values: closes });
+        return { values, offset: closes.length - values.length };
+      }
+
+      case 'Highest': {
+        const ohlc = extractOHLC(candles);
+        const values = highest({ period: validConfig.period, values: ohlc.high });
+        return { values, offset: candles.length - values.length };
+      }
+
+      case 'Lowest': {
+        const ohlc = extractOHLC(candles);
+        const values = lowest({ period: validConfig.period, values: ohlc.low });
         return { values, offset: candles.length - values.length };
       }
     }
