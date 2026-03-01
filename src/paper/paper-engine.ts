@@ -81,6 +81,7 @@ export class PaperTradingEngine extends EventEmitter {
   private session: PaperSession | null = null;
   private isRunning = false;
   private positionDirection: 'long' | 'short' | null = null;
+  private positionEntryTimestamp: number = 0;
   private readonly classifier = new RegimeClassifier();
   private correlationCalculator?: CorrelationCalculator;
   private correlationStore?: CorrelationStore;
@@ -226,6 +227,32 @@ export class PaperTradingEngine extends EventEmitter {
     return this.isRunning;
   }
 
+  /**
+   * Get the current open position, or null if the portfolio is flat.
+   * Used by the dashboard positions endpoint to display paper positions.
+   */
+  getOpenPosition(): {
+    sessionId: string;
+    strategyName: string;
+    pair: string;
+    side: 'long' | 'short';
+    quantity: string;
+    avgEntryPrice: string;
+    entryTimestamp: number;
+  } | null {
+    if (!this.session || this.portfolio.isFlat()) return null;
+    const state = this.portfolio.getState();
+    return {
+      sessionId: this.session.id,
+      strategyName: this.strategy.name,
+      pair: this.config.pair,
+      side: this.positionDirection ?? (state.position.gt(ZERO) ? 'long' : 'short'),
+      quantity: state.position.abs().toString(),
+      avgEntryPrice: state.avgEntryPrice.toString(),
+      entryTimestamp: this.positionEntryTimestamp,
+    };
+  }
+
   // ── Core: candle processing ────────────────────────────────────────
 
   /**
@@ -323,6 +350,7 @@ export class PaperTradingEngine extends EventEmitter {
 
           this.exitManager = null;
           this.positionDirection = null;
+          this.positionEntryTimestamp = 0;
         } else if (exitAction.type === 'partial_exit') {
           log.info(
             {
@@ -420,6 +448,7 @@ export class PaperTradingEngine extends EventEmitter {
 
             this.stopLossTrackers.delete(trackerKey);
             this.positionDirection = null;
+            this.positionEntryTimestamp = 0;
             break;
           }
         }
@@ -585,6 +614,7 @@ export class PaperTradingEngine extends EventEmitter {
     this.stopLossTrackers.clear();
     this.exitManager = null;
     this.positionDirection = null;
+    this.positionEntryTimestamp = 0;
   }
 
   private processEntrySignal(signal: Signal, candle: Candle): void {
@@ -687,6 +717,7 @@ export class PaperTradingEngine extends EventEmitter {
 
     const fill = this.fillSimulator.simulate(signal, fillCandle, quantity);
     this.portfolio.applyFill(fill);
+    this.positionEntryTimestamp = candle.timestamp;
 
     this.emit('orderFilled', {
       purpose: 'ENTRY',
@@ -780,6 +811,7 @@ export class PaperTradingEngine extends EventEmitter {
     this.stopLossTrackers.clear();
     this.exitManager = null;
     this.positionDirection = null;
+    this.positionEntryTimestamp = 0;
 
     log.info(
       { sessionId: this.session.id, fillPrice: fill.fillPrice.toString() },

@@ -263,6 +263,7 @@ program
             strategyRegistry: registry,
             indicatorEngine,
             riskManager,
+            candleRepo: repo,
           });
 
           const session = await engine.start();
@@ -347,6 +348,7 @@ program
           strategyRegistry: registry,
           indicatorEngine,
           riskManager,
+          candleRepo: repo,
         });
         const session = await engine.start();
         paperEngines.push(engine);
@@ -367,6 +369,7 @@ program
         correlationStore,
         backtestStore,
         repo,
+        paperEngines,
       });
 
       await server.start();

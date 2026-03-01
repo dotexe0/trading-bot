@@ -205,14 +205,24 @@ function App(): React.ReactElement {
             .then((r) => r.json())
             .then((data) => setPositions(data as PositionData[]))
             .catch(() => undefined);
-          // Also refresh trades for the active session so PerformancePanel updates
-          const activeSession = sessions.find((s) => s.status === 'running');
-          if (activeSession) {
-            void fetch(`/api/sessions/${activeSession.id}/trades`)
-              .then((r) => r.json())
-              .then((data) => setTrades(data as TradeData[]))
-              .catch(() => undefined);
-          }
+          // Always fetch fresh sessions before fetching trades — never rely on
+          // stale React state here. The sessions state may not yet reflect the
+          // running paper session if orderFilled fires before the engineStarted
+          // /api/sessions fetch has resolved and React has re-rendered.
+          void fetch('/api/sessions')
+            .then((r) => r.json())
+            .then((sessData) => {
+              const updatedSessions = sessData as SessionData[];
+              setSessions(updatedSessions);
+              const active = updatedSessions.find((s) => s.status === 'running');
+              if (active) {
+                return fetch(`/api/sessions/${active.id}/trades`);
+              }
+              return null;
+            })
+            .then((r) => (r ? r.json() : null))
+            .then((data) => { if (data) setTrades(data as TradeData[]); })
+            .catch(() => undefined);
           break;
         }
 
@@ -227,10 +237,14 @@ function App(): React.ReactElement {
         }
 
         case 'engineStarted': {
-          // Refresh strategies list
+          // Refresh strategies list and sessions (new session may have been created)
           void fetch('/api/strategies')
             .then((r) => r.json())
             .then((data) => setStrategies(data as StrategyInfo[]))
+            .catch(() => undefined);
+          void fetch('/api/sessions')
+            .then((r) => r.json())
+            .then((data) => setSessions(data as SessionData[]))
             .catch(() => undefined);
           break;
         }

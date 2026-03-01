@@ -27,9 +27,10 @@ export async function registerPositionRoutes(
   deps: RouteDeps,
 ): Promise<void> {
   app.get('/api/positions', async () => {
-    const runningSessions = deps.liveStateStore.listSessions('running');
     const positions: ApiPosition[] = [];
 
+    // Live trading open positions
+    const runningSessions = deps.liveStateStore.listSessions('running');
     for (const session of runningSessions) {
       const trades = deps.liveStateStore.getSessionTrades(session.id);
 
@@ -58,6 +59,34 @@ export async function registerPositionRoutes(
           unrealizedPnlPct: pnlPct.toFixed(4),
           strategyName: session.strategyName,
           createdAt: trade.entryTimestamp,
+        });
+      }
+    }
+
+    // Paper trading open positions (from in-memory portfolio state)
+    if (deps.paperEngines) {
+      for (const engine of deps.paperEngines) {
+        const pos = engine.getOpenPosition();
+        if (!pos) continue;
+
+        const entryPrice = d(pos.avgEntryPrice);
+        const quantity = d(pos.quantity);
+        // Use entry price as current price (best available from route context)
+        const rawPnl = ZERO;
+        const pnlPct = ZERO;
+
+        positions.push({
+          sessionId: pos.sessionId,
+          orderId: `paper-${pos.sessionId}`,
+          pair: pos.pair,
+          side: pos.side === 'long' ? 'BUY' : 'SELL',
+          entryPrice: entryPrice.toFixed(8),
+          currentPrice: entryPrice.toFixed(8),
+          quantity: quantity.toFixed(8),
+          unrealizedPnl: rawPnl.toFixed(8),
+          unrealizedPnlPct: pnlPct.toFixed(4),
+          strategyName: pos.strategyName,
+          createdAt: pos.entryTimestamp,
         });
       }
     }

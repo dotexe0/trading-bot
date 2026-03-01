@@ -20,6 +20,7 @@ import type { RiskManager } from '../../risk/risk-manager.js';
 import type { BacktestStore } from '../../backtest/backtest-store.js';
 import type { CorrelationStore } from '../../correlation/correlation-store.js';
 import type { CandleRepository } from '../../data/storage/candle-repo.js';
+import type { PaperTradingEngine } from '../../paper/paper-engine.js';
 import {
   toApiSession,
   toApiPaperSession,
@@ -57,6 +58,8 @@ export interface DashboardDeps {
   backtestStore?: BacktestStore;
   correlationStore?: CorrelationStore;
   repo?: CandleRepository;
+  /** Live reference to all active paper engines — used by positions endpoint. */
+  paperEngines?: PaperTradingEngine[];
 }
 
 export interface RouteDeps {
@@ -68,6 +71,8 @@ export interface RouteDeps {
   backtestStore?: BacktestStore;
   correlationStore?: CorrelationStore;
   repo?: CandleRepository;
+  /** Live reference to all active paper engines — used by positions endpoint. */
+  paperEngines?: PaperTradingEngine[];
 }
 
 export interface DashboardServer {
@@ -153,6 +158,7 @@ export async function createDashboardServer(
     backtestStore: deps.backtestStore,
     correlationStore: deps.correlationStore,
     repo: deps.repo,
+    paperEngines: deps.paperEngines,
   };
 
   // Register WebSocket handler
