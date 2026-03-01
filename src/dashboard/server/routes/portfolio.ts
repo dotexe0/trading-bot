@@ -29,13 +29,15 @@ export async function registerPortfolioRoutes(
       }
     }
 
-    // Paper positions (open trade = exitFill.fillTimestamp === 0)
-    for (const session of deps.sessionStore.listSessions('running')) {
-      for (const trade of deps.sessionStore.getSessionTrades(session.id)) {
-        if (trade.exitFill.fillTimestamp !== 0) continue;
-        const value = Number(trade.entryFill.fillPrice) * Number(trade.entryFill.quantity);
-        if (session.pair === 'BTC-USD') btcValueUsd += value;
-        else if (session.pair === 'ETH-USD') ethValueUsd += value;
+    // Paper positions — query engine portfolio state directly, since paper trades
+    // are only written to the DB when they close (no open-trade records exist).
+    if (deps.paperEngines) {
+      for (const engine of deps.paperEngines) {
+        const pos = engine.getOpenPosition();
+        if (!pos) continue;
+        const value = Number(pos.avgEntryPrice) * Number(pos.quantity);
+        if (pos.pair === 'BTC-USD') btcValueUsd += value;
+        else if (pos.pair === 'ETH-USD') ethValueUsd += value;
       }
     }
 

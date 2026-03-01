@@ -513,7 +513,15 @@ export class PaperTradingEngine extends EventEmitter {
     });
 
     if (this.riskManager) {
-      this.emit('riskUpdate', this.riskManager.getCurrentRiskState());
+      const riskState = this.riskManager.getCurrentRiskState();
+      // Compute live exposure from current portfolio — riskManager.lastExposurePct
+      // only updates during evaluate() (entry signals), so it stays 0 while in a
+      // position. Override it here with the real mark-to-market exposure.
+      const portfolioState = this.portfolio.getState();
+      const exposurePct = !this.portfolio.isFlat() && currentEquity.gt(ZERO)
+        ? portfolioState.position.abs().mul(d(candle.close)).div(currentEquity).mul(100).toNumber()
+        : 0;
+      this.emit('riskUpdate', { ...riskState, currentExposurePct: exposurePct });
     }
   }
 
