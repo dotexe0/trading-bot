@@ -27,3 +27,8 @@ export function extractOHLC(candles: Candle[]): {
     close: candles.map((c) => parseFloat(c.close)),
   };
 }
+
+/** Extract volume values as a number array. */
+export function extractVolumes(candles: Candle[]): number[] {
+  return candles.map((c) => parseFloat(c.volume));
+}

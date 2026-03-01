@@ -61,6 +61,21 @@ const adxSchema = z.object({
   period,
 });
 
+const sdSchema = z.object({
+  name: z.literal('SD'),
+  period,
+});
+
+const highestSchema = z.object({
+  name: z.literal('Highest'),
+  period,
+});
+
+const lowestSchema = z.object({
+  name: z.literal('Lowest'),
+  period,
+});
+
 // ── Discriminated union ──────────────────────────────────────────────
 
 export const indicatorConfigSchema = z.discriminatedUnion('name', [
@@ -72,6 +87,9 @@ export const indicatorConfigSchema = z.discriminatedUnion('name', [
   stochasticSchema,
   atrSchema,
   adxSchema,
+  sdSchema,
+  highestSchema,
+  lowestSchema,
 ]);
 
 // ── Public helpers ───────────────────────────────────────────────────
@@ -122,5 +140,9 @@ export function minCandlesRequired(config: IndicatorConfig): number {
       return config.period + 1;
     case 'ADX':
       return config.period * 2;
+    case 'SD':
+    case 'Highest':
+    case 'Lowest':
+      return config.period;
   }
 }

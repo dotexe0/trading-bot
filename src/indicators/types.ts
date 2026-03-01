@@ -15,7 +15,10 @@ export type IndicatorName =
   | 'BollingerBands'
   | 'Stochastic'
   | 'ATR'
-  | 'ADX';
+  | 'ADX'
+  | 'SD'
+  | 'Highest'
+  | 'Lowest';
 
 // ── Per-indicator config types ───────────────────────────────────────
 
@@ -63,6 +66,21 @@ export interface ADXConfig {
   period: number;
 }
 
+export interface SDConfig {
+  name: 'SD';
+  period: number;
+}
+
+export interface HighestConfig {
+  name: 'Highest';
+  period: number;
+}
+
+export interface LowestConfig {
+  name: 'Lowest';
+  period: number;
+}
+
 /** Union of all indicator config types (discriminated on `name`). */
 export type IndicatorConfig =
   | SMAConfig
@@ -72,7 +90,10 @@ export type IndicatorConfig =
   | BollingerBandsConfig
   | StochasticConfig
   | ATRConfig
-  | ADXConfig;
+  | ADXConfig
+  | SDConfig
+  | HighestConfig
+  | LowestConfig;
 
 // ── Result point types ───────────────────────────────────────────────
 
