@@ -93,7 +93,7 @@ const program = new Command();
 program
   .name('start')
   .description('Start the trading bot orchestrator (sync -> tournament -> activate -> dashboard)')
-  .option('-p, --pair <pair>', 'Trading pair for tournament', 'BTC-USD')
+  .option('-p, --pair <pair>', 'Restrict to a single trading pair (default: all pairs in config)')
   .option('-t, --timeframe <tf>', 'Candle timeframe', '1h')
   .option('--days <days>', 'Lookback days for tournament data', '90')
   .option('--capital <amount>', 'Initial capital', '10000')
@@ -116,7 +116,6 @@ program
 
     out.banner('Trading Bot Orchestrator');
 
-    const pair = opts.pair as 'BTC-USD' | 'ETH-USD';
     const timeframe = opts.timeframe as '1m' | '5m' | '15m' | '1h' | '4h' | '1D';
     const days = parseInt(opts.days, 10);
     const capital = opts.capital as string;
@@ -125,7 +124,12 @@ program
     const skipSync = opts.skipSync === true;
     const mode = opts.mode as 'paper' | 'none';
 
-    const totalSteps = 4;
+    // Determine which pairs to trade: --pair overrides, otherwise all configured pairs
+    const tradingPairs: ('BTC-USD' | 'ETH-USD')[] = opts.pair
+      ? [opts.pair as 'BTC-USD' | 'ETH-USD']
+      : config.data.pairs;
+
+    const totalSteps = 3;
     const paperEngines: PaperTradingEngine[] = [];
 
     try {
@@ -149,21 +153,12 @@ program
         }
       }
 
-      // ── Step 2: Tournament ─────────────────────────────────────
+      // ── Step 2: Tournament + Activation (per pair) ────────────
 
-      out.step(2, totalSteps, 'Running tournament...');
+      out.step(2, totalSteps, `Running tournament for ${tradingPairs.join(', ')}...`);
 
       const endMs = Date.now();
       const startMs = endMs - days * 86_400_000;
-
-      const candles = repo.getCandles(pair, timeframe, startMs, endMs);
-      out.info(`${candles.length} candles loaded for ${pair} ${timeframe}`);
-
-      if (candles.length === 0) {
-        out.error('No candle data available. Run `npm run sync` first.');
-        dbConn.sqlite.close();
-        process.exit(1);
-      }
 
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
@@ -190,36 +185,6 @@ program
       const validateWindowMs = Math.floor((totalMs * 0.3) / 3);
       const stepMs = trainWindowMs + validateWindowMs;
 
-      const tournamentConfig = parseTournamentConfig({
-        pair,
-        timeframe,
-        startMs,
-        endMs,
-        initialCapital: capital,
-        topN,
-        activationMode: 'none',
-        walkForward: {
-          trainWindowMs,
-          validateWindowMs,
-          stepMs,
-        },
-      });
-
-      const result = await runner.run(tournamentConfig, candles);
-
-      out.info(
-        `${result.strategiesEvaluated} strategies evaluated in ${(result.durationMs / 1000).toFixed(1)}s`,
-      );
-      for (const entry of result.leaderboard.slice(0, topN)) {
-        const sharpe = entry.oosMetrics.sharpeRatio.toFixed(4);
-        out.table(`#${entry.rank}`, `${entry.strategyName} (OOS Sharpe: ${sharpe})`);
-      }
-      out.success('Tournament complete');
-
-      // ── Step 3: Activate winners ───────────────────────────────
-
-      out.step(3, totalSteps, 'Activating winning strategies...');
-
       const tournamentStore = new TournamentStore({
         dbPath: config.database.path,
       });
@@ -236,74 +201,100 @@ program
         out.warn(`Recovered ${recovered} orphaned session(s) from previous run`);
       }
 
-      if (mode === 'none') {
-        out.info('Activation mode: none (display only)');
-      } else if (mode === 'paper') {
-        // Engine factory creates a PaperTradingEngine per strategy
-        const engineFactory = async (
-          stratConfig: Record<string, unknown>,
-          _tournConfig: typeof tournamentConfig,
-        ) => {
-          const liveFeed = new LiveDataFeed({
-            apiKey: config.coinbase.apiKeyName,
-            apiSecret: config.coinbase.apiKeySecret,
-          });
+      let anyCandles = false;
 
-          const paperConfig = parsePaperConfig({
-            pair,
-            timeframe,
-            strategyConfig: stratConfig,
-            initialCapital: capital,
-          });
+      // Run tournament and activate winner for each configured trading pair
+      for (const tradePair of tradingPairs) {
+        const candles = repo.getCandles(tradePair, timeframe, startMs, endMs);
+        out.info(`${candles.length} candles loaded for ${tradePair} ${timeframe}`);
 
-          const engine = new PaperTradingEngine({
-            config: paperConfig,
-            liveFeed,
-            sessionStore,
-            strategyRegistry: registry,
-            indicatorEngine,
-            riskManager,
-            candleRepo: repo,
-          });
+        if (candles.length === 0) {
+          out.warn(`No candle data for ${tradePair} — skipping (run \`npm run sync\` first)`);
+          continue;
+        }
+        anyCandles = true;
 
-          const session = await engine.start();
-          paperEngines.push(engine);
+        const tournamentConfig = parseTournamentConfig({
+          pair: tradePair,
+          timeframe,
+          startMs,
+          endMs,
+          initialCapital: capital,
+          topN,
+          activationMode: 'none',
+          walkForward: { trainWindowMs, validateWindowMs, stepMs },
+        });
 
-          // Register engine as a stoppable resource
-          resources.push({
-            name: `paper-engine:${(stratConfig as Record<string, unknown>).strategy ?? 'unknown'}`,
-            stop: async () => {
-              await engine.stop();
-            },
-          });
+        const result = await runner.run(tournamentConfig, candles);
 
-          return {
-            sessionId: session.id,
-            strategyName:
-              (stratConfig as Record<string, unknown>).strategy as string ??
-              'unknown',
-            stop: async () => {
-              await engine.stop();
-            },
-          };
-        };
-
-        const activationResult = await activationBridge.activate(
-          result,
-          'paper',
-          engineFactory,
+        out.info(
+          `${result.strategiesEvaluated} strategies evaluated for ${tradePair} in ${(result.durationMs / 1000).toFixed(1)}s`,
         );
+        for (const entry of result.leaderboard.slice(0, topN)) {
+          const sharpe = entry.oosMetrics.sharpeRatio.toFixed(4);
+          out.table(`#${entry.rank}`, `${entry.strategyName} [${tradePair}] (OOS Sharpe: ${sharpe})`);
+        }
 
-        for (const a of activationResult.activated) {
-          out.table('  Activated', `${a.strategyName} (session: ${a.sessionId})`);
+        if (mode === 'paper') {
+          for (const entry of result.leaderboard.slice(0, topN)) {
+            const liveFeed = new LiveDataFeed({
+              apiKey: config.coinbase.apiKeyName,
+              apiSecret: config.coinbase.apiKeySecret,
+            });
+
+            const paperConfig = parsePaperConfig({
+              pair: tradePair,
+              timeframe,
+              strategyConfig: entry.strategyConfig,
+              initialCapital: capital,
+            });
+
+            const engine = new PaperTradingEngine({
+              config: paperConfig,
+              liveFeed,
+              sessionStore,
+              strategyRegistry: registry,
+              indicatorEngine,
+              riskManager,
+              candleRepo: repo,
+            });
+
+            const session = await engine.start();
+            paperEngines.push(engine);
+
+            const engineKey = `${entry.strategyName}:${tradePair}`;
+            const stopEngine = async (): Promise<void> => { await engine.stop(); };
+            resources.push({
+              name: `paper-engine:${engineKey}`,
+              stop: stopEngine,
+            });
+
+            activationBridge.addEngine(engineKey, {
+              sessionId: session.id,
+              strategyName: engineKey,
+              stop: stopEngine,
+            });
+
+            out.table('  Activated', `${entry.strategyName} [${tradePair}] (session: ${session.id})`);
+          }
         }
       }
 
-      out.success('Activation complete');
+      if (!anyCandles) {
+        out.error('No candle data available for any pair. Run `npm run sync` first.');
+        dbConn.sqlite.close();
+        process.exit(1);
+      }
 
-      // ── Step 4: Dashboard ──────────────────────────────────────
+      if (mode === 'none') {
+        out.info('Activation mode: none (display only)');
+      }
 
-      out.step(4, totalSteps, 'Starting dashboard...');
+      out.success('Tournament and activation complete');
+
+      // ── Step 3: Dashboard ──────────────────────────────────────
+
+      out.step(3, totalSteps, 'Starting dashboard...');
 
       const liveStateStore = new LiveStateStore({
         dbPath: config.database.path,
@@ -336,7 +327,7 @@ program
           apiSecret: config.coinbase.apiKeySecret,
         });
         const paperConfig = parsePaperConfig({
-          pair,
+          pair: tradingPairs[0], // default to first configured pair for ad-hoc starts
           timeframe,
           strategyConfig: stratConfig,
           initialCapital: capital,

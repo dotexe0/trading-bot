@@ -29,7 +29,10 @@ export async function registerSessionRoutes(
       .listSessions(status)
       .map(toApiPaperSession);
 
-    return [...liveSessions, ...paperSessions];
+    const all = [...liveSessions, ...paperSessions];
+    // Most recent first so the current session appears at the top of the dashboard
+    all.sort((a, b) => (b.startTime ?? 0) - (a.startTime ?? 0));
+    return all;
   });
 
   app.get<{

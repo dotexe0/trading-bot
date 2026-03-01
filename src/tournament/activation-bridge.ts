@@ -126,6 +126,15 @@ export class ActivationBridge {
   }
 
   /**
+   * Register an engine handle directly without stopping existing engines.
+   * Used when activating strategies across multiple pairs simultaneously —
+   * unlike activate(), this does not call stopAllEngines() first.
+   */
+  addEngine(strategyName: string, handle: EngineHandle): void {
+    this.engines.set(strategyName, handle);
+  }
+
+  /**
    * Get a copy of currently active engine handles.
    */
   getActiveEngines(): Map<string, EngineHandle> {
