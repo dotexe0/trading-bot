@@ -120,6 +120,68 @@ describe('parseStrategyConfig', () => {
     });
   });
 
+  // -- Z-Score Mean Reversion ------------------------------------------------
+
+  describe('z-score-mean-reversion', () => {
+    it('returns defaults when only strategy is provided', () => {
+      const cfg = parseStrategyConfig({ strategy: 'z-score-mean-reversion' });
+      expect(cfg).toMatchObject({
+        strategy: 'z-score-mean-reversion',
+        period: 20,
+        threshold: 1.5,
+      });
+    });
+
+    it('preserves custom values', () => {
+      const cfg = parseStrategyConfig({
+        strategy: 'z-score-mean-reversion',
+        period: 30,
+        threshold: 2.0,
+      });
+      expect(cfg.strategy).toBe('z-score-mean-reversion');
+      if (cfg.strategy === 'z-score-mean-reversion') {
+        expect(cfg.period).toBe(30);
+        expect(cfg.threshold).toBe(2.0);
+      }
+    });
+
+    it('rejects threshold <= 0', () => {
+      expect(() =>
+        parseStrategyConfig({
+          strategy: 'z-score-mean-reversion',
+          threshold: 0,
+        }),
+      ).toThrow(StrategyConfigError);
+    });
+
+    it('rejects negative threshold', () => {
+      expect(() =>
+        parseStrategyConfig({
+          strategy: 'z-score-mean-reversion',
+          threshold: -1,
+        }),
+      ).toThrow(StrategyConfigError);
+    });
+
+    it('rejects period <= 0', () => {
+      expect(() =>
+        parseStrategyConfig({
+          strategy: 'z-score-mean-reversion',
+          period: 0,
+        }),
+      ).toThrow(StrategyConfigError);
+    });
+
+    it('rejects non-integer period', () => {
+      expect(() =>
+        parseStrategyConfig({
+          strategy: 'z-score-mean-reversion',
+          period: 10.5,
+        }),
+      ).toThrow(StrategyConfigError);
+    });
+  });
+
   // -- Multi-Timeframe Trend -----------------------------------------------
 
   describe('multi-timeframe-trend', () => {
@@ -188,5 +250,20 @@ describe('validateStrategyConfigs', () => {
         { strategy: 'invalid' },
       ]),
     ).toThrow(StrategyConfigError);
+  });
+});
+
+describe('registry integration', () => {
+  it('z-score-mean-reversion resolves to ZScoreMeanReversionStrategy instance', async () => {
+    const { createDefaultRegistry } = await import('../index.js');
+    const registry = createDefaultRegistry();
+    expect(registry.has('z-score-mean-reversion')).toBe(true);
+    const strategy = registry.create({ strategy: 'z-score-mean-reversion' });
+    expect(strategy.name).toBe('z-score-mean-reversion');
+    expect(strategy.minCandles).toBe(21); // default period=20, minCandles=21
+    expect(strategy.requiredIndicators).toEqual([
+      { name: 'SMA', period: 20 },
+      { name: 'SD', period: 20 },
+    ]);
   });
 });
