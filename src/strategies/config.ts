@@ -57,6 +57,14 @@ const bollingerBreakoutSchema = z
   })
   .merge(exitConfigSchema);
 
+const zScoreMeanReversionSchema = z
+  .object({
+    strategy: z.literal('z-score-mean-reversion'),
+    period: z.number().int().positive().default(20),
+    threshold: z.number().positive().default(1.5),
+  })
+  .merge(exitConfigSchema);
+
 const multiTimeframeTrendSchema = z
   .object({
     strategy: z.literal('multi-timeframe-trend'),
@@ -74,6 +82,7 @@ export const strategyConfigSchema = z.discriminatedUnion('strategy', [
   rsiMeanReversionSchema,
   macdMomentumSchema,
   bollingerBreakoutSchema,
+  zScoreMeanReversionSchema,
   multiTimeframeTrendSchema,
 ]);
 
