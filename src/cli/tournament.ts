@@ -15,6 +15,7 @@ import { TournamentRunner } from '../tournament/tournament-runner.js';
 import { parseTournamentConfig } from '../tournament/config.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
+import { ExitConfigStore, hashStrategyConfig } from '../optimizer/index.js';
 
 const program = new Command();
 
@@ -75,6 +76,28 @@ program
       const validateWindowMs = Math.floor(totalMs * 0.3 / 3);
       const stepMs = trainWindowMs + validateWindowMs;
 
+      // Load optimized exit configs and merge into strategy configs
+      const exitStore = new ExitConfigStore({ dbPath: config.database.path });
+      let strategyConfigs: Record<string, unknown>[] | undefined;
+      try {
+        const configs = registry.list().map((strategyName) => {
+          const baseStratConfig = { strategy: strategyName };
+          const hash = hashStrategyConfig(baseStratConfig as Record<string, unknown>);
+          const optimized = exitStore.getForStrategy(strategyName, hash);
+          if (optimized) {
+            out.info(strategyName + ': applying optimized exit config');
+            return { ...baseStratConfig, exits: optimized.exitConfig.exits };
+          }
+          return baseStratConfig;
+        });
+        // Only set strategyConfigs if at least one strategy has optimized exits
+        if (configs.some((c) => 'exits' in c)) {
+          strategyConfigs = configs;
+        }
+      } finally {
+        exitStore.close();
+      }
+
       const tournamentConfig = parseTournamentConfig({
         pair,
         timeframe,
@@ -96,6 +119,7 @@ program
               rankingWeight: 0.3,
             }
           : undefined,
+        strategyConfigs,
       });
 
       out.step(3, 3, `Running tournament (${registry.list().length} strategies)`);
