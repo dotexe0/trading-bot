@@ -1,7 +1,7 @@
 /**
  * Strategy framework barrel export.
  *
- * Re-exports types, config validation, registry, all 6 strategy
+ * Re-exports types, config validation, registry, all 7 strategy
  * implementations, and createDefaultRegistry().
  */
 
@@ -18,8 +18,9 @@ export { MacdMomentumStrategy } from './macd-momentum.js';
 export { BollingerBreakoutStrategy } from './bollinger-breakout.js';
 export { ZScoreMeanReversionStrategy } from './z-score-mean-reversion.js';
 export { MultiTimeframeTrendStrategy } from './multi-timeframe-trend.js';
+export { MomentumBreakoutStrategy } from './momentum-breakout.js';
 
-// Default registry with all 6 built-in strategies
+// Default registry with all 7 built-in strategies
 import { StrategyRegistry } from './registry.js';
 import { SmaCrossoverStrategy } from './sma-crossover.js';
 import { RsiMeanReversionStrategy } from './rsi-mean-reversion.js';
@@ -27,10 +28,11 @@ import { MacdMomentumStrategy } from './macd-momentum.js';
 import { BollingerBreakoutStrategy } from './bollinger-breakout.js';
 import { ZScoreMeanReversionStrategy } from './z-score-mean-reversion.js';
 import { MultiTimeframeTrendStrategy } from './multi-timeframe-trend.js';
+import { MomentumBreakoutStrategy } from './momentum-breakout.js';
 import type { StrategyConfig } from './config.js';
 
 /**
- * Create a registry pre-loaded with all 6 built-in strategies.
+ * Create a registry pre-loaded with all 7 built-in strategies.
  *
  * Each strategy factory extracts the fields it needs from the
  * validated StrategyConfig discriminated union.
@@ -66,6 +68,11 @@ export function createDefaultRegistry(): StrategyRegistry {
   registry.register('multi-timeframe-trend', (c: StrategyConfig) => {
     const cfg = c as Extract<StrategyConfig, { strategy: 'multi-timeframe-trend' }>;
     return new MultiTimeframeTrendStrategy(cfg);
+  });
+
+  registry.register('momentum-breakout', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'momentum-breakout' }>;
+    return new MomentumBreakoutStrategy(cfg);
   });
 
   return registry;

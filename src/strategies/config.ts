@@ -75,6 +75,16 @@ const multiTimeframeTrendSchema = z
   })
   .merge(exitConfigSchema);
 
+const momentumBreakoutSchema = z
+  .object({
+    strategy: z.literal('momentum-breakout'),
+    breakoutWindow: z.number().int().positive().default(20),
+    volumeWindow: z.number().int().positive().default(20),
+    volumeMultiplier: z.number().positive().default(1.5),
+  })
+  .merge(exitConfigSchema);
+// No .refine() -- breakoutWindow, volumeWindow, volumeMultiplier have no cross-field constraints
+
 // -- Discriminated union --------------------------------------------------
 
 export const strategyConfigSchema = z.discriminatedUnion('strategy', [
@@ -84,6 +94,7 @@ export const strategyConfigSchema = z.discriminatedUnion('strategy', [
   bollingerBreakoutSchema,
   zScoreMeanReversionSchema,
   multiTimeframeTrendSchema,
+  momentumBreakoutSchema,
 ]);
 
 // -- Inferred type --------------------------------------------------------
