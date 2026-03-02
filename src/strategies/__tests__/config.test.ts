@@ -207,6 +207,59 @@ describe('parseStrategyConfig', () => {
     });
   });
 
+  // -- Momentum Breakout ----------------------------------------------------
+
+  describe('momentum-breakout', () => {
+    it('returns defaults when only strategy is provided', () => {
+      const cfg = parseStrategyConfig({ strategy: 'momentum-breakout' });
+      expect(cfg).toMatchObject({
+        strategy: 'momentum-breakout',
+        breakoutWindow: 20,
+        volumeWindow: 20,
+        volumeMultiplier: 1.5,
+      });
+    });
+
+    it('preserves custom values', () => {
+      const cfg = parseStrategyConfig({
+        strategy: 'momentum-breakout',
+        breakoutWindow: 10,
+        volumeWindow: 15,
+        volumeMultiplier: 2.0,
+      });
+      expect(cfg.strategy).toBe('momentum-breakout');
+      if (cfg.strategy === 'momentum-breakout') {
+        expect(cfg.breakoutWindow).toBe(10);
+        expect(cfg.volumeWindow).toBe(15);
+        expect(cfg.volumeMultiplier).toBe(2.0);
+      }
+    });
+
+    it('rejects non-positive breakoutWindow', () => {
+      expect(() =>
+        parseStrategyConfig({ strategy: 'momentum-breakout', breakoutWindow: 0 }),
+      ).toThrow(StrategyConfigError);
+    });
+
+    it('rejects non-integer breakoutWindow', () => {
+      expect(() =>
+        parseStrategyConfig({ strategy: 'momentum-breakout', breakoutWindow: 5.5 }),
+      ).toThrow(StrategyConfigError);
+    });
+
+    it('rejects non-positive volumeWindow', () => {
+      expect(() =>
+        parseStrategyConfig({ strategy: 'momentum-breakout', volumeWindow: -1 }),
+      ).toThrow(StrategyConfigError);
+    });
+
+    it('rejects non-positive volumeMultiplier', () => {
+      expect(() =>
+        parseStrategyConfig({ strategy: 'momentum-breakout', volumeMultiplier: 0 }),
+      ).toThrow(StrategyConfigError);
+    });
+  });
+
   // -- Edge cases ----------------------------------------------------------
 
   describe('edge cases', () => {
@@ -265,5 +318,19 @@ describe('registry integration', () => {
       { name: 'SMA', period: 20 },
       { name: 'SD', period: 20 },
     ]);
+  });
+});
+
+describe('registry integration - momentum-breakout', () => {
+  it('momentum-breakout resolves to MomentumBreakoutStrategy instance', async () => {
+    const { createDefaultRegistry } = await import('../index.js');
+    const registry = createDefaultRegistry();
+    expect(registry.has('momentum-breakout')).toBe(true);
+    const strategy = registry.create({ strategy: 'momentum-breakout' });
+    expect(strategy.name).toBe('momentum-breakout');
+    // defaults: breakoutWindow=20, volumeWindow=20 -> minCandles = Math.max(20,20) + 1 = 21
+    expect(strategy.minCandles).toBe(21);
+    expect(strategy.requiredIndicators).toContainEqual({ name: 'Highest', period: 20 });
+    expect(strategy.requiredIndicators).toContainEqual({ name: 'Lowest', period: 20 });
   });
 });
