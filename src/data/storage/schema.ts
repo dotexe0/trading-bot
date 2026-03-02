@@ -314,3 +314,24 @@ export const backtestRuns = sqliteTable(
     index('idx_backtest_runs_created').on(table.createdAt),
   ],
 );
+
+// -- Exit Config Optimizer Tables --
+
+export const exitConfigOptimizations = sqliteTable(
+  'exit_config_optimizations',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    strategyName: text('strategy_name').notNull(),
+    strategyConfigHash: text('strategy_config_hash').notNull(),
+    exitConfigJson: text('exit_config_json').notNull(),
+    profitFactor: text('profit_factor').notNull(), // TEXT per project decimal convention
+    searchedAt: integer('searched_at').notNull(),
+  },
+  (table) => [
+    uniqueIndex('idx_exit_opt_strategy_hash').on(
+      table.strategyName,
+      table.strategyConfigHash,
+    ),
+    index('idx_exit_opt_strategy').on(table.strategyName),
+  ],
+);

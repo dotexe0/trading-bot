@@ -314,6 +314,22 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_backtest_runs_created
       ON backtest_runs (created_at);
+
+    -- Exit Config Optimizer tables
+    CREATE TABLE IF NOT EXISTS exit_config_optimizations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      strategy_name TEXT NOT NULL,
+      strategy_config_hash TEXT NOT NULL,
+      exit_config_json TEXT NOT NULL,
+      profit_factor TEXT NOT NULL,
+      searched_at INTEGER NOT NULL
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_exit_opt_strategy_hash
+      ON exit_config_optimizations (strategy_name, strategy_config_hash);
+
+    CREATE INDEX IF NOT EXISTS idx_exit_opt_strategy
+      ON exit_config_optimizations (strategy_name);
   `);
 
   log.info('Database schema initialized');
