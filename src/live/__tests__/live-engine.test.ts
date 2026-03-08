@@ -12,7 +12,11 @@ import { d } from '../../core/decimal.js';
 import { LiveTradingEngine } from '../live-engine.js';
 import type { LiveTradingConfig, LiveOrder, LiveSession } from '../types.js';
 import type { Candle } from '../../core/types.js';
-import type { Signal } from '../../strategies/types.js';
+import type { Signal, IStrategy } from '../../strategies/types.js';
+import { StrategyRegistry } from '../../strategies/registry.js';
+import { RegimeClassifier } from '../../regime/classifier.js';
+import { MarketRegime } from '../../regime/types.js';
+import type { RegimeLeaderboards, RegimeLeaderboardEntry } from '../../tournament/types.js';
 
 // ── Mock factories ──────────────────────────────────────────────────
 
@@ -192,6 +196,60 @@ function makeCloseSignal(): Signal {
     direction: 'close',
     confidence: 1.0,
     reasoning: 'Test close signal',
+  };
+}
+
+// ── Multi-strategy registry for auto-switch tests ───────────────────
+
+/**
+ * A registry that dispatches create() based on the 'strategy' field.
+ * Enables auto-switch tests where regime change swaps to a different strategy.
+ */
+class MultiStrategyMockRegistry extends StrategyRegistry {
+  private strategies: Map<string, IStrategy>;
+  constructor(strategies: Map<string, IStrategy>) {
+    super();
+    this.strategies = strategies;
+  }
+  override create(rawConfig: unknown): IStrategy {
+    const cfg = rawConfig as Record<string, unknown>;
+    const name = cfg.strategy as string;
+    const s = this.strategies.get(name);
+    if (!s) throw new Error(`No mock strategy registered for '${name}'`);
+    return s;
+  }
+}
+
+/**
+ * Build a minimal RegimeLeaderboards with two regime entries and a fallbackEntry.
+ */
+function makeRegimeLeaderboards(
+  trendingStrategy: string,
+  rangingStrategy: string,
+): RegimeLeaderboards {
+  const makeRegimeEntry = (strategyName: string): RegimeLeaderboardEntry => ({
+    rank: 1,
+    strategyName,
+    strategyConfig: { strategy: strategyName },
+    regimeSharpeRatio: 1.5,
+    regimeWinRate: 0.6,
+    regimeTradeCount: 10,
+    overallOosSharpe: 1.2,
+  });
+
+  return {
+    [MarketRegime.TRENDING]: [makeRegimeEntry(trendingStrategy)],
+    [MarketRegime.RANGING]: [makeRegimeEntry(rangingStrategy)],
+    [MarketRegime.VOLATILE]: [],
+    fallbackEntry: {
+      rank: 1,
+      strategyName: rangingStrategy,
+      strategyConfig: { strategy: rangingStrategy },
+      oosMetrics: {} as any,
+      isMetrics: {} as any,
+      robustnessRatio: 1.0,
+      windowCount: 3,
+    },
   };
 }
 
@@ -659,5 +717,185 @@ describe('LiveTradingEngine', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     expect(orderManager.reconcile).toHaveBeenCalled();
+  });
+});
+
+// ── auto-switch describe block ───────────────────────────────────────
+//
+// vi.spyOn(RegimeClassifier.prototype, 'classify') is used to control
+// returned regimes without needing real candle sequences long enough to
+// produce ADX/ATR values.
+
+describe('auto-switch', () => {
+  let classifySpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    classifySpy?.mockRestore();
+    vi.useRealTimers();
+  });
+
+  function makeAutoSwitchEngine(
+    strategyA: IStrategy,
+    strategyB: IStrategy,
+    leaderboards: RegimeLeaderboards,
+  ) {
+    const feed = makeMockLiveFeed();
+    const om = makeMockOrderManager();
+    const store = makeMockStateStore();
+    const strategies = new Map<string, IStrategy>([
+      ['strategy-a', strategyA],
+      ['strategy-b', strategyB],
+    ]);
+    const reg = new MultiStrategyMockRegistry(strategies);
+    const cfg = makeConfig({ strategyConfig: { strategy: 'strategy-a' } });
+
+    const eng = new LiveTradingEngine({
+      config: cfg,
+      liveFeed: feed as any,
+      orderManager: om as any,
+      stateStore: store as any,
+      strategyRegistry: reg as any,
+      indicatorEngine: makeMockIndicatorEngine() as any,
+      regimeLeaderboards: leaderboards,
+    });
+
+    return { engine: eng, feed, orderManager: om };
+  }
+
+  // TEST 1: Immediate switch when no position (onCandle path)
+
+  it('immediately switches strategy on regime change when no position', async () => {
+    const strategyA: IStrategy = {
+      name: 'strategy-a',
+      minCandles: 2,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+    };
+    const strategyB: IStrategy = {
+      name: 'strategy-b',
+      minCandles: 2,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+    };
+
+    const leaderboards = makeRegimeLeaderboards('strategy-b', 'strategy-a');
+
+    // classify() is called once per candle after buffer >= minCandles (2).
+    // Emitting 3 candles -> classify() is called on candles 1 and 2:
+    //   call #1 (candle 1): RANGING -> sets currentRegime = RANGING
+    //   call #2 (candle 2): TRENDING -> currentRegime=RANGING, no position -> switch fires
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    const { engine, feed } = makeAutoSwitchEngine(strategyA, strategyB, leaderboards);
+    await engine.start();
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // 2 candles: first classify call returns RANGING -> sets currentRegime, no switch
+    feed.emit('candle', makeCandle({ timestamp: 1000 }));
+    feed.emit('candle', makeCandle({ timestamp: 2000 }));
+    // No switch yet
+    expect(switchEvents).toHaveLength(0);
+
+    // 3rd candle: classify returns TRENDING, regime changed, no position -> immediate switch
+    feed.emit('candle', makeCandle({ timestamp: 3000 }));
+
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('strategy-b');
+    expect((engine as any)['strategy'].name).toBe('strategy-b');
+  });
+
+  // TEST 2: Deferred switch fires in onOrderFilled for EXIT/STOP_LOSS
+
+  it('deferred switch fires in onOrderFilled when EXIT fill arrives', async () => {
+    const strategyA: IStrategy = {
+      name: 'strategy-a',
+      minCandles: 2,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+    };
+    const strategyB: IStrategy = {
+      name: 'strategy-b',
+      minCandles: 2,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+    };
+
+    const leaderboards = makeRegimeLeaderboards('strategy-b', 'strategy-a');
+
+    // classify() sequence:
+    //   call #1: RANGING -> sets currentRegime = RANGING
+    //   call #2+: TRENDING -> regime changed
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    const { engine, feed, orderManager } = makeAutoSwitchEngine(strategyA, strategyB, leaderboards);
+    await engine.start();
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Candle 1: sets currentRegime = RANGING
+    feed.emit('candle', makeCandle({ timestamp: 1000 }));
+    feed.emit('candle', makeCandle({ timestamp: 2000 }));
+    // No switch yet
+    expect(switchEvents).toHaveLength(0);
+
+    // Manually set currentPosition to non-null to simulate open position
+    (engine as any)['currentPosition'] = {
+      orderId: 'open-order-1',
+      side: 'BUY',
+      quantity: d('0.01'),
+      entryPrice: d('50000'),
+      pending: false,
+      partialExitFired: false,
+    };
+
+    // Candle 3: classify returns TRENDING, position open -> switch deferred (pendingSwitch set)
+    feed.emit('candle', makeCandle({ timestamp: 3000 }));
+
+    // Strategy should NOT have switched yet
+    expect(switchEvents).toHaveLength(0);
+    expect((engine as any)['pendingSwitch']).not.toBeNull();
+    expect((engine as any)['strategy'].name).toBe('strategy-a');
+
+    // Simulate an EXIT fill — this clears currentPosition and calls checkAndExecutePendingSwitch
+    const exitFill: LiveOrder = {
+      orderId: 'exit-order-1',
+      clientOrderId: 'client-exit',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'SELL',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '500',
+      averageFillPrice: '50000',
+      totalFees: '1',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'EXIT',
+    };
+    orderManager.emit('orderFilled', exitFill);
+
+    // Now the deferred switch should have fired
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('strategy-b');
+    expect((engine as any)['strategy'].name).toBe('strategy-b');
+    expect((engine as any)['pendingSwitch']).toBeNull();
+    expect((engine as any)['currentPosition']).toBeNull();
   });
 });

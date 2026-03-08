@@ -14,6 +14,7 @@ import { PaperTradingEngine } from '../paper/paper-engine.js';
 import { SessionStore } from '../paper/session-store.js';
 import { LiveDataFeed } from '../paper/live-data-feed.js';
 import { parsePaperConfig } from '../paper/config.js';
+import { TournamentStore } from '../tournament/tournament-store.js';
 
 const program = new Command();
 
@@ -46,6 +47,21 @@ program
         initialCapital: capital,
       });
 
+      // Load regime leaderboards from latest tournament (if available)
+      let regimeLeaderboards: import('../tournament/types.js').RegimeLeaderboards | undefined;
+      {
+        const tournamentStore = new TournamentStore({ dbPath: config.database.path });
+        try {
+          const latest = tournamentStore.getLatestTournament();
+          if (latest?.regimeLeaderboards) {
+            regimeLeaderboards = latest.regimeLeaderboards;
+            out.info('Regime auto-switching enabled (tournament leaderboards loaded)');
+          }
+        } finally {
+          tournamentStore.close();
+        }
+      }
+
       const engine = new PaperTradingEngine({
         config: paperConfig,
         liveFeed,
@@ -53,6 +69,7 @@ program
         strategyRegistry: registry,
         indicatorEngine,
         candleRepo: repo,
+        regimeLeaderboards,
       });
 
       // Register SIGINT handler for graceful shutdown

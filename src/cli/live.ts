@@ -22,6 +22,7 @@ import { RateLimiter } from '../live/rate-limiter.js';
 import { parseLiveConfig } from '../live/config.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
+import { TournamentStore } from '../tournament/tournament-store.js';
 
 const program = new Command();
 
@@ -87,6 +88,21 @@ program
         riskConfig,
       });
 
+      // Load regime leaderboards from latest tournament (if available)
+      let regimeLeaderboards: import('../tournament/types.js').RegimeLeaderboards | undefined;
+      {
+        const tournamentStore = new TournamentStore({ dbPath: config.database.path });
+        try {
+          const latest = tournamentStore.getLatestTournament();
+          if (latest?.regimeLeaderboards) {
+            regimeLeaderboards = latest.regimeLeaderboards;
+            out.info('Regime auto-switching enabled (tournament leaderboards loaded)');
+          }
+        } finally {
+          tournamentStore.close();
+        }
+      }
+
       const engine = new LiveTradingEngine({
         config: liveConfig,
         liveFeed,
@@ -95,6 +111,7 @@ program
         strategyRegistry: registry,
         indicatorEngine,
         riskManager,
+        regimeLeaderboards,
       });
 
       // Register SIGINT handler for graceful shutdown
