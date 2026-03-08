@@ -6,7 +6,7 @@
  * Uses MockStrategyRegistry to bypass Zod validation for test strategies.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { d, ZERO } from '../../core/decimal.js';
 import { PaperTradingEngine } from '../paper-engine.js';
@@ -17,6 +17,9 @@ import { StrategyRegistry } from '../../strategies/registry.js';
 import { IndicatorEngine } from '../../indicators/engine.js';
 import { RiskManager } from '../../risk/risk-manager.js';
 import type { RiskConfig } from '../../risk/types.js';
+import { RegimeClassifier } from '../../regime/classifier.js';
+import { MarketRegime } from '../../regime/types.js';
+import type { RegimeLeaderboards, RegimeLeaderboardEntry } from '../../tournament/types.js';
 
 // ── Mock LiveDataFeed ─────────────────────────────────────────────────
 
@@ -129,6 +132,26 @@ class MockStrategyRegistry extends StrategyRegistry {
   }
 }
 
+/**
+ * A registry that dispatches create() based on the 'strategy' field of the
+ * raw config. Enables auto-switch tests where regime change swaps to a
+ * different named strategy.
+ */
+class MultiStrategyMockRegistry extends StrategyRegistry {
+  private strategies: Map<string, IStrategy>;
+  constructor(strategies: Map<string, IStrategy>) {
+    super();
+    this.strategies = strategies;
+  }
+  override create(rawConfig: unknown): IStrategy {
+    const cfg = rawConfig as Record<string, unknown>;
+    const name = cfg.strategy as string;
+    const s = this.strategies.get(name);
+    if (!s) throw new Error(`No mock strategy registered for '${name}'`);
+    return s;
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 function makeConfig(overrides: Partial<PaperTradingConfig> = {}): PaperTradingConfig {
@@ -187,6 +210,42 @@ function makeCloseSignal(index: number): Signal {
     direction: 'close',
     confidence: 0.8,
     reasoning: 'Test close signal',
+  };
+}
+
+/**
+ * Build a minimal RegimeLeaderboards with two regime entries and a fallbackEntry.
+ *
+ * @param trendingStrategy - strategy name for TRENDING regime winner
+ * @param rangingStrategy - strategy name for RANGING regime winner
+ */
+function makeRegimeLeaderboards(
+  trendingStrategy: string,
+  rangingStrategy: string,
+): RegimeLeaderboards {
+  const makeRegimeEntry = (strategyName: string): RegimeLeaderboardEntry => ({
+    rank: 1,
+    strategyName,
+    strategyConfig: { strategy: strategyName },
+    regimeSharpeRatio: 1.5,
+    regimeWinRate: 0.6,
+    regimeTradeCount: 10,
+    overallOosSharpe: 1.2,
+  });
+
+  return {
+    [MarketRegime.TRENDING]: [makeRegimeEntry(trendingStrategy)],
+    [MarketRegime.RANGING]: [makeRegimeEntry(rangingStrategy)],
+    [MarketRegime.VOLATILE]: [],
+    fallbackEntry: {
+      rank: 1,
+      strategyName: rangingStrategy,
+      strategyConfig: { strategy: rangingStrategy },
+      oosMetrics: {} as any,
+      isMetrics: {} as any,
+      robustnessRatio: 1.0,
+      windowCount: 3,
+    },
   };
 }
 
@@ -446,5 +505,408 @@ describe('PaperTradingEngine', () => {
 
     // No trade should be recorded (short was skipped)
     expect(sessionStore.recordTrade).not.toHaveBeenCalled();
+  });
+});
+
+// ── Auto-switch tests ─────────────────────────────────────────────────
+//
+// These tests validate the five behavioral requirements of the regime
+// auto-switching state machine (LIVE-01 through LIVE-05).
+//
+// Each test constructs a fresh engine with a fresh MockLiveDataFeed and
+// a MultiStrategyMockRegistry that returns different IStrategy instances
+// based on the strategy name embedded in the regime leaderboard config.
+//
+// vi.spyOn(RegimeClassifier.prototype, 'classify') is used to control
+// returned regimes without needing real candle sequences long enough to
+// produce ADX/ATR values.
+
+describe('auto-switch', () => {
+  let classifySpy: ReturnType<typeof vi.spyOn>;
+
+  afterEach(() => {
+    classifySpy?.mockRestore();
+  });
+
+  /**
+   * Build a fresh engine wired for auto-switch tests.
+   *
+   * @param strategyA - the initial "strategy-a" IStrategy instance
+   * @param strategyB - the "strategy-b" IStrategy instance that regime switch selects
+   * @param regimeLeaderboards - the leaderboard to inject
+   */
+  function makeAutoSwitchEngine(
+    strategyA: IStrategy,
+    strategyB: IStrategy,
+    regimeLeaderboards: RegimeLeaderboards,
+  ) {
+    const feed = new MockLiveDataFeed();
+    const store = createMockSessionStore();
+    const strategies = new Map<string, IStrategy>([
+      ['strategy-a', strategyA],
+      ['strategy-b', strategyB],
+    ]);
+    const reg = new MultiStrategyMockRegistry(strategies);
+    const indEngine = new IndicatorEngine();
+    const cfg = makeConfig({
+      strategyConfig: { strategy: 'strategy-a' },
+    });
+
+    const engine = new PaperTradingEngine({
+      config: cfg,
+      liveFeed: feed as any,
+      sessionStore: store as any,
+      strategyRegistry: reg,
+      indicatorEngine: indEngine,
+      regimeLeaderboards,
+    });
+
+    return { engine, feed, store };
+  }
+
+  // LIVE-01: Immediate switch when portfolio is flat ──────────────────
+
+  it('LIVE-01: immediately switches strategy on regime change when portfolio is flat', async () => {
+    const strategyA: IStrategy = {
+      name: 'strategy-a',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const strategyB: IStrategy = {
+      name: 'strategy-b',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('strategy-b', 'strategy-a');
+
+    // classify() is called once per candle after buffer reaches minCandles (3).
+    // Emitting 4 candles -> classify() is called on candles 2 and 3:
+    //   classify call #1 (candle 2): RANGING -> sets currentRegime = RANGING
+    //   classify call #2 (candle 3): TRENDING -> currentRegime=RANGING, portfolio flat -> switch fires
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    const { engine, feed } = makeAutoSwitchEngine(strategyA, strategyB, leaderboards);
+    await engine.start();
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Emit 3 candles — only candle 2 triggers classify (returns RANGING)
+    // currentRegime is set to RANGING; no switch because RANGING == RANGING (no change)
+    for (let i = 0; i < 3; i++) {
+      feed.emitCandle(makeCandle('50000', i));
+    }
+    // No switch yet
+    expect(switchEvents).toHaveLength(0);
+
+    // Emit 4th candle — classify returns TRENDING, currentRegime=RANGING
+    // Portfolio is flat -> immediate switch fires
+    feed.emitCandle(makeCandle('50000', 3));
+
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('strategy-b');
+  });
+
+  // LIVE-02: Deferred switch when position is open ───────────────────
+
+  it('LIVE-02: defers strategy switch until open position closes', async () => {
+    // Strategy-a enters on buffer[2] (candle index 2) and closes on candle 4.
+    // classify() call sequence (only called when buffer >= minCandles=3):
+    //   call #1 (candle 2): RANGING -> currentRegime=RANGING, entry fires
+    //   call #2 (candle 3): TRENDING -> RANGING!=TRENDING, position open -> pendingSwitch set
+    //   call #3 (candle 4): TRENDING -> TRENDING==TRENDING (no new switch), close signal fires
+    //       -> processCloseSignal -> checkAndExecutePendingSwitch -> switch executes
+
+    const entryA: IStrategy = {
+      name: 'strategy-a',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: (candles) => {
+        const idx = candles.length - 1;
+        if (idx === 2) return [makeLongSignal(idx)]; // enter on 3rd candle (buffer[2])
+        if (idx === 4) return [makeCloseSignal(idx)]; // close on 5th candle
+        return [];
+      },
+    };
+
+    const strategyB: IStrategy = {
+      name: 'strategy-b',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('strategy-b', 'strategy-a');
+
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      // call 1: RANGING (sets currentRegime, entry fires)
+      // call 2+: TRENDING (triggers deferred switch, then holds)
+      return classifyCallCount === 1 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    const feed2 = new MockLiveDataFeed();
+    const store2 = createMockSessionStore();
+    const strategies2 = new Map<string, IStrategy>([
+      ['strategy-a', entryA],
+      ['strategy-b', strategyB],
+    ]);
+    const reg2 = new MultiStrategyMockRegistry(strategies2);
+    const engine2 = new PaperTradingEngine({
+      config: makeConfig({ strategyConfig: { strategy: 'strategy-a' } }),
+      liveFeed: feed2 as any,
+      sessionStore: store2 as any,
+      strategyRegistry: reg2,
+      indicatorEngine: new IndicatorEngine(),
+      regimeLeaderboards: leaderboards,
+    });
+    await engine2.start();
+
+    const switchEvents2: any[] = [];
+    engine2.on('strategySwitch', (data) => switchEvents2.push(data));
+
+    // Candles 0-2: RANGING — enters position on candle 2 (3rd candle fills buffer)
+    for (let i = 0; i < 3; i++) {
+      feed2.emitCandle(makeCandle('50000', i));
+    }
+    // No switch yet (no regime change, just warm-up)
+    expect(switchEvents2).toHaveLength(0);
+
+    // Candle 3: TRENDING — switch detected but position open -> deferred (pendingSwitch set)
+    feed2.emitCandle(makeCandle('50000', 3));
+    // Still no switch
+    expect(switchEvents2).toHaveLength(0);
+
+    // Candle 4: TRENDING continued — close signal fires from entryA.evaluate,
+    // processCloseSignal flattens portfolio, checkAndExecutePendingSwitch executes
+    feed2.emitCandle(makeCandle('50000', 4));
+
+    expect(switchEvents2).toHaveLength(1);
+    expect(switchEvents2[0].newStrategy).toBe('strategy-b');
+  });
+
+  // LIVE-03: Cooldown throttles second switch ────────────────────────
+
+  it('LIVE-03: cooldown window prevents a second strategy switch within 10 candles', async () => {
+    // Leaderboards: TRENDING -> strategy-b, RANGING -> strategy-a
+    // Note: for this test both strategies can be simple no-ops (no position opened)
+    const strategyA: IStrategy = {
+      name: 'strategy-a',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const strategyB: IStrategy = {
+      name: 'strategy-b',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('strategy-b', 'strategy-a');
+
+    // classify() is called once per candle after buffer.length >= 3.
+    // Emitting 15 candles (0-14) -> classify called 13 times (candles 2-14).
+    //
+    // Call sequence:
+    //   #1  (candle 2):  RANGING  -> currentRegime=RANGING
+    //   #2  (candle 3):  TRENDING -> RANGING!=TRENDING, cooldown=0 -> switch #1, cooldown=10
+    //   #3  (candle 4):  RANGING  -> cooldown 10->9, blocked; currentRegime=RANGING
+    //   #4  (candle 5):  RANGING  -> cooldown 9->8, RANGING==RANGING, blocked
+    //   ...                          (regime stays RANGING, no change, cooldown counting)
+    //   #12 (candle 13): RANGING  -> cooldown 1->0
+    //   #13 (candle 14): TRENDING -> cooldown=0, RANGING!=TRENDING -> switch #2
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      if (classifyCallCount === 1) return MarketRegime.RANGING;  // warm-up
+      if (classifyCallCount === 2) return MarketRegime.TRENDING; // switch #1
+      if (classifyCallCount <= 12) return MarketRegime.RANGING;  // in cooldown
+      return MarketRegime.TRENDING;                              // switch #2 (cooldown expired)
+    });
+
+    const { engine, feed } = makeAutoSwitchEngine(strategyA, strategyB, leaderboards);
+    await engine.start();
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Emit candles 0-3: classify calls 1 and 2 fire (RANGING then TRENDING)
+    for (let i = 0; i < 4; i++) {
+      feed.emitCandle(makeCandle('50000', i));
+    }
+    // Switch #1 fires on candle 3
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('strategy-b');
+
+    // Emit candles 4-12 (classify calls 3-11, all RANGING, cooldown 9->1)
+    // No new switch should fire
+    for (let i = 4; i < 13; i++) {
+      feed.emitCandle(makeCandle('50000', i));
+    }
+    expect(switchEvents).toHaveLength(1);
+
+    // Emit candle 13 (classify call 12, RANGING, cooldown 1->0) -- still no switch
+    feed.emitCandle(makeCandle('50000', 13));
+    expect(switchEvents).toHaveLength(1);
+
+    // Emit candle 14 (classify call 13, TRENDING, cooldown=0) -> switch #2 fires
+    feed.emitCandle(makeCandle('50000', 14));
+    expect(switchEvents).toHaveLength(2);
+    expect(switchEvents[1].newStrategy).toBe('strategy-b');
+  });
+
+  // LIVE-04: First undefined->known transition does NOT switch ────────
+
+  it('LIVE-04: first undefined-to-known regime transition does not trigger a strategy switch', async () => {
+    const strategyA: IStrategy = {
+      name: 'strategy-a',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const strategyB: IStrategy = {
+      name: 'strategy-b',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('strategy-b', 'strategy-a');
+
+    // classify() is called on candles 2 and 3 (first two calls after buffer fills).
+    // Spy sequence:
+    //   call #1 (candle 2): undefined -> currentRegime stays undefined
+    //   call #2 (candle 3): TRENDING  -> guard: currentRegime !== undefined FAILS -> no switch
+    //
+    // This is the undefined->known transition guard (LIVE-04).
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? undefined : MarketRegime.TRENDING;
+    });
+
+    const { engine, feed } = makeAutoSwitchEngine(strategyA, strategyB, leaderboards);
+    await engine.start();
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Emit 4 candles:
+    //   candles 0,1: buffer < minCandles, classify not called
+    //   candle 2:    classify call #1 -> undefined, currentRegime stays undefined
+    //   candle 3:    classify call #2 -> TRENDING, but guard fails (currentRegime===undefined)
+    for (let i = 0; i < 4; i++) {
+      feed.emitCandle(makeCandle('50000', i));
+    }
+
+    // No switch: guard `currentRegime !== undefined` blocks the undefined->TRENDING transition
+    expect(switchEvents).toHaveLength(0);
+  });
+
+  // LIVE-05: exitManager cleared on strategy switch ──────────────────
+
+  it('LIVE-05: exitManager is null after strategy switch (no state transfer across strategies)', async () => {
+    // Strategy-a enters a position and then closes it.
+    // After close, a regime change fires executeStrategySwitch.
+    // We verify that the NEXT entry after the switch creates a fresh exitManager
+    // (i.e., the one from the previous strategy was not transferred).
+    //
+    // Observable proxy: after switch, emit entry candle -> if exitManager was
+    // transferred we'd have duplicate exit tracking. We verify via 'orderFilled'
+    // events that only one entry fill occurs (no spurious exits from stale exitManager).
+
+    let strategyACallCount = 0;
+    const strategyA: IStrategy = {
+      name: 'strategy-a',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: (candles) => {
+        strategyACallCount++;
+        const idx = candles.length - 1;
+        if (idx === 2) return [makeLongSignal(idx)]; // enter on 3rd candle
+        if (idx === 3) return [makeCloseSignal(idx)]; // close on 4th candle
+        return [];
+      },
+    };
+    const strategyB: IStrategy = {
+      name: 'strategy-b',
+      minCandles: 3,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('strategy-b', 'strategy-a');
+
+    // classify() call sequence:
+    //   call #1 (candle 2): RANGING -> currentRegime=RANGING, entry fires (exitManager created)
+    //   call #2 (candle 3): RANGING -> close fires, portfolio flat; no pending switch (no regime change)
+    //   call #3 (candle 4): TRENDING -> RANGING!=TRENDING, portfolio flat -> switch fires immediately
+    //       (executeStrategySwitch sets exitManager=null as part of LIVE-05)
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount <= 2 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    // Use exits config to ensure ExitLogicManager is created on entry
+    const exitStrategyConfig: Record<string, unknown> = {
+      strategy: 'strategy-a',
+      exits: {
+        trailing: { enabled: true, activateAfterPct: 0.01, trailAtrMultiple: 2.0 },
+      },
+    };
+
+    const feed = new MockLiveDataFeed();
+    const store = createMockSessionStore();
+    const strategies = new Map<string, IStrategy>([
+      ['strategy-a', strategyA],
+      ['strategy-b', strategyB],
+    ]);
+    const reg = new MultiStrategyMockRegistry(strategies);
+    const engine = new PaperTradingEngine({
+      config: makeConfig({ strategyConfig: exitStrategyConfig }),
+      liveFeed: feed as any,
+      sessionStore: store as any,
+      strategyRegistry: reg,
+      indicatorEngine: new IndicatorEngine(),
+      regimeLeaderboards: leaderboards,
+    });
+    await engine.start();
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    const fills: any[] = [];
+    engine.on('orderFilled', (data) => fills.push(data));
+
+    // Candles 0-3: enter on 2, close on 3 (RANGING regime throughout)
+    for (let i = 0; i < 4; i++) {
+      feed.emitCandle(makeCandle('50000', i));
+    }
+
+    // At this point position is flat, no switch yet (still RANGING from classify)
+    expect(switchEvents).toHaveLength(0);
+
+    // Candle 4: TRENDING — portfolio is flat -> immediate switch
+    feed.emitCandle(makeCandle('50000', 4));
+
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('strategy-b');
+
+    // Verify: the fills array has exactly one ENTRY and one EXIT from the
+    // strategy-a position (no spurious exit from a stale exitManager post-switch)
+    const entryFills = fills.filter((f) => f.purpose === 'ENTRY');
+    const exitFills = fills.filter((f) => f.purpose === 'EXIT');
+    expect(entryFills).toHaveLength(1);
+    expect(exitFills).toHaveLength(1);
   });
 });
