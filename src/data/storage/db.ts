@@ -212,7 +212,8 @@ export function initializeSchema(sqlite: Database.Database): void {
       leaderboard_json TEXT NOT NULL,
       run_timestamp INTEGER NOT NULL,
       duration_ms INTEGER NOT NULL,
-      strategies_evaluated INTEGER NOT NULL
+      strategies_evaluated INTEGER NOT NULL,
+      regime_leaderboards_json TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_tournaments_run_timestamp
@@ -331,6 +332,17 @@ export function initializeSchema(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_exit_opt_strategy
       ON exit_config_optimizations (strategy_name);
   `);
+
+  // Migrate existing databases: add regime_leaderboards_json if absent.
+  // SQLite does not support IF NOT EXISTS on ADD COLUMN, so we use try/catch.
+  // On first run (new DB): column was already added in CREATE TABLE above.
+  // On existing DB: ALTER TABLE adds it; duplicate-column error is silently swallowed.
+  const alterSql = 'ALTER TABLE tournaments ADD COLUMN regime_leaderboards_json TEXT';
+  try {
+    sqlite.exec(alterSql);
+  } catch (_e) {
+    // Column already present — expected for existing databases
+  }
 
   log.info('Database schema initialized');
 }

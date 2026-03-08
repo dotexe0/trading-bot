@@ -148,6 +148,25 @@ program
         console.log('');
       }
 
+      if (result.regimeLeaderboards) {
+        console.log('');
+        out.banner('Regime-Specific Winners');
+        const regimes = ['TRENDING', 'RANGING', 'VOLATILE'] as const;
+        for (const regime of regimes) {
+          const regimeEntries = result.regimeLeaderboards[regime];
+          if (regimeEntries.length === 0) {
+            out.info(
+              `${regime}: insufficient trades — fallback: ${result.regimeLeaderboards.fallbackEntry.strategyName}`,
+            );
+          } else {
+            out.table(`${regime} #1`, regimeEntries[0].strategyName);
+            out.table('  Regime Sharpe', regimeEntries[0].regimeSharpeRatio.toFixed(4));
+            out.table('  Trade Count', String(regimeEntries[0].regimeTradeCount));
+          }
+          console.log('');
+        }
+      }
+
       out.success('Tournament complete');
     } catch (error) {
       out.error(error instanceof Error ? error.message : String(error));

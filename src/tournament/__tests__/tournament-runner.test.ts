@@ -3,7 +3,7 @@
  * leaderboard ranking, and robustness ratio calculation.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { d, ZERO } from '../../core/decimal.js';
 import type { PerformanceMetrics } from '../../backtest/metrics.js';
 import type { WalkForwardResult, WalkForwardWindowResult } from '../../backtest/walk-forward.js';
@@ -11,6 +11,8 @@ import type { BacktestResult, BacktestConfig } from '../../backtest/types.js';
 import type { Candle } from '../../core/types.js';
 import type { TournamentConfig } from '../config.js';
 import { TournamentRunner } from '../tournament-runner.js';
+import { RegimeClassifier } from '../../regime/classifier.js';
+import { MarketRegime } from '../../regime/types.js';
 
 // ── Helpers ────────────────────────────────────────────────────────
 
@@ -53,6 +55,7 @@ function makeWfResult(
     windows,
     aggregateValidateMetrics: makeMetrics({ sharpeRatio: oosSharpe }),
     config: { trainWindowMs: 1000, validateWindowMs: 1000, stepMs: 1000 },
+    validateTrades: [],
   };
 }
 
@@ -86,6 +89,7 @@ const dummyCandles: Candle[] = [
 describe('TournamentRunner', () => {
   let mockWfRunner: { run: ReturnType<typeof vi.fn> };
   let mockRegistry: { list: ReturnType<typeof vi.fn> };
+  let mockMetricsCalculator: { calculateRegimeBreakdown: ReturnType<typeof vi.fn> };
   let runner: TournamentRunner;
 
   beforeEach(() => {
@@ -95,10 +99,18 @@ describe('TournamentRunner', () => {
     mockRegistry = {
       list: vi.fn().mockReturnValue(['sma-crossover', 'rsi-mean-reversion', 'macd-momentum']),
     };
+    mockMetricsCalculator = {
+      calculateRegimeBreakdown: vi.fn().mockReturnValue([]),
+    };
     runner = new TournamentRunner({
       walkForwardRunner: mockWfRunner as any,
       registry: mockRegistry as any,
+      metricsCalculator: mockMetricsCalculator as any,
     });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('runs all registered strategies and produces leaderboard', async () => {
@@ -238,5 +250,117 @@ describe('TournamentRunner', () => {
     expect(result.leaderboard).toHaveLength(1);
     expect(result.leaderboard[0].mcResult).toBeUndefined();
     expect(result.leaderboard[0].mcAdjustedScore).toBeUndefined();
+  });
+});
+
+// ── Regime leaderboard tests ────────────────────────────────────────
+
+describe('TournamentRunner regime leaderboards', () => {
+  let mockWfRunner: { run: ReturnType<typeof vi.fn> };
+  let mockRegistry: { list: ReturnType<typeof vi.fn> };
+  let mockMetricsCalculator: { calculateRegimeBreakdown: ReturnType<typeof vi.fn> };
+  let runner: TournamentRunner;
+
+  beforeEach(() => {
+    mockWfRunner = { run: vi.fn() };
+    mockRegistry = { list: vi.fn().mockReturnValue(['test-strategy']) };
+    mockMetricsCalculator = {
+      calculateRegimeBreakdown: vi.fn().mockReturnValue([]),
+    };
+    runner = new TournamentRunner({
+      walkForwardRunner: mockWfRunner as any,
+      registry: mockRegistry as any,
+      metricsCalculator: mockMetricsCalculator as any,
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('regimeLeaderboards is defined when classifyAll returns non-empty map', async () => {
+    vi.spyOn(RegimeClassifier.prototype, 'classifyAll').mockReturnValue(
+      new Map([[1000, MarketRegime.TRENDING]]),
+    );
+    mockWfRunner.run.mockReturnValue(makeWfResult(1.5, [1.5]));
+    mockMetricsCalculator.calculateRegimeBreakdown.mockReturnValue([]);
+
+    const config = makeTournamentConfig();
+    const result = await runner.run(config, dummyCandles);
+
+    expect(result.regimeLeaderboards).toBeDefined();
+    expect(result.regimeLeaderboards).toHaveProperty('TRENDING');
+    expect(result.regimeLeaderboards).toHaveProperty('RANGING');
+    expect(result.regimeLeaderboards).toHaveProperty('VOLATILE');
+  });
+
+  it('selects correct winner for TRENDING regime', async () => {
+    mockRegistry.list.mockReturnValue(['stratA', 'stratB']);
+    vi.spyOn(RegimeClassifier.prototype, 'classifyAll').mockReturnValue(
+      new Map([[1000, MarketRegime.TRENDING]]),
+    );
+    mockWfRunner.run
+      .mockReturnValueOnce(makeWfResult(2.0, [2.0]))
+      .mockReturnValueOnce(makeWfResult(1.0, [1.0]));
+
+    // Per-strategy: stratA gets sharpe 2.0, stratB gets sharpe 1.0 for TRENDING
+    mockMetricsCalculator.calculateRegimeBreakdown
+      .mockReturnValueOnce([
+        { regime: MarketRegime.TRENDING, tradeCount: 5, sharpeRatio: 2.0, winRate: 0.6, timePct: 0.3 },
+      ])
+      .mockReturnValueOnce([
+        { regime: MarketRegime.TRENDING, tradeCount: 4, sharpeRatio: 1.0, winRate: 0.5, timePct: 0.3 },
+      ]);
+
+    const config = makeTournamentConfig({ strategyConfigs: [
+      { strategy: 'stratA' },
+      { strategy: 'stratB' },
+    ] });
+    const result = await runner.run(config, dummyCandles);
+
+    expect(result.regimeLeaderboards!.TRENDING[0].strategyName).toBe('stratA');
+    expect(result.regimeLeaderboards!.TRENDING[0].regimeSharpeRatio).toBe(2.0);
+  });
+
+  it('excludes strategies with fewer than MIN_REGIME_TRADES (3) OOS trades', async () => {
+    vi.spyOn(RegimeClassifier.prototype, 'classifyAll').mockReturnValue(
+      new Map([[1000, MarketRegime.TRENDING]]),
+    );
+    mockWfRunner.run.mockReturnValue(makeWfResult(1.5, [1.5]));
+    // tradeCount 2 < MIN_REGIME_TRADES 3 — should be excluded
+    mockMetricsCalculator.calculateRegimeBreakdown.mockReturnValue([
+      { regime: MarketRegime.TRENDING, tradeCount: 2, sharpeRatio: 3.0, winRate: 0.7, timePct: 0.2 },
+    ]);
+
+    const config = makeTournamentConfig();
+    const result = await runner.run(config, dummyCandles);
+
+    expect(result.regimeLeaderboards!.TRENDING).toHaveLength(0);
+    expect(result.regimeLeaderboards!.fallbackEntry).toBeDefined();
+  });
+
+  it('fallbackEntry equals overall leaderboard winner', async () => {
+    mockRegistry.list.mockReturnValue(['stratA', 'stratB']);
+    vi.spyOn(RegimeClassifier.prototype, 'classifyAll').mockReturnValue(
+      new Map([[1000, MarketRegime.TRENDING]]),
+    );
+    // stratA has higher OOS Sharpe (2.0) so it should be rank 1 and the fallback
+    mockWfRunner.run
+      .mockReturnValueOnce(makeWfResult(2.0, [2.0]))
+      .mockReturnValueOnce(makeWfResult(1.0, [1.0]));
+
+    // All regimes have tradeCount < MIN_REGIME_TRADES — all arrays empty
+    mockMetricsCalculator.calculateRegimeBreakdown.mockReturnValue([
+      { regime: MarketRegime.TRENDING, tradeCount: 1, sharpeRatio: 3.0, winRate: 0.7, timePct: 0.2 },
+    ]);
+
+    const config = makeTournamentConfig({ strategyConfigs: [
+      { strategy: 'stratA' },
+      { strategy: 'stratB' },
+    ] });
+    const result = await runner.run(config, dummyCandles);
+
+    expect(result.regimeLeaderboards!.TRENDING).toHaveLength(0);
+    expect(result.regimeLeaderboards!.fallbackEntry.strategyName).toBe('stratA');
   });
 });

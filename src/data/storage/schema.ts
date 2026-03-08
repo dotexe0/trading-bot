@@ -186,6 +186,7 @@ export const tournaments = sqliteTable(
     runTimestamp: integer('run_timestamp').notNull(),
     durationMs: integer('duration_ms').notNull(),
     strategiesEvaluated: integer('strategies_evaluated').notNull(),
+    regimeLeaderboardsJson: text('regime_leaderboards_json'),  // nullable — Phase 23 addition
   },
   (table) => [
     index('idx_tournaments_run_timestamp').on(table.runTimestamp),

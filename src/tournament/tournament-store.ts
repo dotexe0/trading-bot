@@ -12,7 +12,7 @@ import { createModuleLogger } from '../core/logger.js';
 import { createDatabase, initializeSchema } from '../data/storage/db.js';
 import { tournaments, activeStrategies } from '../data/storage/schema.js';
 import type { PerformanceMetrics } from '../backtest/metrics.js';
-import type { TournamentResult, LeaderboardEntry, ActivationRecord } from './types.js';
+import type { TournamentResult, LeaderboardEntry, ActivationRecord, RegimeLeaderboards } from './types.js';
 import type { TournamentConfig } from './config.js';
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type * as schema from '../data/storage/schema.js';
@@ -116,6 +116,9 @@ export class TournamentStore {
     const leaderboardJson = JSON.stringify(
       result.leaderboard.map(serializeEntry),
     );
+    const regimeLeaderboardsJson = result.regimeLeaderboards
+      ? JSON.stringify(result.regimeLeaderboards)
+      : null;
 
     this.db.insert(tournaments).values({
       id: result.id,
@@ -124,6 +127,7 @@ export class TournamentStore {
       runTimestamp: result.runTimestamp,
       durationMs: result.durationMs,
       strategiesEvaluated: result.strategiesEvaluated,
+      regimeLeaderboardsJson,
     }).run();
 
     log.info(
@@ -275,6 +279,9 @@ export class TournamentStore {
     const config = JSON.parse(row.configJson) as TournamentConfig;
     const rawLeaderboard = JSON.parse(row.leaderboardJson) as Record<string, unknown>[];
     const leaderboard = rawLeaderboard.map(deserializeEntry);
+    const regimeLeaderboards = row.regimeLeaderboardsJson
+      ? (JSON.parse(row.regimeLeaderboardsJson) as RegimeLeaderboards)
+      : undefined;
 
     return {
       id: row.id,
@@ -283,6 +290,7 @@ export class TournamentStore {
       runTimestamp: row.runTimestamp,
       durationMs: row.durationMs,
       strategiesEvaluated: row.strategiesEvaluated,
+      regimeLeaderboards,
     };
   }
 
