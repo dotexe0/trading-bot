@@ -36,8 +36,12 @@ import { CorrelationCalculator, CorrelationStore } from '../correlation/index.js
 import type { CorrelationConfig } from '../correlation/index.js';
 import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
 import type { ExitConfig } from '../risk/exit-logic/types.js';
+import type { RegimeLeaderboards } from '../tournament/types.js';
 
 const log = createModuleLogger('live-engine');
+
+/** Number of candles to wait after a strategy switch before allowing another switch. */
+const STRATEGY_SWITCH_COOLDOWN_CANDLES = 10;
 
 /** Default position size as fraction of equity when no risk manager is used. */
 const DEFAULT_POSITION_SIZE_PCT = 0.95;
@@ -64,6 +68,8 @@ export interface LiveTradingEngineOptions {
   correlationConfig?: CorrelationConfig;
   /** Path to the SQLite database for storing correlation snapshots. */
   correlationDbPath?: string;
+  /** Regime leaderboards from the latest tournament. When provided, enables auto-switching. */
+  regimeLeaderboards?: RegimeLeaderboards;
 }
 
 interface CurrentPosition {
@@ -107,6 +113,10 @@ export class LiveTradingEngine extends EventEmitter {
   private readonly classifier = new RegimeClassifier();
   private correlationCalculator?: CorrelationCalculator;
   private correlationStore?: CorrelationStore;
+  private readonly regimeLeaderboards?: RegimeLeaderboards;
+  private currentRegime: import('../regime/types.js').MarketRegime | undefined = undefined;
+  private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
+  private cooldownCandlesRemaining: number = 0;
 
   constructor(options: LiveTradingEngineOptions) {
     super();
@@ -119,6 +129,7 @@ export class LiveTradingEngine extends EventEmitter {
     this.riskManager = options.riskManager;
     this.strategyStats = options.strategyStats;
     this.resumeSessionId = options.resumeSessionId;
+    this.regimeLeaderboards = options.regimeLeaderboards;
 
     if (options.correlationConfig?.enabled) {
       this.correlationCalculator = new CorrelationCalculator(
@@ -397,6 +408,36 @@ export class LiveTradingEngine extends EventEmitter {
 
     // 3. Strategy evaluation (pass regime as 5th argument)
     const regime = this.classifier.classify(buffer);
+
+    // Regime-change auto-switch (only when regimeLeaderboards provided)
+    if (this.regimeLeaderboards) {
+      if (this.cooldownCandlesRemaining > 0) {
+        this.cooldownCandlesRemaining--;
+      }
+      if (
+        regime !== undefined &&
+        this.currentRegime !== undefined &&
+        regime !== this.currentRegime &&
+        this.cooldownCandlesRemaining === 0
+      ) {
+        const winnerConfig = this.resolveRegimeWinner(regime);
+        if (winnerConfig) {
+          if (this.currentPosition === null) {
+            this.executeStrategySwitch(winnerConfig);
+          } else {
+            this.pendingSwitch = { strategyConfig: winnerConfig };
+            log.info(
+              { regime, currentStrategy: this.strategy.name },
+              'Regime changed with open position -- switch deferred until position closes',
+            );
+          }
+        }
+      }
+      if (regime !== undefined) {
+        this.currentRegime = regime;
+      }
+    }
+
     const signals = this.strategy.evaluate(
       buffer,
       candle.pair,
@@ -657,6 +698,36 @@ export class LiveTradingEngine extends EventEmitter {
     this.exitManager = null;
   }
 
+  private resolveRegimeWinner(
+    regime: import('../regime/types.js').MarketRegime,
+  ): Record<string, unknown> | null {
+    if (!this.regimeLeaderboards) return null;
+    const entries = this.regimeLeaderboards[regime];
+    if (entries && entries.length > 0) {
+      return entries[0].strategyConfig;
+    }
+    return this.regimeLeaderboards.fallbackEntry.strategyConfig;
+  }
+
+  private executeStrategySwitch(strategyConfig: Record<string, unknown>): void {
+    this.strategy = this.strategyRegistry.create(strategyConfig);
+    this.exitManager = null; // LIVE-05: never transfer ExitLogicManager state
+    this.stopLossTracker = null;
+    this.cooldownCandlesRemaining = STRATEGY_SWITCH_COOLDOWN_CANDLES;
+    log.info(
+      { newStrategy: this.strategy.name, cooldown: STRATEGY_SWITCH_COOLDOWN_CANDLES },
+      'Strategy switched due to regime change',
+    );
+    this.emit('strategySwitch', { newStrategy: this.strategy.name });
+  }
+
+  private checkAndExecutePendingSwitch(): void {
+    if (this.pendingSwitch && this.currentPosition === null) {
+      this.executeStrategySwitch(this.pendingSwitch.strategyConfig);
+      this.pendingSwitch = null;
+    }
+  }
+
   // ── Order event handlers ──────────────────────────────────────────
 
   private onOrderFilled(order: LiveOrder): void {
@@ -771,6 +842,7 @@ export class LiveTradingEngine extends EventEmitter {
       this.positionDirection = null;
       this.stopLossTracker = null;
       this.exitManager = null;
+      this.checkAndExecutePendingSwitch(); // fire any deferred switch now position is gone
     }
 
     this.emit('orderFilled', order);
