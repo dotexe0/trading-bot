@@ -7,6 +7,7 @@
 
 import type { PerformanceMetrics } from '../backtest/metrics.js';
 import type { MonteCarloResult } from '../montecarlo/types.js';
+import { MarketRegime } from '../regime/types.js';
 
 // Re-export TournamentConfig from config module (Zod-inferred)
 export type { TournamentConfig } from './config.js';
@@ -33,6 +34,30 @@ export interface LeaderboardEntry {
   mcAdjustedScore?: number;
 }
 
+/** Per-regime leaderboard entry produced by regime-aware tournament. */
+export interface RegimeLeaderboardEntry {
+  rank: number;
+  strategyName: string;
+  strategyConfig: Record<string, unknown>;
+  /** Sharpe ratio for OOS trades entered during this regime */
+  regimeSharpeRatio: number;
+  /** Win rate for OOS trades entered during this regime (0-1) */
+  regimeWinRate: number;
+  /** Number of OOS trades that entered during this regime */
+  regimeTradeCount: number;
+  /** Overall OOS Sharpe for reference */
+  overallOosSharpe: number;
+}
+
+/** Per-regime leaderboards produced by a regime-aware tournament run. */
+export interface RegimeLeaderboards {
+  [MarketRegime.TRENDING]: RegimeLeaderboardEntry[];
+  [MarketRegime.RANGING]: RegimeLeaderboardEntry[];
+  [MarketRegime.VOLATILE]: RegimeLeaderboardEntry[];
+  /** Overall winner used as fallback when a regime has insufficient trades */
+  fallbackEntry: LeaderboardEntry;
+}
+
 /** Complete result from a tournament run. */
 export interface TournamentResult {
   /** Unique tournament identifier */
@@ -47,6 +72,8 @@ export interface TournamentResult {
   durationMs: number;
   /** Number of strategies evaluated */
   strategiesEvaluated: number;
+  /** Per-regime leaderboards. Optional for backward compatibility with pre-Phase-23 stored records. */
+  regimeLeaderboards?: RegimeLeaderboards;
 }
 
 /** Record of a strategy activated for paper or live trading. */

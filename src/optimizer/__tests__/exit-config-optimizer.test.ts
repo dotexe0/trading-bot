@@ -38,6 +38,7 @@ function makeWfResult(pf: number, totalTrades: number): WalkForwardResult {
     windows: [],
     aggregateValidateMetrics: makeMetrics(pf, totalTrades),
     config: { trainWindowMs: 1, validateWindowMs: 1, stepMs: 1 },
+    validateTrades: [],
   };
 }
 

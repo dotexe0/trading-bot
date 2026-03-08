@@ -7,26 +7,39 @@
 import crypto from 'node:crypto';
 import { createModuleLogger } from '../core/logger.js';
 import type { Candle } from '../core/types.js';
-import type { BacktestConfig } from '../backtest/types.js';
+import type { BacktestConfig, Trade } from '../backtest/types.js';
 import type { WalkForwardRunner, WalkForwardResult } from '../backtest/walk-forward.js';
 import type { StrategyRegistry } from '../strategies/registry.js';
 import type { TournamentConfig } from './config.js';
-import type { TournamentResult, LeaderboardEntry } from './types.js';
-import type { PerformanceMetrics } from '../backtest/metrics.js';
+import type { TournamentResult, LeaderboardEntry, RegimeLeaderboards, RegimeLeaderboardEntry } from './types.js';
+import type { PerformanceMetrics, MetricsCalculator } from '../backtest/metrics.js';
 import { MonteCarloEngine } from '../montecarlo/monte-carlo-engine.js';
+import { RegimeClassifier } from '../regime/classifier.js';
+import { MarketRegime } from '../regime/types.js';
+import { MIN_REGIME_TRADES } from './constants.js';
 
 const log = createModuleLogger('tournament-runner');
+
+interface EntryAccumulator {
+  entry: LeaderboardEntry;
+  validateTrades: Trade[];
+  validateCandleCount: number;
+}
 
 export class TournamentRunner {
   private readonly walkForwardRunner: WalkForwardRunner;
   private readonly registry: StrategyRegistry;
+  private readonly metricsCalculator: MetricsCalculator;
+  private readonly classifier = new RegimeClassifier();
 
   constructor(deps: {
     walkForwardRunner: WalkForwardRunner;
     registry: StrategyRegistry;
+    metricsCalculator: MetricsCalculator;
   }) {
     this.walkForwardRunner = deps.walkForwardRunner;
     this.registry = deps.registry;
+    this.metricsCalculator = deps.metricsCalculator;
   }
 
   /**
@@ -53,7 +66,8 @@ export class TournamentRunner {
     );
 
     const startTime = Date.now();
-    const entries: LeaderboardEntry[] = [];
+    const precomputedRegimes = this.classifier.classifyAll(candles);
+    const accumulators: EntryAccumulator[] = [];
 
     for (const stratConfig of strategyConfigs) {
       const strategyName =
@@ -79,6 +93,8 @@ export class TournamentRunner {
         backtestConfig,
         config.walkForward,
         candles,
+        undefined,
+        precomputedRegimes,
       );
 
       // Compute average IS Sharpe across all windows
@@ -92,14 +108,24 @@ export class TournamentRunner {
       // Compute average IS metrics (use first window's train metrics as representative)
       const isMetrics = this.computeAvgIsMetrics(wfResult);
 
-      entries.push({
-        rank: 0, // assigned after sort
-        strategyName,
-        strategyConfig: stratConfig as Record<string, unknown>,
-        oosMetrics: wfResult.aggregateValidateMetrics,
-        isMetrics,
-        robustnessRatio,
-        windowCount: wfResult.windows.length,
+      const validateCandleCount = wfResult.windows.reduce((sum, w) => {
+        return sum + candles.filter(
+          (c) => c.timestamp >= w.window.validateStart && c.timestamp < w.window.validateEnd,
+        ).length;
+      }, 0);
+
+      accumulators.push({
+        entry: {
+          rank: 0, // assigned after sort
+          strategyName,
+          strategyConfig: stratConfig as Record<string, unknown>,
+          oosMetrics: wfResult.aggregateValidateMetrics,
+          isMetrics,
+          robustnessRatio,
+          windowCount: wfResult.windows.length,
+        },
+        validateTrades: wfResult.validateTrades,
+        validateCandleCount,
       });
 
       // Optional MC post-processing: run MC on last OOS window result
@@ -111,7 +137,7 @@ export class TournamentRunner {
 
         const lastWindow = wfResult.windows[wfResult.windows.length - 1];
         if (lastWindow && lastWindow.validateResult.trades.length >= config.monteCarlo.minTrades) {
-          const entry = entries[entries.length - 1];
+          const entry = accumulators[accumulators.length - 1].entry;
           try {
             const mcResult = mcEngine.run(lastWindow.validateResult, strategyName);
             entry.mcResult = mcResult;
@@ -153,6 +179,9 @@ export class TournamentRunner {
       await new Promise((r) => setImmediate(r));
     }
 
+    // Extract entries from accumulators for sorting
+    const entries = accumulators.map((a) => a.entry);
+
     // Sort by mcAdjustedScore when MC is enabled, otherwise by OOS Sharpe
     if (config.monteCarlo?.enabled) {
       entries.sort((a, b) => {
@@ -169,6 +198,13 @@ export class TournamentRunner {
       entries[i].rank = i + 1;
     }
 
+    // Build regime leaderboards (accumulators order preserved; sort is on entries copy)
+    const regimeLeaderboards = this.buildRegimeLeaderboards(
+      accumulators,
+      precomputedRegimes,
+      entries[0],
+    );
+
     const durationMs = Date.now() - startTime;
 
     const result: TournamentResult = {
@@ -178,6 +214,7 @@ export class TournamentRunner {
       runTimestamp: startTime,
       durationMs,
       strategiesEvaluated: strategyConfigs.length,
+      regimeLeaderboards,
     };
 
     log.info(
@@ -221,5 +258,63 @@ export class TournamentRunner {
       return wfResult.aggregateValidateMetrics; // fallback to OOS
     }
     return wfResult.windows[wfResult.windows.length - 1].trainMetrics;
+  }
+
+  /**
+   * Build per-regime leaderboards from strategy accumulators.
+   *
+   * @param accumulators - Per-strategy entries with their OOS trades
+   * @param precomputedRegimes - Full-series regime map from classifyAll()
+   * @param fallbackEntry - Overall leaderboard winner (rank 1)
+   * @returns RegimeLeaderboards or undefined when regime data is unavailable
+   */
+  private buildRegimeLeaderboards(
+    accumulators: EntryAccumulator[],
+    precomputedRegimes: Map<number, MarketRegime>,
+    fallbackEntry: LeaderboardEntry | undefined,
+  ): RegimeLeaderboards | undefined {
+    if (precomputedRegimes.size === 0 || accumulators.length === 0) return undefined;
+    if (!fallbackEntry) return undefined;
+
+    const regimeArrays: Record<MarketRegime, RegimeLeaderboardEntry[]> = {
+      [MarketRegime.TRENDING]: [],
+      [MarketRegime.RANGING]: [],
+      [MarketRegime.VOLATILE]: [],
+    };
+
+    for (const acc of accumulators) {
+      const breakdown = this.metricsCalculator.calculateRegimeBreakdown(
+        precomputedRegimes,
+        acc.validateTrades,
+        acc.validateCandleCount,
+      );
+
+      for (const bd of breakdown) {
+        if (bd.tradeCount < MIN_REGIME_TRADES) continue;
+        regimeArrays[bd.regime].push({
+          rank: 0,
+          strategyName: acc.entry.strategyName,
+          strategyConfig: acc.entry.strategyConfig,
+          regimeSharpeRatio: bd.sharpeRatio,
+          regimeWinRate: bd.winRate,
+          regimeTradeCount: bd.tradeCount,
+          overallOosSharpe: acc.entry.oosMetrics.sharpeRatio,
+        });
+      }
+    }
+
+    for (const regime of Object.values(MarketRegime)) {
+      regimeArrays[regime].sort((a, b) => b.regimeSharpeRatio - a.regimeSharpeRatio);
+      regimeArrays[regime].forEach((e, i) => {
+        e.rank = i + 1;
+      });
+    }
+
+    return {
+      [MarketRegime.TRENDING]: regimeArrays[MarketRegime.TRENDING],
+      [MarketRegime.RANGING]: regimeArrays[MarketRegime.RANGING],
+      [MarketRegime.VOLATILE]: regimeArrays[MarketRegime.VOLATILE],
+      fallbackEntry,
+    };
   }
 }

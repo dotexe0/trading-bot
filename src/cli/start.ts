@@ -177,6 +177,7 @@ program
       const runner = new TournamentRunner({
         walkForwardRunner,
         registry,
+        metricsCalculator,
       });
 
       // Compute walk-forward window durations from data range
