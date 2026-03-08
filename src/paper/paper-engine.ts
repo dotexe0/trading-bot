@@ -38,11 +38,15 @@ import { CorrelationCalculator, CorrelationStore } from '../correlation/index.js
 import type { CorrelationConfig } from '../correlation/index.js';
 import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
 import type { ExitConfig } from '../risk/exit-logic/types.js';
+import type { RegimeLeaderboards } from '../tournament/types.js';
 
 const log = createModuleLogger('paper-engine');
 
 /** Default position size as fraction of equity when no risk manager is used. */
 const DEFAULT_POSITION_SIZE_PCT = 0.95;
+
+/** Number of candles to wait after a strategy switch before allowing another switch. */
+const STRATEGY_SWITCH_COOLDOWN_CANDLES = 10;
 
 export interface PaperTradingEngineOptions {
   config: PaperTradingConfig;
@@ -58,6 +62,8 @@ export interface PaperTradingEngineOptions {
   correlationDbPath?: string;
   /** Candle repository for preloading historical buffer on startup. */
   candleRepo?: CandleRepository;
+  /** Regime leaderboards from the latest tournament. When provided, enables auto-switching. */
+  regimeLeaderboards?: RegimeLeaderboards;
 }
 
 export class PaperTradingEngine extends EventEmitter {
@@ -86,6 +92,10 @@ export class PaperTradingEngine extends EventEmitter {
   private correlationCalculator?: CorrelationCalculator;
   private correlationStore?: CorrelationStore;
   private readonly candleRepo?: CandleRepository;
+  private readonly regimeLeaderboards?: RegimeLeaderboards;
+  private currentRegime: import('../regime/types.js').MarketRegime | undefined = undefined;
+  private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
+  private cooldownCandlesRemaining: number = 0;
 
   constructor(options: PaperTradingEngineOptions) {
     super();
@@ -97,6 +107,7 @@ export class PaperTradingEngine extends EventEmitter {
     this.riskManager = options.riskManager;
     this.strategyStats = options.strategyStats;
     this.candleRepo = options.candleRepo;
+    this.regimeLeaderboards = options.regimeLeaderboards;
 
     if (options.correlationConfig?.enabled) {
       this.correlationCalculator = new CorrelationCalculator(
