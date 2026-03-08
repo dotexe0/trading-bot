@@ -295,6 +295,33 @@ program
         }
         anyCandles = true;
 
+        if (registry.list().length < 2) {
+          out.warn(`Only ${registry.list().length} strategy registered for ${tradePair} — skipping tournament`);
+          continue;
+        }
+
+        // Load optimized exit configs for this tournament run
+        let strategyConfigs: Record<string, unknown>[] | undefined;
+        {
+          const exitStore = new ExitConfigStore({ dbPath: config.database.path });
+          try {
+            const configs = registry.list().map((strategyName) => {
+              const baseStratConfig = { strategy: strategyName };
+              const hash = hashStrategyConfig(baseStratConfig as Record<string, unknown>);
+              const optimized = exitStore.getForStrategy(strategyName, hash);
+              if (optimized) {
+                return { ...baseStratConfig, exits: optimized.exitConfig.exits };
+              }
+              return baseStratConfig;
+            });
+            if (configs.some((c) => 'exits' in c)) {
+              strategyConfigs = configs;
+            }
+          } finally {
+            exitStore.close();
+          }
+        }
+
         const tournamentConfig = parseTournamentConfig({
           pair: tradePair,
           timeframe,
@@ -304,9 +331,11 @@ program
           topN,
           activationMode: 'none',
           walkForward: { trainWindowMs, validateWindowMs, stepMs },
+          strategyConfigs,
         });
 
         const result = await runner.run(tournamentConfig, candles);
+        tournamentStore.saveTournament(result);
 
         out.info(
           `${result.strategiesEvaluated} strategies evaluated for ${tradePair} in ${(result.durationMs / 1000).toFixed(1)}s`,
@@ -338,6 +367,7 @@ program
               indicatorEngine,
               riskManager,
               candleRepo: repo,
+              regimeLeaderboards: result.regimeLeaderboards,
             });
 
             const session = await engine.start();
