@@ -103,6 +103,74 @@ export class RegimeClassifier {
   }
 
   /**
+   * Classify all candles at once, returning a Map keyed by candle timestamp.
+   *
+   * Builds regime labels in forward (oldest-to-newest) order — no lookahead:
+   * the label at position i only uses data from candles[0..i].
+   *
+   * Returns an empty map when candles.length < MIN_REGIME_CANDLES.
+   * Map entries begin at the first candle that has sufficient smoothing history,
+   * i.e. after the alignment offset plus REGIME_SMOOTHING_WINDOW - 1 positions.
+   *
+   * @param candles - Historical candles sorted ascending by timestamp
+   * @returns Map from candle timestamp to MarketRegime
+   */
+  classifyAll(candles: Candle[]): Map<number, MarketRegime> {
+    const result = new Map<number, MarketRegime>();
+    if (candles.length < MIN_REGIME_CANDLES) return result;
+
+    const adxResult = this.engine.compute({ name: 'ADX', period: 14 }, candles);
+    const atrResult = this.engine.compute({ name: 'ATR', period: 14 }, candles);
+    const adxValues = adxResult.values as ADXPoint[];
+    const atrValues = atrResult.values as number[];
+
+    if (adxValues.length === 0 || atrValues.length === 0) return result;
+
+    const alignedCount = Math.min(adxValues.length, atrValues.length);
+    const rawLabels: MarketRegime[] = [];
+
+    // i=0 is OLDEST aligned position; i=alignedCount-1 is NEWEST
+    // Map to arrays: adxValues[adxValues.length - alignedCount + i] (NOT end - 1 - i)
+    for (let i = 0; i < alignedCount; i++) {
+      const adxIdx = adxValues.length - alignedCount + i;
+      const atrIdx = atrValues.length - alignedCount + i;
+      const adxPoint = adxValues[adxIdx];
+      const atrValue = atrValues[atrIdx];
+
+      if (adxPoint.adx === undefined) {
+        rawLabels.push(MarketRegime.RANGING);
+        continue;
+      }
+
+      const atrHistoryStart = Math.max(0, atrIdx - ATR_ROLLING_AVERAGE_PERIOD);
+      const atrHistorySlice = atrValues.slice(atrHistoryStart, atrIdx);
+
+      if (atrHistorySlice.length === 0) {
+        rawLabels.push(MarketRegime.RANGING);
+        continue;
+      }
+
+      const atrRollingAvg = atrHistorySlice.reduce((s, v) => s + v, 0) / atrHistorySlice.length;
+      rawLabels.push(this.classifyRaw(adxPoint.adx, atrValue, atrRollingAvg));
+    }
+
+    // rawLabels is already oldest-to-newest — no reverse needed (unlike classify())
+    // Apply forward smoothing pass: same window logic as classify(), but emit per-position
+    let currentRegime = MarketRegime.RANGING;
+    const firstCandleIdx = candles.length - alignedCount;
+
+    for (let i = REGIME_SMOOTHING_WINDOW - 1; i < rawLabels.length; i++) {
+      const window = rawLabels.slice(i - (REGIME_SMOOTHING_WINDOW - 1), i + 1);
+      if (window.every((l) => l === window[0])) {
+        currentRegime = window[0];
+      }
+      result.set(candles[firstCandleIdx + i].timestamp, currentRegime);
+    }
+
+    return result;
+  }
+
+  /**
    * Classify a single raw data point into a market regime.
    *
    * Priority: TRENDING (ADX dominates) > VOLATILE (ATR spike) > RANGING (default).

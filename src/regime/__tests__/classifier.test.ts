@@ -158,4 +158,68 @@ describe('RegimeClassifier', () => {
       expect([MarketRegime.TRENDING, MarketRegime.RANGING, MarketRegime.VOLATILE]).toContain(result);
     });
   });
+
+  describe('classifyAll', () => {
+    it('returns empty map when candles < MIN_REGIME_CANDLES', () => {
+      const candles = makeCandles(
+        Array.from({ length: MIN_REGIME_CANDLES - 1 }, (_, i) => 30000 + i),
+      );
+      const result = classifier.classifyAll(candles);
+      expect(result.size).toBe(0);
+    });
+
+    it('returns non-empty map for sufficient trending candles', () => {
+      const candles = makeTrendingCandles(100, 10);
+      const result = classifier.classifyAll(candles);
+      expect(result.size).toBeGreaterThan(0);
+      const validRegimes = [MarketRegime.TRENDING, MarketRegime.RANGING, MarketRegime.VOLATILE];
+      for (const value of result.values()) {
+        expect(validRegimes).toContain(value);
+      }
+    });
+
+    it('map keys are candle timestamps (not array indices)', () => {
+      const candles = makeCandles(
+        Array.from({ length: 60 }, (_, i) => 30000 + i * 5),
+      );
+      const result = classifier.classifyAll(candles);
+      expect(result.size).toBeGreaterThan(0);
+
+      const candleTimestamps = new Set(candles.map((c) => c.timestamp));
+      // Every key in the map must be a candle timestamp
+      for (const key of result.keys()) {
+        expect(candleTimestamps.has(key)).toBe(true);
+      }
+      // No key should be a small integer like 0, 1, 2 (which would indicate index-based keying)
+      for (const key of result.keys()) {
+        expect(key).toBeGreaterThan(100);
+      }
+    });
+
+    it('map keys are in ascending order (forward chronological, no lookahead)', () => {
+      const candles = makeTrendingCandles(100, 10);
+      const result = classifier.classifyAll(candles);
+      expect(result.size).toBeGreaterThan(0);
+
+      const keys = Array.from(result.keys());
+      for (let i = 1; i < keys.length; i++) {
+        expect(keys[i]).toBeGreaterThan(keys[i - 1]);
+      }
+    });
+
+    it('classifyAll result is consistent with classify() for last candle', () => {
+      const candles = makeTrendingCandles(80, 10);
+      const lastCandle = candles[candles.length - 1];
+
+      const allResult = classifier.classifyAll(candles);
+      const singleResult = classifier.classify(candles);
+
+      const allLastEntry = allResult.get(lastCandle.timestamp);
+
+      // If both methods produced a result, they must agree
+      if (allLastEntry !== undefined && singleResult !== undefined) {
+        expect(allLastEntry).toBe(singleResult);
+      }
+    });
+  });
 });
