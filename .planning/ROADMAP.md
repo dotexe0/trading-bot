@@ -52,7 +52,7 @@
 - [x] **Phase 21: Momentum Breakout Strategy** (2/2 plans) — volume-confirmed breakout targeting TRENDING regime — completed 2026-03-01
 - [x] **Phase 22: Exit Config Optimizer** (2/2 plans) — grid search over exit params with walk-forward validation — completed 2026-03-02
 - [x] **Phase 23: Regime-Aware Tournament** (2/2 plans) — per-regime leaderboards and strategy winners — completed 2026-03-07
-- [ ] **Phase 24: Live Strategy Auto-Switching** (0/3 plans) — regime-driven strategy swaps in paper and live engines
+- [x] **Phase 24: Live Strategy Auto-Switching** (3/3 plans) — regime-driven strategy swaps in paper and live engines — completed 2026-03-08
 - [ ] **Phase 25: Pipeline Integration** (0/1 plans) — extended npm start with optimize and regime tournament steps
 
 ---
@@ -181,6 +181,9 @@ Plans:
 **Depends on**: Phase 24 (all subsystems must exist to wire together)
 **Plans**: 1
 
+Plans:
+- [ ] 25-01-PLAN.md — Wire 4-step pipeline in start.ts: optimize exits, regime tournament, save result, pass regimeLeaderboards to engines
+
 **Success Criteria:**
 1. `npm start` executes the extended pipeline: sync -> optimize exits -> regime-aware tournament -> activate per-regime winners -> paper/live + dashboard
 2. Each pipeline step validates its prerequisites before running (e.g., optimizer skips if no candle data; tournament skips if fewer than 2 strategies have results)
@@ -217,5 +220,5 @@ Plans:
 | 21. Momentum Breakout Strategy | v1.3 | 2/2 | Complete | 2026-03-01 |
 | 22. Exit Config Optimizer | v1.3 | 2/2 | Complete | 2026-03-02 |
 | 23. Regime-Aware Tournament | v1.3 | 2/2 | Complete | 2026-03-07 |
-| 24. Live Strategy Auto-Switching | v1.3 | 0/3 | Pending | — |
+| 24. Live Strategy Auto-Switching | v1.3 | 3/3 | Complete | 2026-03-08 |
 | 25. Pipeline Integration | v1.3 | 0/1 | Pending | — |

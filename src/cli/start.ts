@@ -34,6 +34,15 @@ import { parseRiskConfig } from '../risk/config.js';
 import { CorrelationStore } from '../correlation/correlation-store.js';
 import { BacktestStore } from '../backtest/backtest-store.js';
 import type { EventEmitter } from 'node:events';
+import {
+  ExitConfigOptimizer,
+  ExitConfigStore,
+  hashStrategyConfig,
+  DEFAULT_GRID,
+} from '../optimizer/index.js';
+import type { OptimizerConfig } from '../optimizer/index.js';
+import { parseBacktestConfig } from '../backtest/types.js';
+import type { RegimeLeaderboards } from '../tournament/types.js';
 
 // ── Resource tracking ──────────────────────────────────────────────
 
@@ -100,6 +109,7 @@ program
   .option('--top-n <n>', 'How many tournament winners to activate', '1')
   .option('--port <port>', 'Dashboard port', '3001')
   .option('--skip-sync', 'Skip data sync step (for quick restarts)')
+  .option('--skip-optimize', 'Skip exit config optimization step (uses cached configs if available)')
   .option('--mode <mode>', 'Activation mode: paper or none', 'paper')
   .action(async (opts) => {
     // ── Step 0: Bootstrap ──────────────────────────────────────────
@@ -122,6 +132,7 @@ program
     const topN = parseInt(opts.topN, 10);
     const port = parseInt(opts.port, 10);
     const skipSync = opts.skipSync === true;
+    const skipOptimize = opts.skipOptimize === true;
     const mode = opts.mode as 'paper' | 'none';
 
     // Determine which pairs to trade: --pair overrides, otherwise all configured pairs
@@ -129,7 +140,9 @@ program
       ? [opts.pair as 'BTC-USD' | 'ETH-USD']
       : config.data.pairs;
 
-    const totalSteps = 3;
+    const totalSteps = 4;
+    const endMs = Date.now();
+    const startMs = endMs - days * 86_400_000;
     const paperEngines: PaperTradingEngine[] = [];
 
     try {
@@ -153,12 +166,79 @@ program
         }
       }
 
-      // ── Step 2: Tournament + Activation (per pair) ────────────
+      // ── Step 2: Optimize Exits ─────────────────────────────────
 
-      out.step(2, totalSteps, `Running tournament for ${tradingPairs.join(', ')}...`);
+      if (skipOptimize) {
+        out.step(2, totalSteps, 'Skipping exit optimization (--skip-optimize)');
+      } else {
+        out.step(2, totalSteps, 'Optimizing exit parameters...');
 
-      const endMs = Date.now();
-      const startMs = endMs - days * 86_400_000;
+        const exitConfigStore = new ExitConfigStore({ dbPath: config.database.path });
+        try {
+          const riskConfigOpt = parseRiskConfig({});
+          const riskManagerOpt = new RiskManager(riskConfigOpt);
+          const backtestEngineOpt = new BacktestEngine({
+            strategyRegistry: registry,
+            indicatorEngine,
+            riskManager: riskManagerOpt,
+            riskConfig: riskConfigOpt,
+          });
+          const metricsCalcOpt = new MetricsCalculator();
+          const wfRunnerOpt = new WalkForwardRunner({
+            engine: backtestEngineOpt,
+            metricsCalculator: metricsCalcOpt,
+          });
+          const optimizer = new ExitConfigOptimizer({ walkForwardRunner: wfRunnerOpt });
+          const optimizerConfig: OptimizerConfig = {
+            grid: DEFAULT_GRID,
+            minTradesFloor: 5,
+          };
+
+          for (const tradePair of tradingPairs) {
+            const candlesOpt = repo.getCandles(tradePair, timeframe, startMs, endMs);
+            if (candlesOpt.length === 0) {
+              out.warn(`No candles for ${tradePair} — skipping optimizer`);
+              continue;
+            }
+
+            const totalMsOpt = endMs - startMs;
+            const trainWindowMsOpt = Math.floor((totalMsOpt * 0.7) / 3);
+            const validateWindowMsOpt = Math.floor((totalMsOpt * 0.3) / 3);
+            const stepMsOpt = trainWindowMsOpt + validateWindowMsOpt;
+            const wfConfig = { trainWindowMs: trainWindowMsOpt, validateWindowMs: validateWindowMsOpt, stepMs: stepMsOpt };
+
+            for (const strategyName of registry.list()) {
+              const strategyBaseConfig = { strategy: strategyName };
+              const hash = hashStrategyConfig(strategyBaseConfig as Record<string, unknown>);
+              const cached = exitConfigStore.getForStrategy(strategyName, hash);
+              if (cached) {
+                out.info(strategyName + ': exit config up to date, skipping');
+                continue;
+              }
+              out.info(strategyName + ': running grid search...');
+              const baseConfig = parseBacktestConfig({
+                pair: tradePair,
+                timeframe,
+                startMs,
+                endMs,
+                initialCapital: capital,
+                strategyConfig: { strategy: strategyName },
+              });
+              const result = optimizer.optimize(baseConfig, strategyName, candlesOpt, wfConfig, optimizerConfig);
+              result.strategyConfigHash = hash;
+              exitConfigStore.save(result);
+              out.table(strategyName, 'PF: ' + result.profitFactor.toFixed(4));
+            }
+          }
+          out.success('Exit optimization complete');
+        } finally {
+          exitConfigStore.close();
+        }
+      }
+
+      // ── Step 3: Tournament + Activation (per pair) ────────────
+
+      out.step(3, totalSteps, `Running tournament for ${tradingPairs.join(', ')}...`);
 
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
@@ -293,9 +373,9 @@ program
 
       out.success('Tournament and activation complete');
 
-      // ── Step 3: Dashboard ──────────────────────────────────────
+      // ── Step 4: Dashboard ──────────────────────────────────────
 
-      out.step(3, totalSteps, 'Starting dashboard...');
+      out.step(4, totalSteps, 'Starting dashboard...');
 
       const liveStateStore = new LiveStateStore({
         dbPath: config.database.path,
