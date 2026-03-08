@@ -362,6 +362,7 @@ export class PaperTradingEngine extends EventEmitter {
           this.exitManager = null;
           this.positionDirection = null;
           this.positionEntryTimestamp = 0;
+          this.checkAndExecutePendingSwitch();
         } else if (exitAction.type === 'partial_exit') {
           log.info(
             {
@@ -460,14 +461,50 @@ export class PaperTradingEngine extends EventEmitter {
             this.stopLossTrackers.delete(trackerKey);
             this.positionDirection = null;
             this.positionEntryTimestamp = 0;
+            this.checkAndExecutePendingSwitch();
             break;
           }
         }
       }
     }
 
-    // 3. Strategy evaluation (pass regime as 5th argument)
+    // Regime-change auto-switch (only when regimeLeaderboards provided)
     const regime = this.classifier.classify(buffer);
+    if (this.regimeLeaderboards) {
+      // Decrement cooldown
+      if (this.cooldownCandlesRemaining > 0) {
+        this.cooldownCandlesRemaining--;
+      }
+
+      // Only trigger on known→known transitions (guard: both defined and different)
+      if (
+        regime !== undefined &&
+        this.currentRegime !== undefined &&
+        regime !== this.currentRegime &&
+        this.cooldownCandlesRemaining === 0
+      ) {
+        const winnerConfig = this.resolveRegimeWinner(regime);
+        if (winnerConfig) {
+          if (this.portfolio.isFlat()) {
+            this.executeStrategySwitch(winnerConfig);
+          } else {
+            // Position open: defer the switch
+            this.pendingSwitch = { strategyConfig: winnerConfig };
+            log.info(
+              { regime, currentStrategy: this.strategy.name },
+              'Regime changed with open position -- switch deferred until position closes',
+            );
+          }
+        }
+      }
+
+      // Always update currentRegime to track transitions
+      if (regime !== undefined) {
+        this.currentRegime = regime;
+      }
+    }
+
+    // 3. Strategy evaluation (pass regime as 5th argument)
     const signals = this.strategy.evaluate(
       buffer,
       candle.pair,
@@ -634,6 +671,7 @@ export class PaperTradingEngine extends EventEmitter {
     this.exitManager = null;
     this.positionDirection = null;
     this.positionEntryTimestamp = 0;
+    this.checkAndExecutePendingSwitch();
   }
 
   private processEntrySignal(signal: Signal, candle: Candle): void {
@@ -790,6 +828,50 @@ export class PaperTradingEngine extends EventEmitter {
       },
       'Entry fill executed',
     );
+  }
+
+  /**
+   * Resolve the winning strategy config for a given regime from regimeLeaderboards.
+   * Falls back to fallbackEntry when the regime has no entries.
+   */
+  private resolveRegimeWinner(
+    regime: import('../regime/types.js').MarketRegime,
+  ): Record<string, unknown> | null {
+    if (!this.regimeLeaderboards) return null;
+    const entries = this.regimeLeaderboards[regime];
+    if (entries && entries.length > 0) {
+      return entries[0].strategyConfig;
+    }
+    // Fallback: overall tournament winner
+    return this.regimeLeaderboards.fallbackEntry.strategyConfig;
+  }
+
+  /**
+   * Execute an immediate strategy switch.
+   * Sets exitManager to null (LIVE-05: no state transfer).
+   * Resets stopLossTrackers. Starts cooldown.
+   */
+  private executeStrategySwitch(strategyConfig: Record<string, unknown>): void {
+    this.strategy = this.strategyRegistry.create(strategyConfig);
+    this.exitManager = null; // LIVE-05: never transfer ExitLogicManager state
+    this.stopLossTrackers.clear();
+    this.cooldownCandlesRemaining = STRATEGY_SWITCH_COOLDOWN_CANDLES;
+    log.info(
+      { newStrategy: this.strategy.name, cooldown: STRATEGY_SWITCH_COOLDOWN_CANDLES },
+      'Strategy switched due to regime change',
+    );
+    this.emit('strategySwitch', { newStrategy: this.strategy.name });
+  }
+
+  /**
+   * Check if a pending switch can now execute (position is flat).
+   * Called after every position close.
+   */
+  private checkAndExecutePendingSwitch(): void {
+    if (this.pendingSwitch && this.portfolio.isFlat()) {
+      this.executeStrategySwitch(this.pendingSwitch.strategyConfig);
+      this.pendingSwitch = null;
+    }
   }
 
   private forceClosePosition(): void {
