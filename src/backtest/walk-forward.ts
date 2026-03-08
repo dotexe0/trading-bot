@@ -12,6 +12,7 @@ import type { Candle, Timeframe } from '../core/types.js';
 import type { BacktestConfig, BacktestResult, Trade, EquityPoint } from './types.js';
 import type { BacktestEngine } from './engine.js';
 import type { MetricsCalculator, PerformanceMetrics } from './metrics.js';
+import type { MarketRegime } from '../regime/types.js';
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -54,6 +55,7 @@ export interface WalkForwardResult {
   windows: WalkForwardWindowResult[];
   aggregateValidateMetrics: PerformanceMetrics;
   config: WalkForwardConfig;
+  validateTrades: Trade[];  // All OOS trades across all validate windows
 }
 
 // ── Window Generation ─────────────────────────────────────────────────
@@ -115,12 +117,14 @@ export class WalkForwardRunner {
     wfConfig: WalkForwardConfig,
     candles: Candle[],
     additionalCandlesMap?: Map<Timeframe, Candle[]>,
+    precomputedRegimes?: Map<number, MarketRegime>,
   ): WalkForwardResult {
     if (candles.length === 0) {
       return {
         windows: [],
         aggregateValidateMetrics: this.emptyMetrics(backtestConfig.initialCapital),
         config: wfConfig,
+        validateTrades: [],
       };
     }
 
@@ -175,8 +179,8 @@ export class WalkForwardRunner {
       };
 
       // Run engine on each window
-      const trainResult = this.engine.run(trainConfig, trainCandles, trainAdditional);
-      const validateResult = this.engine.run(validateConfig, validateCandles, validateAdditional);
+      const trainResult = this.engine.run(trainConfig, trainCandles, trainAdditional, undefined, precomputedRegimes);
+      const validateResult = this.engine.run(validateConfig, validateCandles, validateAdditional, undefined, precomputedRegimes);
 
       // Calculate metrics
       const trainMetrics = this.metricsCalculator.calculate(trainResult, backtestConfig.initialCapital);
@@ -206,6 +210,7 @@ export class WalkForwardRunner {
       windows: windowResults,
       aggregateValidateMetrics,
       config: wfConfig,
+      validateTrades: allValidateTrades,
     };
   }
 

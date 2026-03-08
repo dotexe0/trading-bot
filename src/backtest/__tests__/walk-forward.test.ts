@@ -284,3 +284,59 @@ describe('WalkForwardRunner', () => {
     expect(result.aggregateValidateMetrics.totalTrades).toBeGreaterThanOrEqual(0);
   });
 });
+
+// ── Tests: WalkForwardResult validateTrades ───────────────────────────
+
+describe('WalkForwardResult validateTrades', () => {
+  function createRunner() {
+    const strategy = new AlternatingStrategy();
+    const registry = new MockStrategyRegistry(strategy);
+    const engine = new BacktestEngine({
+      strategyRegistry: registry,
+      indicatorEngine: new IndicatorEngine(),
+    });
+    const metricsCalculator = new MetricsCalculator();
+    return new WalkForwardRunner({ engine, metricsCalculator });
+  }
+
+  it('validateTrades is an array populated from all validate windows', () => {
+    const candles = makeCandles(100);
+    const startTs = candles[0].timestamp;
+    const endTs = candles[candles.length - 1].timestamp;
+
+    const wfConfig: WalkForwardConfig = {
+      trainWindowMs: 30 * HOUR_MS,
+      validateWindowMs: 10 * HOUR_MS,
+      stepMs: 10 * HOUR_MS,
+    };
+
+    const runner = createRunner();
+    const config = makeBaseConfig(startTs, endTs);
+    const result = runner.run(config, wfConfig, candles);
+
+    // validateTrades must be an array (not undefined)
+    expect(Array.isArray(result.validateTrades)).toBe(true);
+
+    // validateTrades must equal the sum of trades across all validate windows
+    const expectedTradeCount = result.windows.reduce(
+      (sum, w) => sum + w.validateResult.trades.length,
+      0,
+    );
+    expect(result.validateTrades.length).toBe(expectedTradeCount);
+  });
+
+  it('validateTrades is empty array when no candles provided', () => {
+    const wfConfig: WalkForwardConfig = {
+      trainWindowMs: 30 * HOUR_MS,
+      validateWindowMs: 10 * HOUR_MS,
+      stepMs: 10 * HOUR_MS,
+    };
+
+    const runner = createRunner();
+    const config = makeBaseConfig(1700000000000, 1700003600000);
+    const result = runner.run(config, wfConfig, []);
+
+    expect(Array.isArray(result.validateTrades)).toBe(true);
+    expect(result.validateTrades.length).toBe(0);
+  });
+});

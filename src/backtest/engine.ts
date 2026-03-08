@@ -74,6 +74,7 @@ export class BacktestEngine {
     candles: Candle[],
     additionalCandlesMap?: Map<Timeframe, Candle[]>,
     strategyStats?: StrategyStats,
+    precomputedRegimes?: Map<number, MarketRegime>,
   ): BacktestResult {
     // 1. Validate config
     const validConfig = parseBacktestConfig(config);
@@ -220,8 +221,11 @@ export class BacktestEngine {
         }
       }
 
-      // 6b-regime. Compute regime using only visible candles (no lookahead)
-      const regime = this.classifier.classify(visibleCandles);
+      // 6b-regime. Compute regime using only visible candles (no lookahead),
+      // or do a fast O(1) map lookup when precomputedRegimes is provided.
+      const regime = precomputedRegimes
+        ? precomputedRegimes.get(candles[i].timestamp)
+        : this.classifier.classify(visibleCandles);
       if (regime !== undefined) {
         regimePerCandle.set(candles[i].timestamp, regime);
       }
