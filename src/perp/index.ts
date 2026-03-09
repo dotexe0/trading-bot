@@ -14,6 +14,8 @@ export { PerpPositionManager } from './position-manager.js';
 export { PerpStateStore } from './perp-state-store.js';
 export { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
 export { PerpOrderEngine } from './order-engine.js';
+export { TrailingStopManager } from './trailing-stop.js';
+export type { TrailingStopState } from './trailing-stop.js';
 export type {
   IntxMarkPriceEvent,
   IntxFundingRateEvent,

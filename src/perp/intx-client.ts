@@ -361,4 +361,43 @@ export class IntxClient extends EventEmitter {
       throw err;
     }
   }
+
+  /**
+   * Place a stop-limit (stop_limit_stop_limit_gtc) FCM futures order.
+   * Used for trailing stop placement — stop triggers at stopPrice, executes at limitPrice.
+   *
+   * stop_direction values:
+   *  - 'STOP_DIRECTION_STOP_DOWN' — triggers when price falls to stopPrice (long exit)
+   *  - 'STOP_DIRECTION_STOP_UP'   — triggers when price rises to stopPrice (short exit)
+   */
+  async placeStopOrder(params: {
+    productId: string;
+    side: 'BUY' | 'SELL';
+    size: string;
+    stopPrice: string;
+    limitPrice: string;
+    stopDirection: string;
+    clientOrderId?: string;
+  }): Promise<{ orderId: string }> {
+    const clientOrderId = params.clientOrderId ?? crypto.randomUUID();
+    const req = {
+      client_order_id: clientOrderId,
+      product_id: params.productId,
+      side: params.side,
+      order_configuration: {
+        stop_limit_stop_limit_gtc: {
+          base_size: params.size,
+          stop_price: params.stopPrice,
+          limit_price: params.limitPrice,
+          stop_direction: params.stopDirection,
+        },
+      },
+    };
+    const response = await this.restClient.submitOrder(req as any);
+    const successResp = (response as any)?.success_response ?? response;
+    const orderId = successResp?.order_id ?? (response as any)?.order_id;
+    if (!orderId) throw new Error(`placeStopOrder: no order_id: ${JSON.stringify(response)}`);
+    log.info({ clientOrderId, exchangeOrderId: orderId }, 'FCM stop order placed');
+    return { orderId };
+  }
 }

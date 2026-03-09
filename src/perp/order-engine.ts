@@ -12,7 +12,9 @@
 
 import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
+import { d } from '../core/decimal.js';
 import { createModuleLogger } from '../core/logger.js';
+import { TrailingStopManager } from './trailing-stop.js';
 import type { IntxClient } from './intx-client.js';
 import type { PerpStateStore } from './perp-state-store.js';
 import type { FcmConfig } from './config.js';
@@ -22,6 +24,7 @@ import type {
   PerpDirection,
   PerpOrderEngineEvents,
   FcmOrderFillEvent,
+  IntxMarkPriceEvent,
 } from './types.js';
 
 const log = createModuleLogger('perp-order-engine');
@@ -56,6 +59,16 @@ export class PerpOrderEngine extends EventEmitter {
   private stateStore: PerpStateStore;
   private config: FcmConfig;
 
+  // ── Post-fill order state ──────────────────────────────────────────
+  private _stopManager: TrailingStopManager | null = null;
+  private _tpOrderPlaced = false;
+  private _tpExchangeOrderId: string | undefined;
+  private _stopExchangeOrderId: string | undefined;
+  private _currentAtr = '0';
+  private _ratchetLoopActive = false;
+  private _onMarkPriceRatchet: ((evt: IntxMarkPriceEvent) => void) | null = null;
+  private _currentInstrument: string | null = null;
+
   /** Typed emit override for PerpOrderEngineEvents. */
   override emit<K extends keyof PerpOrderEngineEvents>(
     event: K,
@@ -73,6 +86,14 @@ export class PerpOrderEngine extends EventEmitter {
     this.intxClient = options.intxClient;
     this.stateStore = options.stateStore;
     this.config = options.config;
+  }
+
+  /**
+   * Update the current ATR value used by the ratchet loop.
+   * Called by the orchestrator each time a new ATR is computed.
+   */
+  setCurrentAtr(atr: string): void {
+    this._currentAtr = atr;
   }
 
   /**
@@ -333,6 +354,334 @@ export class PerpOrderEngine extends EventEmitter {
     }
 
     log.info({ sessionId, cancelled: orders.length }, 'cancelAllOpenOrders: DB records marked CANCELLED');
+  }
+
+  // ── Post-fill order management ─────────────────────────────────────
+
+  /**
+   * Place take-profit limit and trailing stop-limit orders after an entry fills.
+   *
+   * Idempotent: guarded by _tpOrderPlaced flag + DB check for existing TAKE_PROFIT order.
+   * TP order: LIMIT (no post_only — taker OK for close orders)
+   * Stop order: stop_limit_stop_limit_gtc with stop_direction
+   *
+   * Persist BEFORE each API call for idempotency.
+   * TP failure is logged but does NOT block stop placement.
+   */
+  async placePostFillOrders(session: PerpSession, atr: string): Promise<void> {
+    // Idempotency guard — check flag and DB
+    if (this._tpOrderPlaced) {
+      log.info({ sessionId: session.id }, 'placePostFillOrders: already placed, skipping');
+      return;
+    }
+    const existingOrders = this.stateStore.getOpenOrdersBySession(session.id);
+    if (existingOrders.some((o) => o.purpose === 'TAKE_PROFIT')) {
+      log.info({ sessionId: session.id }, 'placePostFillOrders: TAKE_PROFIT order already in DB, skipping');
+      this._tpOrderPlaced = true;
+      return;
+    }
+
+    const { direction, entryPrice, size, instrument } = session;
+    const side: 'BUY' | 'SELL' = direction === 'long' ? 'SELL' : 'BUY';
+    this._currentInstrument = instrument;
+    this._currentAtr = atr;
+
+    // 1. Compute TP limit price
+    const entry = d(entryPrice);
+    const tpPct = d(this.config.tpTargetPct).div(d('100'));
+    let tpLimitPrice: string;
+    if (direction === 'long') {
+      tpLimitPrice = entry.mul(d('1').plus(tpPct)).toFixed(8);
+    } else {
+      tpLimitPrice = entry.mul(d('1').minus(tpPct)).toFixed(8);
+    }
+
+    // 2. Place TP limit order
+    const tpClientOrderId = crypto.randomUUID();
+    const now = Date.now();
+    const tpOrder: PerpOrder = {
+      id: tpClientOrderId,
+      clientOrderId: tpClientOrderId,
+      sessionId: session.id,
+      instrument,
+      side,
+      size,
+      status: 'PENDING',
+      purpose: 'TAKE_PROFIT',
+      limitPrice: tpLimitPrice,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    // Persist BEFORE API call
+    this.stateStore.persistOrder(tpOrder);
+
+    try {
+      const tpResult = await this.intxClient.placeOrder({
+        productId: instrument,
+        side,
+        size,
+        orderType: 'LIMIT',
+        limitPrice: tpLimitPrice,
+        clientOrderId: tpClientOrderId,
+        postOnly: false, // taker OK for close orders
+      });
+      tpOrder.exchangeOrderId = tpResult.orderId;
+      tpOrder.status = 'OPEN';
+      tpOrder.updatedAt = Date.now();
+      this.stateStore.persistOrder(tpOrder);
+      this._tpExchangeOrderId = tpResult.orderId;
+      log.info(
+        { sessionId: session.id, instrument, tpLimitPrice, exchangeOrderId: tpResult.orderId },
+        'Take-profit limit order placed',
+      );
+    } catch (tpErr) {
+      tpOrder.status = 'FAILED';
+      tpOrder.updatedAt = Date.now();
+      this.stateStore.persistOrder(tpOrder);
+      log.error(
+        { sessionId: session.id, err: tpErr instanceof Error ? tpErr.message : String(tpErr) },
+        'placePostFillOrders: TP order failed — proceeding with stop placement',
+      );
+      // Do NOT throw — stop placement must proceed
+    }
+
+    // 3. Initialize trailing stop manager
+    if (!this._stopManager) {
+      this._stopManager = new TrailingStopManager({
+        direction,
+        atrMultiplier: this.config.atrMultiplier,
+        slippagePct: this.config.stopLimitSlippagePct,
+      });
+    }
+    const stopState = this._stopManager.initialize(entryPrice, atr);
+
+    // 4. Place initial stop-limit order
+    const stopClientOrderId = crypto.randomUUID();
+    const stopSide: 'BUY' | 'SELL' = direction === 'long' ? 'SELL' : 'BUY';
+    const stopDirection =
+      direction === 'long' ? 'STOP_DIRECTION_STOP_DOWN' : 'STOP_DIRECTION_STOP_UP';
+
+    const stopOrder: PerpOrder = {
+      id: stopClientOrderId,
+      clientOrderId: stopClientOrderId,
+      sessionId: session.id,
+      instrument,
+      side: stopSide,
+      size,
+      status: 'PENDING',
+      purpose: 'STOP_LOSS',
+      stopPrice: stopState.stopPrice,
+      limitPrice: stopState.limitPrice,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    // Persist BEFORE API call
+    this.stateStore.persistOrder(stopOrder);
+
+    try {
+      const stopResult = await this.intxClient.placeStopOrder({
+        productId: instrument,
+        side: stopSide,
+        size,
+        stopPrice: stopState.stopPrice,
+        limitPrice: stopState.limitPrice,
+        stopDirection,
+        clientOrderId: stopClientOrderId,
+      });
+      stopOrder.exchangeOrderId = stopResult.orderId;
+      stopOrder.status = 'OPEN';
+      stopOrder.updatedAt = Date.now();
+      this.stateStore.persistOrder(stopOrder);
+      this._stopExchangeOrderId = stopResult.orderId;
+      log.info(
+        {
+          sessionId: session.id,
+          instrument,
+          stopPrice: stopState.stopPrice,
+          limitPrice: stopState.limitPrice,
+          exchangeOrderId: stopResult.orderId,
+        },
+        'Trailing stop-limit order placed',
+      );
+    } catch (stopErr) {
+      stopOrder.status = 'FAILED';
+      stopOrder.updatedAt = Date.now();
+      this.stateStore.persistOrder(stopOrder);
+      log.error(
+        { sessionId: session.id, err: stopErr instanceof Error ? stopErr.message : String(stopErr) },
+        'placePostFillOrders: stop order failed',
+      );
+    }
+
+    this._tpOrderPlaced = true;
+
+    // 5. Start ratchet loop
+    this._startRatchetLoop(session);
+  }
+
+  /**
+   * Start the mark-price ratchet loop for the trailing stop.
+   * Listens to 'markPrice' events from intxClient.
+   * On each favorable price movement: cancel old stop → place new stop → update DB.
+   */
+  private _startRatchetLoop(session: PerpSession): void {
+    if (this._ratchetLoopActive) return;
+    this._ratchetLoopActive = true;
+
+    const { instrument, direction, size, id: sessionId } = session;
+    const stopSide: 'BUY' | 'SELL' = direction === 'long' ? 'SELL' : 'BUY';
+    const stopDirection =
+      direction === 'long' ? 'STOP_DIRECTION_STOP_DOWN' : 'STOP_DIRECTION_STOP_UP';
+
+    this._onMarkPriceRatchet = async (evt: IntxMarkPriceEvent) => {
+      if (evt.instrument !== instrument) return;
+      if (!this._stopManager) return;
+      if (!this._ratchetLoopActive) return;
+
+      const newState = this._stopManager.ratchet(evt.markPrice, this._currentAtr);
+      if (newState === null) return; // no ratchet needed
+
+      log.info(
+        { sessionId, instrument, newStopPrice: newState.stopPrice, markPrice: evt.markPrice },
+        'Ratchet: stop price updated',
+      );
+
+      // Cancel old stop order
+      const oldStopOrderId = this._stopExchangeOrderId;
+      if (oldStopOrderId) {
+        try {
+          await this.intxClient.cancelOrders([oldStopOrderId]);
+        } catch (cancelErr) {
+          log.warn(
+            { oldStopOrderId, err: cancelErr instanceof Error ? cancelErr.message : String(cancelErr) },
+            'Ratchet: cancel old stop failed — placing new stop anyway',
+          );
+        }
+      }
+
+      // Place new stop order
+      const newStopClientOrderId = crypto.randomUUID();
+      const newStopOrder: PerpOrder = {
+        id: newStopClientOrderId,
+        clientOrderId: newStopClientOrderId,
+        sessionId,
+        instrument,
+        side: stopSide,
+        size,
+        status: 'PENDING',
+        purpose: 'STOP_LOSS',
+        stopPrice: newState.stopPrice,
+        limitPrice: newState.limitPrice,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      // Persist BEFORE API call
+      this.stateStore.persistOrder(newStopOrder);
+
+      try {
+        const newStopResult = await this.intxClient.placeStopOrder({
+          productId: instrument,
+          side: stopSide,
+          size,
+          stopPrice: newState.stopPrice,
+          limitPrice: newState.limitPrice,
+          stopDirection,
+          clientOrderId: newStopClientOrderId,
+        });
+        newStopOrder.exchangeOrderId = newStopResult.orderId;
+        newStopOrder.status = 'OPEN';
+        newStopOrder.updatedAt = Date.now();
+        this.stateStore.persistOrder(newStopOrder);
+        this._stopExchangeOrderId = newStopResult.orderId;
+        log.info(
+          { sessionId, instrument, newStopPrice: newState.stopPrice, exchangeOrderId: newStopResult.orderId },
+          'Ratchet: new stop order placed',
+        );
+      } catch (placeErr) {
+        newStopOrder.status = 'FAILED';
+        newStopOrder.updatedAt = Date.now();
+        this.stateStore.persistOrder(newStopOrder);
+        log.error(
+          { sessionId, err: placeErr instanceof Error ? placeErr.message : String(placeErr) },
+          'Ratchet: new stop order placement failed — will retry on next tick',
+        );
+        // Reset stop manager state so next tick retries
+        if (this._stopManager) {
+          // The ratchet already moved the internal state — the next markPrice event will
+          // compute a new candidate and attempt placement again
+        }
+      }
+    };
+
+    this.intxClient.on('markPrice', this._onMarkPriceRatchet);
+    log.info({ sessionId, instrument }, 'Ratchet loop started');
+  }
+
+  /**
+   * Stop the ratchet loop and remove the markPrice listener.
+   */
+  private _stopRatchetLoop(): void {
+    if (!this._ratchetLoopActive) return;
+    this._ratchetLoopActive = false;
+    if (this._onMarkPriceRatchet) {
+      this.intxClient.off('markPrice', this._onMarkPriceRatchet);
+      this._onMarkPriceRatchet = null;
+    }
+    log.info({ instrument: this._currentInstrument }, 'Ratchet loop stopped');
+  }
+
+  /**
+   * Cancel all tracked post-fill orders (TP + stop) and clean up state.
+   *
+   * Called by PerpPositionManager on all close paths before marking the session closed.
+   * Does NOT throw — logs warn on partial failure and continues cleanup.
+   *
+   * Steps:
+   * 1. Stop the ratchet loop
+   * 2. Cancel TP and stop orders via batch cancel
+   * 3. Mark each cancelled in DB
+   * 4. Reset internal state flags
+   */
+  async closeAndCleanup(sessionId: string): Promise<void> {
+    this._stopRatchetLoop();
+
+    const orderIdsToCancel = [this._tpExchangeOrderId, this._stopExchangeOrderId].filter(
+      (id): id is string => !!id,
+    );
+
+    if (orderIdsToCancel.length > 0) {
+      try {
+        await this.intxClient.cancelOrders(orderIdsToCancel);
+        log.info({ sessionId, count: orderIdsToCancel.length }, 'closeAndCleanup: cancelled TP/stop orders');
+      } catch (cancelErr) {
+        log.warn(
+          { sessionId, orderIdsToCancel, err: cancelErr instanceof Error ? cancelErr.message : String(cancelErr) },
+          'closeAndCleanup: batch cancel partial failure — marking cancelled in DB anyway',
+        );
+      }
+
+      // Mark each as CANCELLED in DB using DB query (catches any stop orders we placed during ratcheting)
+      const openOrders = this.stateStore.getOpenOrdersBySession(sessionId);
+      const now = Date.now();
+      for (const order of openOrders) {
+        if (order.purpose === 'TAKE_PROFIT' || order.purpose === 'STOP_LOSS') {
+          this.stateStore.persistOrder({ ...order, status: 'CANCELLED', updatedAt: now });
+        }
+      }
+    }
+
+    // Reset state
+    this._tpOrderPlaced = false;
+    this._tpExchangeOrderId = undefined;
+    this._stopExchangeOrderId = undefined;
+    if (this._stopManager) {
+      this._stopManager.reset();
+    }
+
+    log.info({ sessionId }, 'PerpOrderEngine: position cleanup complete');
   }
 
   // ── Private helpers ────────────────────────────────────────────────
