@@ -1,0 +1,80 @@
+# Project State
+
+## Project Reference
+
+See: .planning/PROJECT.md (updated 2026-03-08)
+
+**Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 27 (Perp Position Execution)
+
+## Current Position
+
+Phase: 27 of 33 (Perp Position Execution)
+Plan: 1 of 2 in current phase — in progress
+Status: Active
+Last activity: 2026-03-09 — 27-01 complete (PerpPositionManager, PerpStateStore, liquidation-calc, IntxClient placeOrder/cancelOrder)
+
+Progress: [░░░░░░░░░░] 20% of v1.4 (3/15 plans complete)
+
+## Performance Metrics
+
+**v1.0 Totals:**
+- 11 phases, 22 plans completed
+- 53 commits, 149 files, 55,764 LOC TypeScript
+- 773 tests across 52 test files
+- Timeline: 10 days (2026-02-09 to 2026-02-19)
+
+**v1.1 Totals:**
+- 5 phases, 12 plans completed
+- 68 files changed, +5,520 net lines
+- 444 tests passing (40 test files)
+- Timeline: 6 days (2026-02-20 to 2026-02-26)
+
+**v1.2 Totals:**
+- 2 phases, 5 plans completed
+- 30 files changed, +3,340 net lines
+- 527 tests passing (49 test files)
+- Timeline: 2 days (2026-02-27 to 2026-02-28)
+
+**v1.3 Totals:**
+- 7 phases, 14 plans completed
+- 49 files changed, +4,225 net lines
+- 638 tests passing (53 test files)
+- Timeline: 8 days (2026-03-01 to 2026-03-08)
+
+## Accumulated Context
+
+### Decisions
+
+All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions table.
+
+**v1.4 Decisions:**
+
+- 26-01: CBInternationalClient.getPortfolioDetails() used for single-call account state (balances + positions + summary)
+- 26-01: IntxAccountState typed loosely (unknown) — Phase 27 tightens based on actual response shape
+- 26-01: placeOrder/cancelOrder are explicit Phase-27 stubs (throw) — not omitted from interface
+- 26-01: useSandbox mapped from config.testnet (INTX_TESTNET env var)
+- 26-01: intxConfigSchema refine requires all four INTX credentials when enabled=true; path set to apiKey
+- 26-02: vi.hoisted() required for WebsocketClient mock class — vi.mock factory hoisted before class declarations
+- 26-02: MockWebsocketClient._instances static array tracks WS instances across tests without global leakage
+- 26-02: perp:status uses out.banner/table/info + console.log(JSON.stringify) — out.header/label/section/json do not exist
+- 26-02: internationalMarketData WsKey + uppercase RISK/FUNDING channel names (not lowercase)
+- 27-01: IOC MARKET orders only for entry and exit — no partial fills to track, simplifies state
+- 27-01: cancelOrder uses restClient.cancelOrder({ id, portfolio }) — INTX single-cancel API not bulk CancelINTXOrdersRequest
+- 27-01: PerpStateStore.createSession() accepts fully-constructed PerpSession — store writes as-is, no ID/timestamp generation
+- 27-01: closePosition() sets purpose='EMERGENCY_CLOSE' when reason='EMERGENCY_CLOSE', 'EXIT' otherwise
+
+### Open Issues / Tech Debt
+
+- fast-technical-indicators createRequire workaround (inherited, low priority)
+- Paper trading profitability not yet measured — use `npm run report` after paper session
+
+### Blockers
+
+None.
+
+## Session Continuity
+
+Last session: 2026-03-09
+Stopped at: Completed 27-01-PLAN.md (PerpPositionManager, PerpStateStore, liquidation-calc, IntxClient placeOrder/cancelOrder — 27 tests)
+Resume with: `/gsd:execute-phase 27` (Phase 27 Plan 02: position monitoring, PnL tracking, live integration)
