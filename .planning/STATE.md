@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 27 (Perp Position Execution)
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 28 (Post-Only Limit Order Engine)
 
 ## Current Position
 
-Phase: 27 of 33 (Perp Position Execution)
-Plan: 2 of 2 in current phase — complete
+Phase: 28 of 33 (Post-Only Limit Order Engine)
+Plan: 1 of 2 in current phase — complete
 Status: Active
-Last activity: 2026-03-09 — 27-02 complete (PaperPerpEngine, recoverFromRestart, perp:paper CLI)
+Last activity: 2026-03-09 — 28-01 complete (PerpOrderEngine, post-only entry loop, FCM user channel)
 
-Progress: [█░░░░░░░░░] 27% of v1.4 (4/15 plans complete)
+Progress: [█░░░░░░░░░] 33% of v1.4 (5/15 plans complete)
 
 ## Performance Metrics
 
@@ -67,6 +67,10 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 27-02: createSession receives spread copy (not live reference) — prevents mutation aliasing after closePaperPosition
 - 27-02: recoverFromRestart marks PENDING orders FAILED before session restore — conservative, prevents double-entry
 - 27-02: getAllOpenSessions() added to PerpStateStore — required by recovery for all-instrument open session query
+- 28-01: PerpOrderEngine allocates sessionId upfront before any order attempt — consistent session ID across reprice loops
+- 28-01: NON_RETRYABLE_REASONS set (INSUFFICIENT_FUND, INVALID_SIZE, INVALID_PRICE, INVALID_PRODUCT) — abort immediately without retrying
+- 28-01: Fill detection uses repriceTimeoutMs (60s) per-attempt, entryOrderTimeoutMs (300s) total loop timeout
+- 28-01: cancelOrders() public batch method on IntxClient — cancelAllOpenOrders never accesses restClient directly
 
 ### Open Issues / Tech Debt
 
@@ -80,5 +84,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 27-02-PLAN.md (PaperPerpEngine, recoverFromRestart, perp:paper CLI — 675 tests)
-Resume with: `/gsd:execute-phase 28` (Phase 28: Perp Risk Management)
+Stopped at: Completed 28-01-PLAN.md (PerpOrderEngine, post-only entry loop, FCM user channel, cancel-reprice loop)
+Resume with: `/gsd:execute-phase 28` (Phase 28, Plan 02: ratchet stop and TP/SL orders)
