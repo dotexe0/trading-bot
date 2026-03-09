@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-08)
 ## Current Position
 
 Phase: 27 of 33 (Perp Position Execution)
-Plan: 1 of 2 in current phase — in progress
+Plan: 2 of 2 in current phase — complete
 Status: Active
-Last activity: 2026-03-09 — 27-01 complete (PerpPositionManager, PerpStateStore, liquidation-calc, IntxClient placeOrder/cancelOrder)
+Last activity: 2026-03-09 — 27-02 complete (PaperPerpEngine, recoverFromRestart, perp:paper CLI)
 
-Progress: [░░░░░░░░░░] 20% of v1.4 (3/15 plans complete)
+Progress: [█░░░░░░░░░] 27% of v1.4 (4/15 plans complete)
 
 ## Performance Metrics
 
@@ -63,6 +63,10 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 27-01: cancelOrder uses restClient.cancelOrder({ id, portfolio }) — INTX single-cancel API not bulk CancelINTXOrdersRequest
 - 27-01: PerpStateStore.createSession() accepts fully-constructed PerpSession — store writes as-is, no ID/timestamp generation
 - 27-01: closePosition() sets purpose='EMERGENCY_CLOSE' when reason='EMERGENCY_CLOSE', 'EXIT' otherwise
+- 27-02: PaperPerpEngine is separate from PerpPositionManager — guarantees zero REST calls in paper path
+- 27-02: createSession receives spread copy (not live reference) — prevents mutation aliasing after closePaperPosition
+- 27-02: recoverFromRestart marks PENDING orders FAILED before session restore — conservative, prevents double-entry
+- 27-02: getAllOpenSessions() added to PerpStateStore — required by recovery for all-instrument open session query
 
 ### Open Issues / Tech Debt
 
@@ -76,5 +80,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 27-01-PLAN.md (PerpPositionManager, PerpStateStore, liquidation-calc, IntxClient placeOrder/cancelOrder — 27 tests)
-Resume with: `/gsd:execute-phase 27` (Phase 27 Plan 02: position monitoring, PnL tracking, live integration)
+Stopped at: Completed 27-02-PLAN.md (PaperPerpEngine, recoverFromRestart, perp:paper CLI — 675 tests)
+Resume with: `/gsd:execute-phase 28` (Phase 28: Perp Risk Management)
