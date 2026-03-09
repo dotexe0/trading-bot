@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 30 in progress (Perp Strategies and Tournament), Plan 2 of N complete
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 30 in progress (Perp Strategies and Tournament), Plan 3 of N complete
 
 ## Current Position
 
 Phase: 30 of 33 (Perp Strategies and Tournament) — in progress
-Plan: 2 complete in current phase
+Plan: 3 complete in current phase
 Status: Active
-Last activity: 2026-03-09 — 30-02 complete (PerpMeanReversionStrategy with Z-score + funding rate adjustment, 27 tests, TDD RED→GREEN)
+Last activity: 2026-03-09 — 30-03 complete (perp registry factories, config schema extension, npm run tournament:perp CLI)
 
-Progress: [████░░░░░░] 63% of v1.4 (10/16 plans complete)
+Progress: [████░░░░░░] 69% of v1.4 (11/16 plans complete)
 
 ## Performance Metrics
 
@@ -88,6 +88,11 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 30-02: No regime filter on PerpMeanReversionStrategy — consistent with PerpMomentumStrategy; perp strategies need signals in any market condition
 - 30-02: Funding adjustment formula identical to PerpMomentumStrategy — >= threshold comparison for long, <= -threshold for short
 - 30-02: minCandles = period + 1 (same as ZScoreMeanReversionStrategy spot counterpart)
+- 30-03: createPerpRegistry() and createDefaultRegistry() are strictly separate instances — registry isolation invariant (no spot strategies in perp registry)
+- 30-03: fundingRateProvider excluded from Zod schema — runtime-injected callback, not serializable config; only scalar params in schema
+- 30-03: createLivePerpRegistry(provider) factory for live/paper engine use — injects real funding callback so FundingAdj fires at runtime
+- 30-03: Perp tournament CLI omits ExitConfigStore — exit parameters from Zod schema defaults, no per-strategy exit config persistence for tournament
+- 30-03: TournamentRunner unchanged — only registry and CLI differ from spot tournament (zero modification to core infrastructure)
 
 ### Open Issues / Tech Debt
 
@@ -101,5 +106,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 30-02-PLAN.md (PerpMeanReversionStrategy, Z-score + funding rate adjustment, 27 tests passing)
+Stopped at: Completed 30-03-PLAN.md (perp registry factories, config schema extension, npm run tournament:perp CLI)
 Resume with: `/gsd:execute-phase 30` (Phase 30: continue with next plan)
