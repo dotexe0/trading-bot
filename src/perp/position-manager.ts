@@ -15,7 +15,7 @@
 
 import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
-import { d } from '../core/decimal.js';
+import { d, ZERO } from '../core/decimal.js';
 import { createModuleLogger } from '../core/logger.js';
 import { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
 import type { IntxClient } from './intx-client.js';
@@ -296,6 +296,96 @@ export class PerpPositionManager extends EventEmitter {
     } finally {
       this._emergencyCloseInProgress = false;
     }
+  }
+
+  /**
+   * Reconcile internal state with INTX on startup after a crash or restart.
+   *
+   * Strategy:
+   * 1. Query PerpStateStore for any session with status='open'
+   * 2. For each open session, call intxClient.getAccountState() and parse positions
+   * 3. Match by instrument; parse net_size as Decimal:
+   *    - gt(ZERO) → still long on exchange
+   *    - lt(ZERO) → still short on exchange
+   *    - isZero() → position closed externally → mark session closed
+   * 4. If exchange confirms position open: restore this.currentSession from DB
+   * 5. If exchange shows no position: mark session closed with closeReason='external_close'
+   * 6. Check for PENDING orders: log at warn and mark FAILED (conservative; prevents double-entry)
+   * 7. Log reconciliation result at info
+   * 8. Return: { restored: boolean; closedExternally: boolean }
+   */
+  async recoverFromRestart(): Promise<{ restored: boolean; closedExternally: boolean }> {
+    const openSessions = this.stateStore.getAllOpenSessions();
+
+    if (openSessions.length === 0) {
+      log.info('recoverFromRestart: no open sessions in DB — nothing to reconcile');
+      return { restored: false, closedExternally: false };
+    }
+
+    const accountState = await this.intxClient.getAccountState();
+    const positions = (accountState.positions as Array<{
+      instrument: string;
+      net_size: string;
+      vwap: string;
+      mark_price: string;
+    }>) ?? [];
+
+    let restored = false;
+    let closedExternally = false;
+
+    for (const dbSession of openSessions) {
+      // Mark any PENDING orders as FAILED before doing anything else
+      const pendingOrders = this.stateStore.getPendingOrders(dbSession.id);
+      for (const order of pendingOrders) {
+        log.warn(
+          { clientOrderId: order.clientOrderId, instrument: order.instrument },
+          'Unconfirmed PENDING order on restart — marking FAILED (conservative)',
+        );
+        this.stateStore.persistOrder({ ...order, status: 'FAILED', updatedAt: Date.now() });
+      }
+
+      // Find matching position on exchange
+      const exchangePos = positions.find((p) => p.instrument === dbSession.instrument);
+      const netSize = exchangePos ? d(exchangePos.net_size) : null;
+
+      const isLongOnExchange = netSize?.gt(ZERO) ?? false;
+      const isShortOnExchange = netSize?.lt(ZERO) ?? false;
+      const isZeroOnExchange = netSize?.isZero() ?? true;
+
+      const sessionMatchesExchange =
+        (dbSession.direction === 'long' && isLongOnExchange) ||
+        (dbSession.direction === 'short' && isShortOnExchange);
+
+      if (sessionMatchesExchange) {
+        // Position still open — restore
+        this.currentSession = dbSession;
+        restored = true;
+        log.info(
+          { sessionId: dbSession.id, instrument: dbSession.instrument, direction: dbSession.direction },
+          'recoverFromRestart: session restored from DB — exchange position confirmed open',
+        );
+      } else {
+        // Position closed externally (or net_size is wrong direction)
+        const closedAt = Date.now();
+        this.stateStore.updateSession(dbSession.id, {
+          status: 'closed',
+          closedAt,
+          closeReason: 'external_close',
+        });
+        closedExternally = true;
+        log.info(
+          { sessionId: dbSession.id, instrument: dbSession.instrument, exchangeNetSize: exchangePos?.net_size ?? '0' },
+          'recoverFromRestart: session closed externally — marked closed in DB',
+        );
+      }
+    }
+
+    log.info(
+      { restored, closedExternally, sessionsChecked: openSessions.length },
+      'recoverFromRestart: reconciliation complete',
+    );
+
+    return { restored, closedExternally };
   }
 
   // ── Accessors ──────────────────────────────────────────────────────

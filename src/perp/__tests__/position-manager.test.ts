@@ -57,6 +57,7 @@ function makeStateStore(): PerpStateStore {
   return {
     createSession: vi.fn(),
     getOpenSession: vi.fn().mockReturnValue(null),
+    getAllOpenSessions: vi.fn().mockReturnValue([]),
     updateSession: vi.fn(),
     persistOrder: vi.fn(),
     getOrderByClientId: vi.fn().mockReturnValue(null),
@@ -311,6 +312,129 @@ describe('PerpPositionManager', () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
 
       expect(distEvent).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Tests 9-12: recoverFromRestart ────────────────────────────────
+  describe('recoverFromRestart()', () => {
+    it('restores currentSession when exchange confirms position still open (long)', async () => {
+      const dbSession: ReturnType<typeof makeStateStore> extends { getOpenSession: any } ? any : never = {
+        id: 'session-1',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '50000',
+        size: '0.1',
+        leverage: 10,
+        liquidationPrice: '46665',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: Date.now(),
+      };
+
+      (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
+      (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
+        balances: [],
+        positions: [{ instrument: 'BTC-PERP', net_size: '0.1', vwap: '50000', mark_price: '51000' }],
+        summary: {},
+      });
+      (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const result = await manager.recoverFromRestart();
+
+      expect(result.restored).toBe(true);
+      expect(result.closedExternally).toBe(false);
+      expect(manager.getCurrentSession()).toEqual(dbSession);
+    });
+
+    it('marks session closed externally when exchange shows net_size=0', async () => {
+      const dbSession: any = {
+        id: 'session-2',
+        instrument: 'ETH-PERP',
+        direction: 'long',
+        entryPrice: '3000',
+        size: '1.0',
+        leverage: 5,
+        liquidationPrice: '2400',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: Date.now(),
+      };
+
+      (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
+      (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
+        balances: [],
+        positions: [{ instrument: 'ETH-PERP', net_size: '0', vwap: '3000', mark_price: '3100' }],
+        summary: {},
+      });
+      (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const result = await manager.recoverFromRestart();
+
+      expect(result.closedExternally).toBe(true);
+      expect(result.restored).toBe(false);
+      expect(manager.getCurrentSession()).toBeNull();
+
+      // stateStore.updateSession called to close session
+      expect(stateStore.updateSession).toHaveBeenCalledWith(
+        dbSession.id,
+        expect.objectContaining({ status: 'closed', closeReason: 'external_close' }),
+      );
+    });
+
+    it('marks PENDING orders as FAILED to prevent double-entry on restart', async () => {
+      const dbSession: any = {
+        id: 'session-3',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '50000',
+        size: '0.1',
+        leverage: 10,
+        liquidationPrice: '46665',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: Date.now(),
+      };
+
+      const pendingOrder: any = {
+        id: 'order-uuid-1',
+        clientOrderId: 'order-uuid-1',
+        sessionId: dbSession.id,
+        instrument: 'BTC-PERP',
+        side: 'BUY',
+        size: '0.1',
+        status: 'PENDING',
+        purpose: 'ENTRY',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
+      (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([pendingOrder]);
+      (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
+        balances: [],
+        positions: [{ instrument: 'BTC-PERP', net_size: '0.1', vwap: '50000', mark_price: '51000' }],
+        summary: {},
+      });
+
+      await manager.recoverFromRestart();
+
+      // persistOrder called with FAILED status — no new orders placed
+      expect(stateStore.persistOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ clientOrderId: 'order-uuid-1', status: 'FAILED' }),
+      );
+      // placeOrder never called
+      expect(intxClient.placeOrder).not.toHaveBeenCalled();
+    });
+
+    it('returns restored=false, closedExternally=false when no open sessions in DB', async () => {
+      (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([]);
+
+      const result = await manager.recoverFromRestart();
+
+      expect(result.restored).toBe(false);
+      expect(result.closedExternally).toBe(false);
+      // getAccountState not called when no sessions to check
+      expect((intxClient as any).getAccountState).toBeUndefined();
     });
   });
 

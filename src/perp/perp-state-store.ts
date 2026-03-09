@@ -64,6 +64,20 @@ export class PerpStateStore {
   }
 
   /**
+   * Get all open sessions across all instruments (status = 'open').
+   * Used by recoverFromRestart() to reconcile state on startup.
+   */
+  getAllOpenSessions(): PerpSession[] {
+    const rows = this.db
+      .select()
+      .from(perpSessions)
+      .where(sql`${perpSessions.status} = 'open'`)
+      .all();
+
+    return rows.map((row) => this.rowToSession(row));
+  }
+
+  /**
    * Get the open session for an instrument (status = 'open').
    */
   getOpenSession(instrument: string): PerpSession | null {
