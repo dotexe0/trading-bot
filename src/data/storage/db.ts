@@ -365,6 +365,8 @@ export function initializeSchema(sqlite: Database.Database): void {
       exchange_order_id TEXT,
       avg_fill_price TEXT,
       fee TEXT,
+      limit_price TEXT,
+      stop_price TEXT,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -382,6 +384,16 @@ export function initializeSchema(sqlite: Database.Database): void {
     sqlite.exec(alterSql);
   } catch (_e) {
     // Column already present — expected for existing databases
+  }
+
+  // Migrate existing perp_orders tables: add limit_price and stop_price if absent.
+  // Guard via pragma_table_info to check column existence before ALTER TABLE.
+  const perpOrdersColumns = sqlite
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('perp_orders') WHERE name='limit_price'")
+    .get() as { cnt: number };
+  if (perpOrdersColumns.cnt === 0) {
+    sqlite.exec('ALTER TABLE perp_orders ADD COLUMN limit_price TEXT');
+    sqlite.exec('ALTER TABLE perp_orders ADD COLUMN stop_price TEXT');
   }
 
   log.info('Database schema initialized');

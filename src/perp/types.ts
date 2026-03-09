@@ -28,10 +28,23 @@ export interface IntxFundingRateEvent {
 
 // ── EventEmitter Events ──────────────────────────────────────────────
 
+/** Order fill event emitted by the FCM user channel WebSocket feed. */
+export interface FcmOrderFillEvent {
+  orderId: string;          // exchange order_id
+  clientOrderId: string;
+  productId: string;
+  side: 'BUY' | 'SELL';
+  filledSize: string;
+  avgFillPrice: string;
+  totalFees: string;
+  timestamp: number;
+}
+
 /** Typed EventEmitter event map for IntxClient. */
 export interface IntxClientEvents {
   markPrice: [IntxMarkPriceEvent];
   fundingRate: [IntxFundingRateEvent];
+  orderFill: [FcmOrderFillEvent];
   connected: [];
   disconnected: [];
   reconnected: [];
@@ -68,6 +81,7 @@ export interface PlaceOrderParams {
   limitPrice?: string;
   clientOrderId?: string;
   closeOnly?: boolean;
+  postOnly?: boolean;
 }
 
 /** Parameters for cancelling a perpetual futures order via FCM. */
@@ -111,10 +125,12 @@ export interface PerpOrder {
   side: 'BUY' | 'SELL';
   size: string;
   status: 'PENDING' | 'OPEN' | 'FILLED' | 'FAILED' | 'CANCELLED';
-  purpose: 'ENTRY' | 'EXIT' | 'EMERGENCY_CLOSE';
+  purpose: 'ENTRY' | 'EXIT' | 'EMERGENCY_CLOSE' | 'TAKE_PROFIT' | 'STOP_LOSS';
   exchangeOrderId?: string;     // set after API confirms
   avgFillPrice?: string;
   fee?: string;
+  limitPrice?: string;
+  stopPrice?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -125,6 +141,14 @@ export interface PerpPositionManagerEvents {
   positionClosed: [PerpSession];
   emergencyClose: [PerpSession, { markPrice: string; distancePct: string }];
   liquidationDistance: [{ sessionId: string; instrument: string; distancePct: string; markPrice: string }];
+  error: [Error];
+}
+
+/** Typed event map for PerpOrderEngine. */
+export interface PerpOrderEngineEvents {
+  entryFilled: [{ sessionId: string; order: PerpOrder; session: PerpSession }];
+  entryFailed: [{ reason: string; attempts: number }];
+  repriced: [{ attempt: number; oldPrice: string; newPrice: string }];
   error: [Error];
 }
 

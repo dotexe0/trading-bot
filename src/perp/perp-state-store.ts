@@ -134,6 +134,8 @@ export class PerpStateStore {
           exchangeOrderId: order.exchangeOrderId ?? null,
           avgFillPrice: order.avgFillPrice ?? null,
           fee: order.fee ?? null,
+          limitPrice: order.limitPrice ?? null,
+          stopPrice: order.stopPrice ?? null,
           updatedAt: order.updatedAt,
         })
         .where(eq(perpOrders.clientOrderId, order.clientOrderId))
@@ -152,6 +154,8 @@ export class PerpStateStore {
           exchangeOrderId: order.exchangeOrderId ?? null,
           avgFillPrice: order.avgFillPrice ?? null,
           fee: order.fee ?? null,
+          limitPrice: order.limitPrice ?? null,
+          stopPrice: order.stopPrice ?? null,
           createdAt: order.createdAt,
           updatedAt: order.updatedAt,
         })
@@ -182,6 +186,22 @@ export class PerpStateStore {
       .from(perpOrders)
       .where(
         sql`${perpOrders.sessionId} = ${sessionId} AND ${perpOrders.status} = 'PENDING'`,
+      )
+      .all();
+
+    return rows.map((row) => this.rowToOrder(row));
+  }
+
+  /**
+   * Get all PENDING and OPEN orders for a session.
+   * Used by cancelAllOpenOrders() to find orders eligible for cancellation.
+   */
+  getOpenOrdersBySession(sessionId: string): PerpOrder[] {
+    const rows = this.db
+      .select()
+      .from(perpOrders)
+      .where(
+        sql`${perpOrders.sessionId} = ${sessionId} AND ${perpOrders.status} IN ('PENDING', 'OPEN')`,
       )
       .all();
 
@@ -231,6 +251,8 @@ export class PerpStateStore {
       exchangeOrderId: row.exchangeOrderId ?? undefined,
       avgFillPrice: row.avgFillPrice ?? undefined,
       fee: row.fee ?? undefined,
+      limitPrice: row.limitPrice ?? undefined,
+      stopPrice: row.stopPrice ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

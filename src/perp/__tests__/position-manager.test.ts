@@ -33,6 +33,12 @@ function makeConfig(overrides: Partial<IntxConfig> = {}): IntxConfig {
     ethProductId: 'ETP-20DEC30-CDE',
     liquidationSafetyThresholdPct: 5.0,
     defaultMaintenanceMarginRate: '0.0333',
+    tpTargetPct: 2.0,
+    atrMultiplier: 2.0,
+    stopLimitSlippagePct: 0.1,
+    repriceTimeoutMs: 60000,
+    maxRepriceAttempts: 20,
+    entryOrderTimeoutMs: 300000,
     ...overrides,
   };
 }

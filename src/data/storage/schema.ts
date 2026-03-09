@@ -349,6 +349,8 @@ export const perpOrders = sqliteTable(
     exchangeOrderId: text('exchange_order_id'),
     avgFillPrice: text('avg_fill_price'),
     fee: text('fee'),
+    limitPrice: text('limit_price'),
+    stopPrice: text('stop_price'),
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),
   },

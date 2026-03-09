@@ -20,6 +20,12 @@ export const fcmConfigSchema = z
     ethProductId: z.string().default('ETP-20DEC30-CDE'),
     liquidationSafetyThresholdPct: z.number().default(5.0),
     defaultMaintenanceMarginRate: z.string().default('0.0333'),
+    tpTargetPct: z.number().default(2.0),
+    atrMultiplier: z.number().default(2.0),
+    stopLimitSlippagePct: z.number().default(0.1),
+    repriceTimeoutMs: z.number().default(60000),
+    maxRepriceAttempts: z.number().default(20),
+    entryOrderTimeoutMs: z.number().default(300000),
   })
   .refine(
     (data) => !data.enabled || (!!data.apiKey && !!data.apiSecret),
