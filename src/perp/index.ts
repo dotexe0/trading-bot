@@ -6,6 +6,8 @@
  */
 
 export { IntxClient } from './intx-client.js';
+export { PaperPerpEngine } from './paper-perp-engine.js';
+export type { PaperPerpEngineOptions } from './paper-perp-engine.js';
 export type { IntxConfig } from './config.js';
 export { intxConfigSchema } from './config.js';
 export { PerpPositionManager } from './position-manager.js';
