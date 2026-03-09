@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 29 complete (Leverage and Margin Risk Layer), Phase 30 next
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 30 in progress (Perp Strategies and Tournament), Plan 1 of N complete
 
 ## Current Position
 
-Phase: 29 of 33 (Leverage and Margin Risk Layer) — complete
-Plan: 2 of 2 in current phase — complete
+Phase: 30 of 33 (Perp Strategies and Tournament) — in progress
+Plan: 1 complete in current phase
 Status: Active
-Last activity: 2026-03-09 — 29-02 complete (PerpRiskGate with three sequential checks, balance cache, wired into PerpPositionManager and PaperPerpEngine)
+Last activity: 2026-03-09 — 30-01 complete (PerpMomentumStrategy with funding rate adjustment, 26 tests, TDD RED→GREEN)
 
-Progress: [████░░░░░░] 53% of v1.4 (8/15 plans complete)
+Progress: [████░░░░░░] 56% of v1.4 (9/16 plans complete)
 
 ## Performance Metrics
 
@@ -81,6 +81,10 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 29-02: openPaperPosition made async to support await riskGate.check() inline; _handleMarkPrice uses .catch() fire-and-forget for signal dispatch
 - 29-02: Paper mode mock balance (initialMargin=0, availableMargin=1000000) always passes utilization; in-process sessions count toward notional cap
 - 29-02: riskGate optional on both PerpPositionManager and PaperPerpEngine — null when absent; zero breaking changes for existing callers
+- 30-01: fundingRateProvider uses >= for threshold comparison — rate at threshold triggers 50% max reduction (canonical test case: rate=threshold=0.01)
+- 30-01: Plan annotation '25% reduction for rate=0.005' incorrect; formula gives no adjustment when rate < threshold; >= condition is correct
+- 30-01: No regime filter on PerpMomentumStrategy — perp strategies activate in TRENDING, RANGING, VOLATILE (leveraged execution needs signals in any market)
+- 30-01: fundingRateProvider injected via constructor — decouples from live data, enables tournament mode with null provider
 
 ### Open Issues / Tech Debt
 
@@ -94,5 +98,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 29-02-PLAN.md (PerpRiskGate, wired into PerpPositionManager and PaperPerpEngine, barrel exports)
-Resume with: `/gsd:execute-phase 30` (Phase 30: Perp Strategies)
+Stopped at: Completed 30-01-PLAN.md (PerpMomentumStrategy, funding rate adjustment, 26 tests passing)
+Resume with: `/gsd:execute-phase 30` (Phase 30: continue with next plan)
