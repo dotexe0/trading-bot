@@ -60,12 +60,65 @@ export interface PlaceOrderParams {
   orderType: 'MARKET' | 'LIMIT';
   limitPrice?: string;
   clientOrderId?: string;
+  closeOnly?: boolean;
 }
 
 /** Parameters for cancelling a perpetual order on INTX. */
 export interface CancelOrderParams {
   orderId: string;
   portfolioId: string;
+}
+
+// ── Perp Position Types ──────────────────────────────────────────────
+
+/** Direction of a perp position. */
+export type PerpDirection = 'long' | 'short';
+
+/** Status of a perp session (open position lifecycle). */
+export type PerpSessionStatus = 'open' | 'closed' | 'emergency_closed';
+
+/** An open or closed perp position session. */
+export interface PerpSession {
+  id: string;                   // UUID session ID
+  instrument: string;           // 'BTC-PERP' | 'ETH-PERP'
+  direction: PerpDirection;
+  entryPrice: string;           // decimal string
+  size: string;                 // base units (decimal string)
+  leverage: number;
+  liquidationPrice: string;     // decimal string; computed pre-entry
+  maintenanceMarginRate: string; // decimal string (e.g. '0.0333')
+  markPrice?: string;           // last known mark price
+  unrealizedPnl?: string;       // decimal string
+  status: PerpSessionStatus;
+  openedAt: number;             // Unix ms
+  closedAt?: number;            // Unix ms
+  closeReason?: string;
+}
+
+/** A persisted perp order record (entry or exit). */
+export interface PerpOrder {
+  id: string;                   // client_order_id (UUID); updated to exchange order_id on fill
+  clientOrderId: string;
+  sessionId: string;
+  instrument: string;
+  side: 'BUY' | 'SELL';
+  size: string;
+  status: 'PENDING' | 'OPEN' | 'FILLED' | 'FAILED' | 'CANCELLED';
+  purpose: 'ENTRY' | 'EXIT' | 'EMERGENCY_CLOSE';
+  exchangeOrderId?: string;     // set after API confirms
+  avgFillPrice?: string;
+  fee?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** Typed event map for PerpPositionManager. */
+export interface PerpPositionManagerEvents {
+  positionOpened: [PerpSession];
+  positionClosed: [PerpSession];
+  emergencyClose: [PerpSession, { markPrice: string; distancePct: string }];
+  liquidationDistance: [{ sessionId: string; instrument: string; distancePct: string; markPrice: string }];
+  error: [Error];
 }
 
 // ── Config re-export ─────────────────────────────────────────────────

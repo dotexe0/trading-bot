@@ -316,6 +316,45 @@ export const backtestRuns = sqliteTable(
   ],
 );
 
+// ── Perp Trading Tables ─────────────────────────────────────────────
+
+export const perpSessions = sqliteTable('perp_sessions', {
+  id: text('id').primaryKey(),
+  instrument: text('instrument').notNull(),
+  direction: text('direction').notNull(),
+  entryPrice: text('entry_price').notNull(),
+  size: text('size').notNull(),
+  leverage: integer('leverage').notNull(),
+  liquidationPrice: text('liquidation_price').notNull(),
+  maintenanceMarginRate: text('maintenance_margin_rate').notNull(),
+  markPrice: text('mark_price'),
+  unrealizedPnl: text('unrealized_pnl'),
+  status: text('status').notNull().default('open'),
+  openedAt: integer('opened_at').notNull(),
+  closedAt: integer('closed_at'),
+  closeReason: text('close_reason'),
+});
+
+export const perpOrders = sqliteTable(
+  'perp_orders',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    clientOrderId: text('client_order_id').notNull().unique(),
+    sessionId: text('session_id').notNull(),
+    instrument: text('instrument').notNull(),
+    side: text('side').notNull(),
+    size: text('size').notNull(),
+    status: text('status').notNull(),
+    purpose: text('purpose').notNull(),
+    exchangeOrderId: text('exchange_order_id'),
+    avgFillPrice: text('avg_fill_price'),
+    fee: text('fee'),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (table) => [index('idx_perp_orders_session').on(table.sessionId)],
+);
+
 // -- Exit Config Optimizer Tables --
 
 export const exitConfigOptimizations = sqliteTable(

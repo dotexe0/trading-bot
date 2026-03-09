@@ -331,6 +331,46 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_exit_opt_strategy
       ON exit_config_optimizations (strategy_name);
+
+    -- Perp trading tables
+    CREATE TABLE IF NOT EXISTS perp_sessions (
+      id TEXT PRIMARY KEY,
+      instrument TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      entry_price TEXT NOT NULL,
+      size TEXT NOT NULL,
+      leverage INTEGER NOT NULL,
+      liquidation_price TEXT NOT NULL,
+      maintenance_margin_rate TEXT NOT NULL,
+      mark_price TEXT,
+      unrealized_pnl TEXT,
+      status TEXT NOT NULL DEFAULT 'open',
+      opened_at INTEGER NOT NULL,
+      closed_at INTEGER,
+      close_reason TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_perp_sessions_instrument
+      ON perp_sessions (instrument, status);
+
+    CREATE TABLE IF NOT EXISTS perp_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      client_order_id TEXT NOT NULL UNIQUE,
+      session_id TEXT NOT NULL,
+      instrument TEXT NOT NULL,
+      side TEXT NOT NULL,
+      size TEXT NOT NULL,
+      status TEXT NOT NULL,
+      purpose TEXT NOT NULL,
+      exchange_order_id TEXT,
+      avg_fill_price TEXT,
+      fee TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_perp_orders_session
+      ON perp_orders (session_id);
   `);
 
   // Migrate existing databases: add regime_leaderboards_json if absent.

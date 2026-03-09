@@ -16,6 +16,8 @@ export const intxConfigSchema = z
     apiPassphrase: z.string().optional(),
     portfolioId: z.string().optional(),
     testnet: z.boolean().default(false),
+    liquidationSafetyThresholdPct: z.number().default(5.0),
+    defaultMaintenanceMarginRate: z.string().default('0.0333'),
   })
   .refine(
     (data) =>

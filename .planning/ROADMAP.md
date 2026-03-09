@@ -111,7 +111,7 @@ Plans:
 4. After a simulated crash and restart, the bot reconciles with INTX, restores open position state, and resumes without duplicating orders
 5. Bot triggers an emergency close and logs a `LIQUIDATION_RISK` warning when liquidation distance falls below the configured safety threshold
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 27-01: Perp position manager — open/close long/short, liquidation price calc, liquidation distance monitor, emergency close
