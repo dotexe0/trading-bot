@@ -16,6 +16,12 @@ export { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-cal
 export { PerpOrderEngine } from './order-engine.js';
 export { TrailingStopManager } from './trailing-stop.js';
 export type { TrailingStopState } from './trailing-stop.js';
+export { PerpRiskGate } from './perp-risk-gate.js';
+export type { PerpRiskGateOptions } from './perp-risk-gate.js';
+export { computeLeverage } from './leverage-sizer.js';
+export type { LeverageConfig } from './leverage-sizer.js';
+export { getMarginMode } from './margin-mode.js';
+export type { MarginMode } from './margin-mode.js';
 export type {
   IntxMarkPriceEvent,
   IntxFundingRateEvent,
@@ -30,4 +36,6 @@ export type {
   PerpPositionManagerEvents,
   FcmOrderFillEvent,
   PerpOrderEngineEvents,
+  RiskGateResult,
+  PerpRiskGateParams,
 } from './types.js';

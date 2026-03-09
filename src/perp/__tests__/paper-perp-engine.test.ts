@@ -111,7 +111,7 @@ describe('PaperPerpEngine', () => {
 
   // ── Test 1: Full round-trip via onSignal ───────────────────────────
   describe('full round-trip via onSignal', () => {
-    it('opens and closes position, persists to stateStore, never calls placeOrder', () => {
+    it('opens and closes position, persists to stateStore, never calls placeOrder', async () => {
       let callCount = 0;
       const engine = new PaperPerpEngine({
         intxClient,
@@ -132,10 +132,12 @@ describe('PaperPerpEngine', () => {
 
       engine.start();
 
-      // First event: open-long
+      // First event: open-long (openPaperPosition is async; flush microtask queue)
       intxClient.emit('markPrice', makeMarkPriceEvt('BTC-PERP', '50000'));
-      // Second event: close
+      await Promise.resolve();
+      // Second event: close (position is now open)
       intxClient.emit('markPrice', makeMarkPriceEvt('BTC-PERP', '51000'));
+      await Promise.resolve();
 
       engine.stop();
 
@@ -167,13 +169,13 @@ describe('PaperPerpEngine', () => {
 
   // ── Test 2: Emergency close ────────────────────────────────────────
   describe('emergency close', () => {
-    it('triggers when mark price is near liquidation, emits emergencyClose, never calls placeOrder', () => {
+    it('triggers when mark price is near liquidation, emits emergencyClose, never calls placeOrder', async () => {
       const emergencyConfig = makeConfig({ liquidationSafetyThresholdPct: 10 });
       const engine = new PaperPerpEngine({ intxClient, stateStore, config: emergencyConfig });
       engine.start();
 
       // Open long at 50000, leverage 10, MMR=0.0333 → liqPrice ≈ 46665
-      engine.openPaperPosition('BTC-PERP', 'long', '0.01', 10, '50000');
+      await engine.openPaperPosition('BTC-PERP', 'long', '0.01', 10, '50000');
 
       const emergencyCloseFn = vi.fn();
       engine.on('emergencyClose', emergencyCloseFn);
@@ -222,23 +224,23 @@ describe('PaperPerpEngine', () => {
 
   // ── Test 4: Double-open guard ──────────────────────────────────────
   describe('double-open guard', () => {
-    it('throws when openPaperPosition called while position is already open', () => {
+    it('throws when openPaperPosition called while position is already open', async () => {
       const engine = new PaperPerpEngine({ intxClient, stateStore, config });
 
-      engine.openPaperPosition('BTC-PERP', 'long', '0.01', 5, '50000');
+      await engine.openPaperPosition('BTC-PERP', 'long', '0.01', 5, '50000');
 
-      expect(() => {
-        engine.openPaperPosition('BTC-PERP', 'long', '0.01', 5, '51000');
-      }).toThrow('Paper position already open');
+      await expect(
+        engine.openPaperPosition('BTC-PERP', 'long', '0.01', 5, '51000'),
+      ).rejects.toThrow('Paper position already open');
     });
   });
 
   // ── Test 5: Short position PnL ─────────────────────────────────────
   describe('short position PnL', () => {
-    it('realizes positive PnL when short opened at 50000 and closed at 45000', () => {
+    it('realizes positive PnL when short opened at 50000 and closed at 45000', async () => {
       const engine = new PaperPerpEngine({ intxClient, stateStore, config });
 
-      engine.openPaperPosition('BTC-PERP', 'short', '0.01', 5, '50000');
+      await engine.openPaperPosition('BTC-PERP', 'short', '0.01', 5, '50000');
 
       const positionClosed = vi.fn();
       engine.on('positionClosed', positionClosed);
@@ -261,7 +263,7 @@ describe('PaperPerpEngine', () => {
 
   // ── Test 6: No placeOrder calls ────────────────────────────────────
   describe('no placeOrder calls', () => {
-    it('placeOrder throwing does not affect paper round-trip', () => {
+    it('placeOrder throwing does not affect paper round-trip', async () => {
       // Make placeOrder throw — if paper engine ever calls it, the test will throw
       (intxClient.placeOrder as ReturnType<typeof vi.fn>).mockImplementation(() => {
         throw new Error('placeOrder should never be called in paper mode');
@@ -281,11 +283,12 @@ describe('PaperPerpEngine', () => {
 
       engine.start();
 
-      // Should not throw even though placeOrder would throw
-      expect(() => {
-        intxClient.emit('markPrice', makeMarkPriceEvt('BTC-PERP', '50000'));
-        intxClient.emit('markPrice', makeMarkPriceEvt('BTC-PERP', '51000'));
-      }).not.toThrow();
+      // First event: open-long (openPaperPosition is async; flush microtask queue)
+      intxClient.emit('markPrice', makeMarkPriceEvt('BTC-PERP', '50000'));
+      await Promise.resolve();
+      // Second event: close (position is now open)
+      intxClient.emit('markPrice', makeMarkPriceEvt('BTC-PERP', '51000'));
+      await Promise.resolve();
 
       engine.stop();
 

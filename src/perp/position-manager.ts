@@ -22,6 +22,7 @@ import type { IntxClient } from './intx-client.js';
 import type { PerpStateStore } from './perp-state-store.js';
 import type { IntxConfig } from './config.js';
 import type { PerpOrderEngine } from './order-engine.js';
+import type { PerpRiskGate } from './perp-risk-gate.js';
 import type {
   PerpSession,
   PerpOrder,
@@ -38,6 +39,7 @@ export interface PerpPositionManagerOptions {
   config: IntxConfig;
   sessionId?: string;
   orderEngine?: PerpOrderEngine; // optional: if provided, closeAndCleanup() called on all close paths
+  riskGate?: PerpRiskGate;       // optional: if provided, check() called before every openPosition() API call
 }
 
 export class PerpPositionManager extends EventEmitter {
@@ -46,6 +48,8 @@ export class PerpPositionManager extends EventEmitter {
   private config: IntxConfig;
   private botSessionId: string;
   private _orderEngine: PerpOrderEngine | null;
+
+  private _riskGate: PerpRiskGate | null;
 
   private currentSession: PerpSession | null = null;
   private _emergencyCloseInProgress = false;
@@ -66,6 +70,7 @@ export class PerpPositionManager extends EventEmitter {
     this.config = options.config;
     this.botSessionId = options.sessionId ?? crypto.randomUUID();
     this._orderEngine = options.orderEngine ?? null;
+    this._riskGate = options.riskGate ?? null;
   }
 
   /**
@@ -129,6 +134,12 @@ export class PerpPositionManager extends EventEmitter {
     leverage: number;
     entryPrice: string;
     maintenanceMarginRate?: string;
+    /** Required when riskGate is set — total FCM account equity used for cap/loss checks. */
+    accountValue?: string;
+    /** Fraction of notional to use as max-loss estimate (default 0.02 = 2%). */
+    stopDistancePct?: number;
+    /** Bot-internal margin policy for this entry; included in entry log and session. */
+    marginMode?: 'isolated' | 'cross';
   }): Promise<PerpSession> {
     if (this.currentSession !== null && this.currentSession.status === 'open') {
       throw new Error('Position already open for this instrument');
@@ -136,6 +147,23 @@ export class PerpPositionManager extends EventEmitter {
 
     const { instrument, direction, size, leverage, entryPrice } = params;
     const mmr = d(params.maintenanceMarginRate ?? this.config.defaultMaintenanceMarginRate);
+
+    // Risk gate check (before liquidation calc and any API call)
+    if (this._riskGate) {
+      const stopPct = d(String(params.stopDistancePct ?? 0.02));
+      const proposedNotional = d(size).mul(d(entryPrice));
+      const proposedMaxLoss = proposedNotional.mul(stopPct);
+      const accountVal = params.accountValue ?? '0';
+      const gateResult = await this._riskGate.check({
+        instrument,
+        proposedNotional: proposedNotional.toFixed(8),
+        proposedMaxLoss: proposedMaxLoss.toFixed(8),
+        accountValue: accountVal,
+      });
+      if (!gateResult.approved) {
+        throw new Error(`PerpRiskGate rejected entry: ${gateResult.rejectReason}`);
+      }
+    }
 
     // Step: compute liquidation price before entry
     const liqPrice = calcLiquidationPrice(d(entryPrice), leverage, direction, mmr);
@@ -145,6 +173,7 @@ export class PerpPositionManager extends EventEmitter {
         direction,
         entryPrice,
         leverage,
+        marginMode: params.marginMode ?? 'unknown',
         liquidationPrice: liqPrice.toFixed(8),
       },
       'Liquidation price computed before entry',
@@ -198,6 +227,7 @@ export class PerpPositionManager extends EventEmitter {
       leverage,
       liquidationPrice: liqPrice.toFixed(8),
       maintenanceMarginRate: mmr.toFixed(8),
+      marginMode: params.marginMode,
       status: 'open',
       openedAt: Date.now(),
     };

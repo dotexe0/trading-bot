@@ -19,6 +19,7 @@ import { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-cal
 import type { IntxClient } from './intx-client.js';
 import type { PerpStateStore } from './perp-state-store.js';
 import type { IntxConfig } from './config.js';
+import type { PerpRiskGate } from './perp-risk-gate.js';
 import type {
   PerpSession,
   PerpDirection,
@@ -45,6 +46,8 @@ export interface PaperPerpEngineOptions {
   intxClient: IntxClient;
   stateStore: PerpStateStore;
   config: IntxConfig;
+  /** Optional: if provided, check() called before every openPaperPosition() call. */
+  riskGate?: PerpRiskGate;
   /**
    * Optional signal callback. Called on each markPrice event.
    * Return value controls the engine's action:
@@ -69,6 +72,7 @@ export class PaperPerpEngine extends EventEmitter {
   private stateStore: PerpStateStore;
   private config: IntxConfig;
   private onSignal?: PaperPerpEngineOptions['onSignal'];
+  private _riskGate: PerpRiskGate | null;
 
   private currentPosition: PaperPerpPosition | null = null;
   private _started = false;
@@ -89,6 +93,7 @@ export class PaperPerpEngine extends EventEmitter {
     this.stateStore = options.stateStore;
     this.config = options.config;
     this.onSignal = options.onSignal;
+    this._riskGate = options.riskGate ?? null;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -121,16 +126,46 @@ export class PaperPerpEngine extends EventEmitter {
   /**
    * Open a simulated paper position at the current mark price.
    * Persists to PerpStateStore — no REST calls made.
+   *
+   * If a riskGate is configured, check() is called before the liquidation calc.
    */
-  openPaperPosition(
+  async openPaperPosition(
     instrument: string,
     direction: PerpDirection,
     size: string,
     leverage: number,
     markPrice: string,
-  ): PerpSession {
+    options?: {
+      /** Total account equity for exposure/loss cap checks. Defaults to '1000000'. */
+      accountValue?: string;
+      /** Fraction of notional to use as max-loss estimate (default 0.02 = 2%). */
+      stopDistancePct?: number;
+      /** Bot-internal margin policy; included in entry log and session. */
+      marginMode?: 'isolated' | 'cross';
+    },
+  ): Promise<PerpSession> {
     if (this.currentPosition !== null) {
       throw new Error('Paper position already open — close existing position first');
+    }
+
+    const accountValue = options?.accountValue;
+    const stopDistancePct = options?.stopDistancePct;
+    const marginMode = options?.marginMode;
+
+    // Risk gate check (before liquidation calc)
+    if (this._riskGate) {
+      const stopPct = d(String(stopDistancePct ?? 0.02));
+      const proposedNotional = d(size).mul(d(markPrice));
+      const proposedMaxLoss = proposedNotional.mul(stopPct);
+      const gateResult = await this._riskGate.check({
+        instrument,
+        proposedNotional: proposedNotional.toFixed(8),
+        proposedMaxLoss: proposedMaxLoss.toFixed(8),
+        accountValue: accountValue ?? '1000000',
+      });
+      if (!gateResult.approved) {
+        throw new Error(`PerpRiskGate rejected paper entry: ${gateResult.rejectReason}`);
+      }
     }
 
     const mmr = d(this.config.defaultMaintenanceMarginRate);
@@ -141,6 +176,7 @@ export class PaperPerpEngine extends EventEmitter {
         instrument,
         direction,
         leverage,
+        marginMode: marginMode ?? 'unknown',
         paperEntryPrice: markPrice,
         liquidationPrice: liqPrice.toFixed(8),
       },
@@ -156,6 +192,7 @@ export class PaperPerpEngine extends EventEmitter {
       leverage,
       liquidationPrice: liqPrice.toFixed(8),
       maintenanceMarginRate: mmr.toFixed(8),
+      marginMode,
       markPrice,
       status: 'open',
       openedAt: Date.now(),
@@ -293,10 +330,14 @@ export class PaperPerpEngine extends EventEmitter {
       const directive = this.onSignal(evt.instrument, evt.markPrice);
       switch (directive) {
         case 'open-long':
-          this.openPaperPosition(evt.instrument, 'long', '0.01', 5, evt.markPrice);
+          this.openPaperPosition(evt.instrument, 'long', '0.01', 5, evt.markPrice).catch((err) => {
+            log.error({ err: err instanceof Error ? err.message : String(err) }, '[PAPER] openPaperPosition failed');
+          });
           break;
         case 'open-short':
-          this.openPaperPosition(evt.instrument, 'short', '0.01', 5, evt.markPrice);
+          this.openPaperPosition(evt.instrument, 'short', '0.01', 5, evt.markPrice).catch((err) => {
+            log.error({ err: err instanceof Error ? err.message : String(err) }, '[PAPER] openPaperPosition failed');
+          });
           break;
         case 'close':
           if (this.currentPosition) {
