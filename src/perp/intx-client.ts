@@ -21,6 +21,7 @@ import type {
   IntxAccountState,
   PlaceOrderParams,
   CancelOrderParams,
+  FcmOrderFillEvent,
 } from './types.js';
 
 const log = createModuleLogger('fcm-client');
@@ -106,13 +107,25 @@ export class IntxClient extends EventEmitter {
 
   // ── WebSocket private helpers ──────────────────────────────────────
 
-  /** Subscribe to ticker (mark prices) and futures_balance_summary channels. */
+  /** Subscribe to ticker (mark prices), futures_balance_summary, and user (order fills) channels. */
   private _subscribe(): void {
     const products = [this.config.btcProductId, this.config.ethProductId];
     // Ticker for mark prices on FCM products
     this.ws!.subscribe({ topic: 'ticker', payload: { product_ids: products } }, 'advTradeMarketData');
     // Futures balance summary for account-level updates
     this.ws!.subscribe({ topic: 'futures_balance_summary', payload: { product_ids: [] } }, 'advTradeUserData');
+    // User data channel for order fills
+    this.ws!.subscribe({ topic: 'user', payload: { product_ids: products } }, 'advTradeUserData');
+  }
+
+  /**
+   * Explicitly re-subscribe to the user channel (e.g. after reconnect).
+   * Already included in _subscribe(); exposed for idempotent re-subscription.
+   */
+  subscribeUserChannel(): void {
+    if (!this.ws) throw new Error('FcmClient not started');
+    const products = [this.config.btcProductId, this.config.ethProductId];
+    this.ws.subscribe({ topic: 'user', payload: { product_ids: products } }, 'advTradeUserData');
   }
 
   /** Attach event listeners to the WebsocketClient instance. */
@@ -157,6 +170,26 @@ export class IntxClient extends EventEmitter {
             timestamp: Date.now(),
             isStale: this._isStale,
           });
+        }
+      } else if (data?.channel === 'user') {
+        const events = Array.isArray(data.events) ? data.events : [data];
+        for (const evt of events) {
+          const orders = Array.isArray(evt.orders) ? evt.orders : [];
+          for (const o of orders) {
+            if (o.status === 'FILLED' && o.order_id) {
+              const fill: FcmOrderFillEvent = {
+                orderId: o.order_id,
+                clientOrderId: o.client_order_id ?? '',
+                productId: o.product_id ?? '',
+                side: o.side ?? 'BUY',
+                filledSize: o.filled_size ?? o.base_size ?? '0',
+                avgFillPrice: o.average_filled_price ?? '0',
+                totalFees: o.total_fees ?? '0',
+                timestamp: Date.now(),
+              };
+              this.emit('orderFill', fill);
+            }
+          }
         }
       } else {
         log.debug({ channel: data?.channel }, 'FCM WebSocket: unknown channel update');
@@ -256,7 +289,7 @@ export class IntxClient extends EventEmitter {
         limit_limit_gtc: {
           base_size: params.size,
           limit_price: params.limitPrice!,
-          post_only: false,
+          post_only: params.postOnly ?? false,
         },
       };
     }
@@ -309,6 +342,22 @@ export class IntxClient extends EventEmitter {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.warn({ orderId: params.orderId, err: message }, 'FCM cancelOrder failed');
+      throw err;
+    }
+  }
+
+  /**
+   * Batch cancel FCM futures orders by exchange order IDs.
+   * Logs at warn on partial failure; throws to allow caller to handle.
+   */
+  async cancelOrders(orderIds: string[]): Promise<void> {
+    if (orderIds.length === 0) return;
+    try {
+      await this.restClient.cancelOrders({ order_ids: orderIds });
+      log.info({ count: orderIds.length }, 'FCM batch cancel complete');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ orderIds, err: message }, 'FCM batch cancel partial failure');
       throw err;
     }
   }

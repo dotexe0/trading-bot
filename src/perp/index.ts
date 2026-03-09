@@ -13,6 +13,7 @@ export { intxConfigSchema } from './config.js';
 export { PerpPositionManager } from './position-manager.js';
 export { PerpStateStore } from './perp-state-store.js';
 export { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
+export { PerpOrderEngine } from './order-engine.js';
 export type {
   IntxMarkPriceEvent,
   IntxFundingRateEvent,
@@ -25,4 +26,6 @@ export type {
   PerpDirection,
   PerpSessionStatus,
   PerpPositionManagerEvents,
+  FcmOrderFillEvent,
+  PerpOrderEngineEvents,
 } from './types.js';
