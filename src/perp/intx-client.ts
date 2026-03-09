@@ -19,6 +19,7 @@
  */
 
 import { EventEmitter } from 'node:events';
+import crypto from 'node:crypto';
 import { CBInternationalClient, WebsocketClient } from 'coinbase-api';
 import { createModuleLogger } from '../core/logger.js';
 import type { IntxConfig } from './config.js';
@@ -230,18 +231,83 @@ export class IntxClient extends EventEmitter {
   }
 
   /**
-   * Stub: Place a perp order on INTX.
-   * Full implementation in Phase 27.
+   * Place a perp order on INTX using a market IOC order.
+   * Returns orderId, status, execQty, avgPrice, and fee from the exchange response.
    */
-  async placeOrder(_params: PlaceOrderParams): Promise<void> {
-    throw new Error('placeOrder not implemented until Phase 27');
+  async placeOrder(params: PlaceOrderParams): Promise<{
+    orderId: string;
+    status: string;
+    execQty: string;
+    avgPrice: string;
+    fee: string;
+  }> {
+    const clientOrderId = params.clientOrderId ?? crypto.randomUUID();
+    const req: {
+      client_order_id: string;
+      side: string;
+      size: string;
+      tif: string;
+      instrument: string;
+      type: string;
+      portfolio: string;
+      close_only?: boolean;
+      price?: string;
+    } = {
+      client_order_id: clientOrderId,
+      side: params.side,
+      size: params.size,
+      tif: 'IOC',
+      instrument: params.instrument,
+      type: params.orderType,
+      portfolio: this.config.portfolioId!,
+    };
+
+    if (params.closeOnly === true) {
+      req.close_only = true;
+    }
+    if (params.limitPrice !== undefined) {
+      req.price = params.limitPrice;
+    }
+
+    const response = await this.restClient.submitOrder(req);
+
+    if (!response.order_id) {
+      throw new Error('INTX submitOrder returned no order_id');
+    }
+
+    log.info(
+      {
+        clientOrderId,
+        exchangeOrderId: response.order_id,
+        side: params.side,
+        instrument: params.instrument,
+      },
+      'INTX order placed',
+    );
+
+    return {
+      orderId: response.order_id,
+      status: response.order_status ?? 'UNKNOWN',
+      execQty: response.exec_qty ?? '0',
+      avgPrice: response.avg_price ?? '0',
+      fee: response.fee ?? '0',
+    };
   }
 
   /**
-   * Stub: Cancel a perp order on INTX.
-   * Full implementation in Phase 27.
+   * Cancel a single open perp order on INTX.
    */
-  async cancelOrder(_params: CancelOrderParams): Promise<void> {
-    throw new Error('cancelOrder not implemented until Phase 27');
+  async cancelOrder(params: CancelOrderParams): Promise<void> {
+    try {
+      await this.restClient.cancelOrder({
+        id: params.orderId,
+        portfolio: params.portfolioId,
+      });
+      log.info({ orderId: params.orderId }, 'INTX order cancelled');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ orderId: params.orderId, err: message }, 'INTX cancelOrder failed');
+      throw err;
+    }
   }
 }

@@ -1,12 +1,16 @@
 /**
  * Barrel export for the perp (perpetual futures) module.
  *
- * Imports from src/perp/intx-client.ts, src/perp/config.ts, src/perp/types.ts.
+ * Imports from src/perp/intx-client.ts, src/perp/config.ts, src/perp/types.ts,
+ * src/perp/position-manager.ts, src/perp/perp-state-store.ts, src/perp/liquidation-calc.ts.
  */
 
 export { IntxClient } from './intx-client.js';
 export type { IntxConfig } from './config.js';
 export { intxConfigSchema } from './config.js';
+export { PerpPositionManager } from './position-manager.js';
+export { PerpStateStore } from './perp-state-store.js';
+export { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
 export type {
   IntxMarkPriceEvent,
   IntxFundingRateEvent,
@@ -14,4 +18,9 @@ export type {
   IntxAccountState,
   PlaceOrderParams,
   CancelOrderParams,
+  PerpSession,
+  PerpOrder,
+  PerpDirection,
+  PerpSessionStatus,
+  PerpPositionManagerEvents,
 } from './types.js';
