@@ -24,6 +24,7 @@
     "dashboard": "tsx src/cli/dashboard.ts",
     "perp:status": "tsx src/cli/perp-status.ts",
     "perp:paper": "tsx src/cli/perp-paper.ts",
+    "tournament:perp": "tsx src/cli/perp-tournament.ts",
     "check-gaps": "tsx src/cli/check-gaps.ts",
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate"
