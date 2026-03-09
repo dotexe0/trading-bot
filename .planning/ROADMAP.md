@@ -61,7 +61,7 @@
 
 ### 🚧 v1.4 Perpetual Futures Trading (In Progress)
 
-**Milestone Goal:** Add Coinbase INTX perpetual futures (BTC-PERP, ETH-PERP) as a second trading system running alongside existing spot. Post-only limit order entries with cancel-and-reprice logic, ATR-based trailing stop-limit exits, configurable leverage with regime-driven margin mode, two perp-specific IStrategy-compatible strategies evaluated in the existing tournament, funding rate tracking with hold-time exit trigger, separate analytics, and three new dashboard panels.
+**Milestone Goal:** Add Coinbase FCM nano perp futures (BIP-20DEC30-CDE, ETP-20DEC30-CDE) as a second trading system running alongside existing spot. Post-only limit order entries with cancel-and-reprice logic, ATR-based trailing stop-limit exits, configurable leverage with regime-driven margin mode, two perp-specific IStrategy-compatible strategies evaluated in the existing tournament, funding rate tracking with hold-time exit trigger, separate analytics, and three new dashboard panels.
 
 - [ ] **Phase 26: INTX API Client** — Coinbase INTX REST + WebSocket connectivity, credentials, account balance, and real-time mark/index/funding streams for BTC-PERP and ETH-PERP
 - [ ] **Phase 27: Perp Position Execution** — Open/close long and short positions, liquidation price calculation, paper perp mode, crash recovery and reconciliation, emergency close on low liquidation distance
@@ -76,14 +76,14 @@
 
 #### Phase 26: INTX API Client
 
-**Goal:** The bot can authenticate to Coinbase INTX and stream live market data for BTC-PERP and ETH-PERP, independently of the existing Advanced Trade integration.
+**Goal:** The bot can authenticate to Coinbase INTX and stream live market data for BTC-PERP and ETH-PERP, using the same Advanced Trade credentials as spot.
 
 **Depends on:** Phase 25 (existing spot system is the integration baseline)
 
 **Requirements:** INTX-01, INTX-02, INTX-03, INTX-04
 
 **Success Criteria** (what must be TRUE):
-1. Bot connects to INTX REST and WebSocket using a separate credential set stored in `.env`; existing Advanced Trade credentials are not shared or affected
+1. Bot connects to FCM via Advanced Trade API using existing COINBASE_API_KEY_NAME/COINBASE_API_KEY_SECRET; no separate credential set needed
 2. `npm run perp:status` (or equivalent CLI) prints current INTX account balance, available margin, and any open positions from a live or testnet account
 3. WebSocket subscription streams real-time mark price, index price, and 8-hour funding rate for both BTC-PERP and ETH-PERP; values update on each event and are observable in logs
 4. All INTX API interactions are encapsulated behind a typed `IntxClient` interface, keeping INTX code isolated from the Advanced Trade code path
