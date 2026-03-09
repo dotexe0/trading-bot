@@ -41,19 +41,16 @@ export type Config = z.infer<typeof configSchema>;
  * Load and validate configuration from environment variables.
  *
  * Env var mapping:
- * - COINBASE_API_KEY_NAME -> coinbase.apiKeyName
- * - COINBASE_API_KEY_SECRET -> coinbase.apiKeySecret
+ * - COINBASE_API_KEY_NAME -> coinbase.apiKeyName (also reused as intx.apiKey for FCM)
+ * - COINBASE_API_KEY_SECRET -> coinbase.apiKeySecret (also reused as intx.apiSecret for FCM)
  * - CRYPTOCOMPARE_API_KEY -> cryptoCompare.apiKey
  * - DB_PATH -> database.path
  * - TRADING_PAIRS -> data.pairs (comma-separated)
  * - HISTORY_DAYS -> data.historyDays (parsed as int)
  * - LOG_LEVEL -> logging.level
- * - INTX_ENABLED -> intx.enabled (default false)
- * - INTX_API_KEY -> intx.apiKey (required when INTX_ENABLED=true)
- * - INTX_API_SECRET -> intx.apiSecret (required when INTX_ENABLED=true)
- * - INTX_API_PASSPHRASE -> intx.apiPassphrase (required when INTX_ENABLED=true)
- * - INTX_PORTFOLIO_ID -> intx.portfolioId (required when INTX_ENABLED=true)
- * - INTX_TESTNET -> intx.testnet (default false)
+ * - FCM_ENABLED -> intx.enabled (default false)
+ * - FCM_TESTNET -> intx.testnet (default false)
+ * (FCM reuses COINBASE_API_KEY_NAME / COINBASE_API_KEY_SECRET — no separate FCM keys needed)
  *
  * @throws ConfigError on validation failure
  */
@@ -81,12 +78,10 @@ export function loadConfig(): Config {
       level: env.LOG_LEVEL ?? 'info',
     },
     intx: {
-      enabled: env.INTX_ENABLED === 'true',
-      apiKey: env.INTX_API_KEY,
-      apiSecret: env.INTX_API_SECRET,
-      apiPassphrase: env.INTX_API_PASSPHRASE,
-      portfolioId: env.INTX_PORTFOLIO_ID,
-      testnet: env.INTX_TESTNET === 'true',
+      enabled: env.FCM_ENABLED === 'true',
+      apiKey: env.COINBASE_API_KEY_NAME,
+      apiSecret: env.COINBASE_API_KEY_SECRET,
+      testnet: env.FCM_TESTNET === 'true',
     },
   };
 
