@@ -1,28 +1,21 @@
 /**
- * IntxClient — REST wrapper and WebSocket streamer for Coinbase International Exchange (INTX).
+ * FcmClient — REST wrapper and WebSocket streamer for Coinbase FCM futures
+ * (available to US users via the Advanced Trade API).
  *
- * Provides:
- *  - getAccountState(): single round-trip to fetch balances, positions, summary
- *  - start(): subscribe to RISK and FUNDING channels via WebSocket, with exponential backoff reconnect
- *  - stop(): graceful shutdown, clears pending reconnect timers
- *  - placeOrder(): stub — full implementation in Phase 27
- *  - cancelOrder(): stub — full implementation in Phase 27
+ * Replaces the former INTX (Coinbase International) client.
+ * Uses CBAdvancedTradeClient with the same credentials as spot trading.
  *
  * Events emitted (typed via IntxClientEvents):
- *  - markPrice     — on RISK channel update
- *  - fundingRate   — on FUNDING channel update
- *  - connected     — WebSocket connection established
- *  - disconnected  — WebSocket connection dropped (isStale becomes true)
- *  - reconnected   — WebSocket successfully reconnected
- *  - reconnectFailed — max reconnect attempts exceeded, IntxClient stopped
- *  - error         — WebSocket error (logged, does not crash)
+ *  - markPrice     — on ticker update for FCM products
+ *  - fundingRate   — on futures_balance_summary update (funding component)
+ *  - connected / disconnected / reconnected / reconnectFailed / error
  */
 
 import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
-import { CBInternationalClient, WebsocketClient } from 'coinbase-api';
+import { CBAdvancedTradeClient, WebsocketClient } from 'coinbase-api';
 import { createModuleLogger } from '../core/logger.js';
-import type { IntxConfig } from './config.js';
+import type { FcmConfig } from './config.js';
 import type {
   IntxClientEvents,
   IntxAccountState,
@@ -30,11 +23,11 @@ import type {
   CancelOrderParams,
 } from './types.js';
 
-const log = createModuleLogger('intx-client');
+const log = createModuleLogger('fcm-client');
 
 export class IntxClient extends EventEmitter {
-  private restClient: CBInternationalClient;
-  private config: IntxConfig;
+  private restClient: CBAdvancedTradeClient;
+  private config: FcmConfig;
 
   // ── WebSocket state ────────────────────────────────────────────────
   private ws: WebsocketClient | null = null;
@@ -56,45 +49,43 @@ export class IntxClient extends EventEmitter {
     return super.emit(event, ...args);
   }
 
-  constructor(config: IntxConfig) {
+  constructor(config: FcmConfig) {
     super();
     if (!config.enabled) {
       throw new Error(
-        'IntxClient instantiated with INTX_ENABLED=false. Check caller.',
+        'IntxClient instantiated with FCM_ENABLED=false. Check caller.',
       );
     }
     this.config = config;
-    this.restClient = new CBInternationalClient({
+    this.restClient = new CBAdvancedTradeClient({
       apiKey: config.apiKey!,
       apiSecret: config.apiSecret!,
-      apiPassphrase: config.apiPassphrase!,
-      useSandbox: config.testnet,
     });
     log.info(
       { testnet: config.testnet },
-      'IntxClient initialized (REST only until start() called)',
+      'FcmClient initialized (FCM via Advanced Trade API)',
     );
   }
+
+  get isStale(): boolean { return this._isStale; }
 
   // ── WebSocket public API ───────────────────────────────────────────
 
   /**
-   * Connect WebSocket and subscribe to RISK and FUNDING channels.
+   * Connect WebSocket and subscribe to ticker and futures_balance_summary channels.
    * Call once — throws if already started.
    * Does NOT make live network calls at module load time.
    */
   async start(): Promise<void> {
-    if (this.ws) throw new Error('IntxClient already started');
+    if (this.ws) throw new Error('FcmClient already started');
     this.stopped = false;
     this.ws = new WebsocketClient({
       apiKey: this.config.apiKey!,
       apiSecret: this.config.apiSecret!,
-      apiPassphrase: this.config.apiPassphrase!,
-      useSandbox: this.config.testnet,
     });
     this._wireWsEvents();
     this._subscribe();
-    log.info('IntxClient WebSocket started');
+    log.info('FcmClient WebSocket started');
   }
 
   /**
@@ -110,21 +101,18 @@ export class IntxClient extends EventEmitter {
       this.ws.closeAll();
       this.ws = null;
     }
-    log.info('IntxClient stopped');
+    log.info('FcmClient stopped');
   }
 
   // ── WebSocket private helpers ──────────────────────────────────────
 
-  /** Subscribe to RISK and FUNDING channels for BTC-PERP and ETH-PERP. */
+  /** Subscribe to ticker (mark prices) and futures_balance_summary channels. */
   private _subscribe(): void {
-    this.ws!.subscribe(
-      { topic: 'RISK', payload: { product_ids: ['BTC-PERP', 'ETH-PERP'] } },
-      'internationalMarketData',
-    );
-    this.ws!.subscribe(
-      { topic: 'FUNDING', payload: { product_ids: ['BTC-PERP', 'ETH-PERP'] } },
-      'internationalMarketData',
-    );
+    const products = [this.config.btcProductId, this.config.ethProductId];
+    // Ticker for mark prices on FCM products
+    this.ws!.subscribe({ topic: 'ticker', payload: { product_ids: products } }, 'advTradeMarketData');
+    // Futures balance summary for account-level updates
+    this.ws!.subscribe({ topic: 'futures_balance_summary', payload: { product_ids: [] } }, 'advTradeUserData');
   }
 
   /** Attach event listeners to the WebsocketClient instance. */
@@ -134,29 +122,44 @@ export class IntxClient extends EventEmitter {
       this.reconnectAttempts = 0;
       this._isStale = false;
       this.emit('connected');
-      log.info('INTX WebSocket connected');
+      log.info('FCM WebSocket connected');
     });
 
     // Market data update
     this.ws!.on('update', (data: any) => {
-      if (data?.channel === 'RISK') {
-        this.emit('markPrice', {
-          instrument: data.product_id,
-          markPrice: data.mark_price,
-          indexPrice: data.index_price,
-          timestamp: Date.now(),
-          isStale: this._isStale,
-        });
-      } else if (data?.channel === 'FUNDING') {
-        this.emit('fundingRate', {
-          instrument: data.product_id,
-          fundingRate: data.funding_rate,
-          isFinal: data.is_final,
-          timestamp: Date.now(),
-          isStale: this._isStale,
-        });
+      if (data?.channel === 'ticker' || data?.type === 'ticker') {
+        // ticker events: data.events[].tickers[] or data.price etc.
+        const events = Array.isArray(data.events) ? data.events : [data];
+        for (const evt of events) {
+          const tickers = Array.isArray(evt.tickers) ? evt.tickers : [evt];
+          for (const t of tickers) {
+            const productId = t.product_id ?? data.product_id;
+            const price = t.price ?? t.mark_price ?? t.last_trade_price;
+            if (productId && price) {
+              this.emit('markPrice', {
+                instrument: productId,
+                markPrice: price,
+                indexPrice: t.price ?? price,
+                timestamp: Date.now(),
+                isStale: this._isStale,
+              });
+            }
+          }
+        }
+      } else if (data?.channel === 'futures_balance_summary') {
+        // Funding rate from balance summary
+        const summary = data?.events?.[0]?.fcm_balance_summary ?? data;
+        if (summary?.funding_hold) {
+          this.emit('fundingRate', {
+            instrument: 'FCM',
+            fundingRate: summary.funding_hold,
+            isFinal: false,
+            timestamp: Date.now(),
+            isStale: this._isStale,
+          });
+        }
       } else {
-        log.debug({ channel: data?.channel }, 'INTX WebSocket: unknown channel update');
+        log.debug({ channel: data?.channel }, 'FCM WebSocket: unknown channel update');
       }
     });
 
@@ -164,14 +167,14 @@ export class IntxClient extends EventEmitter {
     this.ws!.on('close', () => {
       this._isStale = true;
       this.emit('disconnected');
-      log.warn('INTX WebSocket disconnected — scheduling reconnect');
+      log.warn('FCM WebSocket disconnected — scheduling reconnect');
       this._scheduleReconnect();
     });
 
     // WebSocket error — log and let reconnect handle recovery
     this.ws!.on('error', (err: any) => {
       const message = err instanceof Error ? err.message : String(err);
-      log.error({ err: message }, 'INTX WebSocket error');
+      log.error({ err: message }, 'FCM WebSocket error');
       this.emit('error', err instanceof Error ? err : new Error(message));
     });
   }
@@ -183,7 +186,7 @@ export class IntxClient extends EventEmitter {
     if (this.reconnectAttempts > this.MAX_RECONNECT_ATTEMPTS) {
       log.fatal(
         { attempts: this.reconnectAttempts },
-        'INTX WebSocket max reconnect attempts exceeded — perp subsystem stopped',
+        'FCM WebSocket max reconnect attempts exceeded — perp subsystem stopped',
       );
       this.emit('reconnectFailed', { attempts: this.reconnectAttempts });
       this.stopped = true;
@@ -197,7 +200,7 @@ export class IntxClient extends EventEmitter {
     const delay = Math.round(base + jitter);
     log.warn(
       { attempt: this.reconnectAttempts, delayMs: delay },
-      'INTX WebSocket reconnecting...',
+      'FCM WebSocket reconnecting...',
     );
     this.reconnectTimer = setTimeout(() => {
       if (this.stopped) return;
@@ -212,27 +215,23 @@ export class IntxClient extends EventEmitter {
   // ── REST API ───────────────────────────────────────────────────────
 
   /**
-   * Query INTX account state: balances, open positions, and portfolio summary.
-   * Uses getPortfolioDetails() for a single round-trip.
+   * Fetch FCM account state: futures balance summary and open positions.
    */
   async getAccountState(): Promise<IntxAccountState> {
-    const detail = await this.restClient.getPortfolioDetails({
-      portfolio: this.config.portfolioId!,
-    });
-    log.info(
-      { portfolioId: this.config.portfolioId },
-      'INTX account state fetched',
-    );
+    const [balanceSummary, positions] = await Promise.all([
+      this.restClient.getFuturesBalanceSummary(),
+      this.restClient.getFuturesPositions(),
+    ]);
+    log.info('FCM account state fetched');
     return {
-      balances: (detail as any).balances ?? [],
-      positions: (detail as any).positions ?? [],
-      summary: (detail as any).summary ?? {},
+      balances: (balanceSummary as any)?.balance_summary ?? balanceSummary,
+      positions: (positions as any)?.positions ?? positions ?? [],
+      summary: (balanceSummary as any)?.balance_summary ?? balanceSummary,
     };
   }
 
   /**
-   * Place a perp order on INTX using a market IOC order.
-   * Returns orderId, status, execQty, avgPrice, and fee from the exchange response.
+   * Place an FCM futures order using the Advanced Trade submitOrder endpoint.
    */
   async placeOrder(params: PlaceOrderParams): Promise<{
     orderId: string;
@@ -242,71 +241,74 @@ export class IntxClient extends EventEmitter {
     fee: string;
   }> {
     const clientOrderId = params.clientOrderId ?? crypto.randomUUID();
-    const req: {
-      client_order_id: string;
-      side: string;
-      size: string;
-      tif: string;
-      instrument: string;
-      type: string;
-      portfolio: string;
-      close_only?: boolean;
-      price?: string;
-    } = {
+    const productId = params.productId ?? params.instrument;
+
+    // Build order config based on type
+    let orderConfiguration: Record<string, unknown>;
+    if (params.orderType === 'MARKET') {
+      if (params.side === 'BUY') {
+        orderConfiguration = { market_market_ioc: { quote_size: params.size } };
+      } else {
+        orderConfiguration = { market_market_ioc: { base_size: params.size } };
+      }
+    } else {
+      orderConfiguration = {
+        limit_limit_gtc: {
+          base_size: params.size,
+          limit_price: params.limitPrice!,
+          post_only: false,
+        },
+      };
+    }
+
+    const req: Record<string, unknown> = {
       client_order_id: clientOrderId,
+      product_id: productId,
       side: params.side,
-      size: params.size,
-      tif: 'IOC',
-      instrument: params.instrument,
-      type: params.orderType,
-      portfolio: this.config.portfolioId!,
+      order_configuration: orderConfiguration,
     };
 
-    if (params.closeOnly === true) {
-      req.close_only = true;
-    }
-    if (params.limitPrice !== undefined) {
-      req.price = params.limitPrice;
+    if (params.closeOnly) {
+      (req as any).close_position = true;
     }
 
-    const response = await this.restClient.submitOrder(req);
+    const response = await this.restClient.submitOrder(req as any);
+    const successResp = (response as any)?.success_response ?? response;
+    const orderId = successResp?.order_id ?? (response as any)?.order_id;
 
-    if (!response.order_id) {
-      throw new Error('INTX submitOrder returned no order_id');
+    if (!orderId) {
+      throw new Error(`FCM submitOrder returned no order_id: ${JSON.stringify(response)}`);
     }
 
     log.info(
       {
         clientOrderId,
-        exchangeOrderId: response.order_id,
+        exchangeOrderId: orderId,
         side: params.side,
-        instrument: params.instrument,
+        productId,
       },
-      'INTX order placed',
+      'FCM order placed',
     );
 
     return {
-      orderId: response.order_id,
-      status: response.order_status ?? 'UNKNOWN',
-      execQty: response.exec_qty ?? '0',
-      avgPrice: response.avg_price ?? '0',
-      fee: response.fee ?? '0',
+      orderId,
+      status: successResp?.status ?? 'FILLED',
+      execQty: successResp?.filled_size ?? params.size,
+      avgPrice: successResp?.average_filled_price ?? '0',
+      fee: successResp?.total_fees ?? '0',
     };
   }
 
   /**
-   * Cancel a single open perp order on INTX.
+   * Cancel a single FCM futures order.
    */
   async cancelOrder(params: CancelOrderParams): Promise<void> {
     try {
-      await this.restClient.cancelOrder({
-        id: params.orderId,
-        portfolio: params.portfolioId,
-      });
-      log.info({ orderId: params.orderId }, 'INTX order cancelled');
+      await this.restClient.cancelOrders({ order_ids: [params.orderId] });
+      log.info({ orderId: params.orderId }, 'FCM order cancelled');
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      log.warn({ orderId: params.orderId, err: message }, 'INTX cancelOrder failed');
+      log.warn({ orderId: params.orderId, err: message }, 'FCM cancelOrder failed');
       throw err;
     }
   }
