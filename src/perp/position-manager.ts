@@ -21,6 +21,7 @@ import { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-cal
 import type { IntxClient } from './intx-client.js';
 import type { PerpStateStore } from './perp-state-store.js';
 import type { IntxConfig } from './config.js';
+import type { PerpOrderEngine } from './order-engine.js';
 import type {
   PerpSession,
   PerpOrder,
@@ -36,6 +37,7 @@ export interface PerpPositionManagerOptions {
   stateStore: PerpStateStore;
   config: IntxConfig;
   sessionId?: string;
+  orderEngine?: PerpOrderEngine; // optional: if provided, closeAndCleanup() called on all close paths
 }
 
 export class PerpPositionManager extends EventEmitter {
@@ -43,6 +45,7 @@ export class PerpPositionManager extends EventEmitter {
   private stateStore: PerpStateStore;
   private config: IntxConfig;
   private botSessionId: string;
+  private _orderEngine: PerpOrderEngine | null;
 
   private currentSession: PerpSession | null = null;
   private _emergencyCloseInProgress = false;
@@ -62,6 +65,7 @@ export class PerpPositionManager extends EventEmitter {
     this.stateStore = options.stateStore;
     this.config = options.config;
     this.botSessionId = options.sessionId ?? crypto.randomUUID();
+    this._orderEngine = options.orderEngine ?? null;
   }
 
   /**
@@ -253,6 +257,15 @@ export class PerpPositionManager extends EventEmitter {
     closeOrder.fee = result.fee;
     closeOrder.updatedAt = Date.now();
     this.stateStore.persistOrder(closeOrder);
+
+    // Cancel open orders (TP + stop) before marking session closed — ORDER-05
+    if (this._orderEngine) {
+      try {
+        await this._orderEngine.closeAndCleanup(session.id);
+      } catch (err) {
+        log.warn({ err }, 'PerpPositionManager: order cleanup failed, proceeding with close');
+      }
+    }
 
     // Update session
     const closedAt = Date.now();
