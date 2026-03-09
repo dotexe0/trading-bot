@@ -142,6 +142,8 @@ export interface PerpPositionManagerEvents {
   positionClosed: [PerpSession];
   emergencyClose: [PerpSession, { markPrice: string; distancePct: string }];
   liquidationDistance: [{ sessionId: string; instrument: string; distancePct: string; markPrice: string }];
+  /** Emitted when the active strategy is switched due to a regime change. */
+  strategySwitch: [{ newStrategy: string }];
   error: [Error];
 }
 

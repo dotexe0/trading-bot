@@ -9,17 +9,32 @@
  *  - Zero REST order calls: paper engine subscribes to markPrice events only
  *  - Emergency close guard: _emergencyCloseInProgress flag reset in finally block
  *  - Stale data ignored: evt.isStale === true → no-op
+ *
+ * Regime auto-switch:
+ *  - When regimeLeaderboards is provided, the engine classifies market regime on
+ *    each candle (onCandle()) and switches the active strategy to the leaderboard
+ *    winner for the new regime.
+ *  - A 10-candle cooldown prevents rapid strategy thrashing.
+ *  - Switches are deferred while a position is open; they fire when the position closes.
+ *  - Regime classification fires ONLY in onCandle(), never in _handleMarkPrice().
  */
 
 import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
-import { d, ZERO } from '../core/decimal.js';
+import { d } from '../core/decimal.js';
 import { createModuleLogger } from '../core/logger.js';
 import { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
+import { RegimeClassifier } from '../regime/classifier.js';
+import { createLivePerpRegistry } from './strategies/index.js';
 import type { IntxClient } from './intx-client.js';
 import type { PerpStateStore } from './perp-state-store.js';
 import type { IntxConfig } from './config.js';
 import type { PerpRiskGate } from './perp-risk-gate.js';
+import type { IStrategy } from '../strategies/types.js';
+import type { StrategyRegistry } from '../strategies/registry.js';
+import type { RegimeLeaderboards } from '../tournament/types.js';
+import type { MarketRegime } from '../regime/types.js';
+import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import type {
   PerpSession,
   PerpDirection,
@@ -28,6 +43,9 @@ import type {
 } from './types.js';
 
 const log = createModuleLogger('paper-perp-engine');
+
+/** Number of candles to wait after a strategy switch before allowing another switch. */
+const STRATEGY_SWITCH_COOLDOWN_CANDLES = 10;
 
 // ── Internal types ────────────────────────────────────────────────────────────
 
@@ -57,12 +75,42 @@ export interface PaperPerpEngineOptions {
    *  - 'hold'       → do nothing
    *
    * When not provided, the engine operates in passive monitoring mode
-   * (liquidation safety checks only).
+   * (liquidation safety checks only) unless a strategy is set via
+   * regimeLeaderboards / initialStrategy.
    */
   onSignal?: (
     instrument: string,
     markPrice: string,
   ) => 'open-long' | 'open-short' | 'close' | 'hold';
+  /**
+   * Optional regime leaderboards from the latest tournament.
+   * When provided, enables automatic strategy switching on regime changes.
+   * Must be used together with a strategyRegistry (or fundingRateProvider).
+   */
+  regimeLeaderboards?: RegimeLeaderboards;
+  /**
+   * Optional pre-built strategy registry for regime auto-switch.
+   * If omitted but regimeLeaderboards is provided, the engine will build
+   * one internally via createLivePerpRegistry(fundingRateProvider ?? () => null).
+   *
+   * Callers may also pass a createLivePerpRegistry(provider) result directly
+   * to ensure funding adjustments fire at runtime.
+   */
+  strategyRegistry?: StrategyRegistry;
+  /**
+   * Optional initial strategy to use before the first regime classification.
+   * When set, this strategy is used for signal evaluation until a regime switch occurs.
+   */
+  initialStrategy?: IStrategy;
+  /**
+   * Optional funding rate provider for strategies created during regime switches.
+   * Used when building the internal registry via createLivePerpRegistry().
+   * If strategyRegistry is provided, this field is ignored.
+   *
+   * KEY INVARIANT: strategies created via executeStrategySwitch() must receive a
+   * real fundingRateProvider (not () => null) so funding adjustments fire at runtime.
+   */
+  fundingRateProvider?: () => number | null;
 }
 
 // ── Engine ────────────────────────────────────────────────────────────────────
@@ -79,6 +127,24 @@ export class PaperPerpEngine extends EventEmitter {
   private _emergencyCloseInProgress = false;
   private _onMarkPrice: ((evt: IntxMarkPriceEvent) => void) | null = null;
 
+  // ── Regime auto-switch state ───────────────────────────────────────────────
+  /** Active strategy for candle-based signal evaluation (null when onSignal is the signal source). */
+  private strategy: IStrategy | null = null;
+  /** Regime leaderboards — null when feature is disabled. */
+  private regimeLeaderboards: RegimeLeaderboards | null;
+  /** Last observed market regime (undefined before first candle classification). */
+  private currentRegime: MarketRegime | undefined = undefined;
+  /** Candles remaining in cooldown after a strategy switch. */
+  private cooldownCandlesRemaining = 0;
+  /** Deferred switch config when a position was open at regime-change time. */
+  private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
+  /** Registry used to instantiate new strategies on regime switch. */
+  private strategyRegistry: StrategyRegistry | null;
+  /** Classifies market regime from candle history. */
+  private readonly classifier = new RegimeClassifier();
+  /** Rolling candle buffer — max 100 candles. */
+  private candleBuffer: Candle[] = [];
+
   /** Typed emit override — matches PerpPositionManagerEvents interface. */
   override emit<K extends keyof PerpPositionManagerEvents>(
     event: K,
@@ -94,6 +160,21 @@ export class PaperPerpEngine extends EventEmitter {
     this.config = options.config;
     this.onSignal = options.onSignal;
     this._riskGate = options.riskGate ?? null;
+
+    // Regime auto-switch wiring
+    this.regimeLeaderboards = options.regimeLeaderboards ?? null;
+    this.strategy = options.initialStrategy ?? null;
+
+    if (options.regimeLeaderboards) {
+      // Callers may supply a pre-built createLivePerpRegistry(provider) result.
+      // If not, build one internally using the supplied fundingRateProvider.
+      // The key invariant: strategies created via executeStrategySwitch() must
+      // receive a real fundingRateProvider so funding adjustments fire at runtime.
+      this.strategyRegistry = options.strategyRegistry
+        ?? createLivePerpRegistry(options.fundingRateProvider ?? (() => null));
+    } else {
+      this.strategyRegistry = options.strategyRegistry ?? null;
+    }
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -119,6 +200,98 @@ export class PaperPerpEngine extends EventEmitter {
     }
     this._started = false;
     log.info('PaperPerpEngine stopped');
+  }
+
+  // ── Candle ingestion ──────────────────────────────────────────────────────
+
+  /**
+   * Process a completed candle.
+   *
+   * - Appends to the rolling candle buffer (max 100 candles).
+   * - Classifies market regime — ONLY here, never in _handleMarkPrice.
+   * - Applies regime auto-switch logic when regimeLeaderboards is configured:
+   *   switches strategy to the regime winner on regime change, with a 10-candle
+   *   cooldown; defers the switch if a position is currently open.
+   * - If a pendingSwitch exists and no position is open, executes it.
+   * - If a strategy is set (and onSignal is not provided), evaluates the strategy
+   *   and acts on signals.
+   */
+  onCandle(candle: Candle): void {
+    // Maintain rolling buffer (max 100 candles)
+    this.candleBuffer.push(candle);
+    if (this.candleBuffer.length > 100) {
+      this.candleBuffer.shift();
+    }
+
+    // Classify regime from candle history (only here — never in _handleMarkPrice)
+    const regime = this.classifier.classify(this.candleBuffer);
+
+    // Regime auto-switch logic (mirrors LiveTradingEngine lines 413-439)
+    if (this.regimeLeaderboards) {
+      if (this.cooldownCandlesRemaining > 0) {
+        this.cooldownCandlesRemaining--;
+      }
+      if (
+        regime !== undefined &&
+        this.currentRegime !== undefined &&
+        regime !== this.currentRegime &&
+        this.cooldownCandlesRemaining === 0
+      ) {
+        const winnerConfig = this.resolveRegimeWinner(regime);
+        if (winnerConfig) {
+          if (this.currentPosition === null) {
+            this.executeStrategySwitch(winnerConfig);
+          } else {
+            this.pendingSwitch = { strategyConfig: winnerConfig };
+            log.info(
+              { regime, currentStrategy: this.strategy?.name },
+              '[PAPER] Regime changed with open position -- switch deferred until position closes',
+            );
+          }
+        }
+      }
+      if (regime !== undefined) {
+        this.currentRegime = regime;
+      }
+    }
+
+    // Execute any pending switch now that position may have closed
+    if (this.pendingSwitch && this.currentPosition === null) {
+      this.executeStrategySwitch(this.pendingSwitch.strategyConfig);
+      this.pendingSwitch = null;
+    }
+
+    // Strategy-based signal evaluation (only when onSignal is not the signal source)
+    if (this.strategy && !this.onSignal) {
+      const instrument = candle.pair as string;
+      const timeframe = candle.timeframe as Timeframe;
+      const signals = this.strategy.evaluate(
+        this.candleBuffer,
+        candle.pair as TradingPair,
+        timeframe,
+        undefined,
+        regime,
+      );
+      for (const signal of signals) {
+        if (signal.direction === 'long' || signal.direction === 'short') {
+          if (this.currentPosition === null) {
+            const direction: PerpDirection = signal.direction;
+            this.openPaperPosition(instrument, direction, '0.01', 5, candle.close).catch(
+              (err) => {
+                log.error(
+                  { err: err instanceof Error ? err.message : String(err) },
+                  '[PAPER] strategy openPaperPosition failed',
+                );
+              },
+            );
+          }
+        } else if (signal.direction === 'close') {
+          if (this.currentPosition !== null) {
+            this.closePaperPosition(candle.close, 'strategy-signal');
+          }
+        }
+      }
+    }
   }
 
   // ── Position management ───────────────────────────────────────────────────
@@ -209,6 +382,9 @@ export class PaperPerpEngine extends EventEmitter {
   /**
    * Close the current simulated paper position.
    * Persists updated session to PerpStateStore — no REST calls made.
+   *
+   * After close, any pending regime strategy switch is executed immediately
+   * (position is no longer blocking it).
    */
   closePaperPosition(markPrice: string, reason?: string): PerpSession {
     if (!this.currentPosition) {
@@ -254,6 +430,13 @@ export class PaperPerpEngine extends EventEmitter {
 
     const closedSession = { ...session };
     this.currentPosition = null;
+
+    // Execute any pending regime strategy switch now that position is closed
+    if (this.pendingSwitch) {
+      this.executeStrategySwitch(this.pendingSwitch.strategyConfig);
+      this.pendingSwitch = null;
+    }
+
     return closedSession;
   }
 
@@ -267,6 +450,8 @@ export class PaperPerpEngine extends EventEmitter {
    * 2. If position open for this instrument: check liquidation distance, emit
    *    event, persist updated mark price, trigger emergency close if needed
    * 3. If onSignal provided: call signal and act on directive
+   *
+   * NOTE: Regime classification does NOT happen here — only in onCandle().
    */
   private _handleMarkPrice(evt: IntxMarkPriceEvent): void {
     if (evt.isStale) return;
@@ -325,7 +510,7 @@ export class PaperPerpEngine extends EventEmitter {
       }
     }
 
-    // Step 3: optional signal directive
+    // Step 3: optional signal directive (imperative onSignal path — unaffected by regime switch)
     if (this.onSignal) {
       const directive = this.onSignal(evt.instrument, evt.markPrice);
       switch (directive) {
@@ -348,6 +533,35 @@ export class PaperPerpEngine extends EventEmitter {
           break;
       }
     }
+  }
+
+  // ── Regime auto-switch helpers ────────────────────────────────────────────
+
+  /**
+   * Resolve the best strategy config for the given regime from the leaderboard.
+   * Returns entries[0].strategyConfig if the regime has at least one entry,
+   * otherwise falls back to fallbackEntry.strategyConfig.
+   */
+  private resolveRegimeWinner(regime: MarketRegime): Record<string, unknown> | null {
+    if (!this.regimeLeaderboards) return null;
+    const entries = this.regimeLeaderboards[regime];
+    if (entries && entries.length > 0) {
+      return entries[0].strategyConfig;
+    }
+    return this.regimeLeaderboards.fallbackEntry.strategyConfig;
+  }
+
+  /**
+   * Instantiate a new strategy from config, assign it, reset cooldown, emit event.
+   */
+  private executeStrategySwitch(strategyConfig: Record<string, unknown>): void {
+    this.strategy = this.strategyRegistry!.create(strategyConfig);
+    this.cooldownCandlesRemaining = STRATEGY_SWITCH_COOLDOWN_CANDLES;
+    log.info(
+      { newStrategy: this.strategy.name, cooldown: STRATEGY_SWITCH_COOLDOWN_CANDLES },
+      '[PAPER] Strategy switched due to regime change',
+    );
+    this.emit('strategySwitch', { newStrategy: this.strategy.name });
   }
 
   // ── Accessors ─────────────────────────────────────────────────────────────
