@@ -22,6 +22,7 @@ export { computeLeverage } from './leverage-sizer.js';
 export type { LeverageConfig } from './leverage-sizer.js';
 export { getMarginMode } from './margin-mode.js';
 export type { MarginMode } from './margin-mode.js';
+export { PerpMomentumStrategy, PerpMeanReversionStrategy, createPerpRegistry, createLivePerpRegistry } from './strategies/index.js';
 export type {
   IntxMarkPriceEvent,
   IntxFundingRateEvent,

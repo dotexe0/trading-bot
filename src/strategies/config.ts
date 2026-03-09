@@ -85,6 +85,29 @@ const momentumBreakoutSchema = z
   .merge(exitConfigSchema);
 // No .refine() -- breakoutWindow, volumeWindow, volumeMultiplier have no cross-field constraints
 
+// -- Perp strategy schemas ------------------------------------------------
+// NOTE: fundingRateProvider is a runtime-injected callback and is NOT part of
+// the Zod schema (not serializable). Only scalar config params are stored here.
+
+const perpMomentumSchema = z
+  .object({
+    strategy: z.literal('perp-momentum'),
+    breakoutWindow: z.number().int().positive().default(20),
+    volumeWindow: z.number().int().positive().default(20),
+    volumeMultiplier: z.number().positive().default(1.5),
+    fundingThreshold: z.number().positive().default(0.01),
+  })
+  .merge(exitConfigSchema);
+
+const perpMeanReversionSchema = z
+  .object({
+    strategy: z.literal('perp-mean-reversion'),
+    period: z.number().int().positive().default(20),
+    threshold: z.number().positive().default(1.5),
+    fundingThreshold: z.number().positive().default(0.01),
+  })
+  .merge(exitConfigSchema);
+
 // -- Discriminated union --------------------------------------------------
 
 export const strategyConfigSchema = z.discriminatedUnion('strategy', [
@@ -95,6 +118,8 @@ export const strategyConfigSchema = z.discriminatedUnion('strategy', [
   zScoreMeanReversionSchema,
   multiTimeframeTrendSchema,
   momentumBreakoutSchema,
+  perpMomentumSchema,
+  perpMeanReversionSchema,
 ]);
 
 // -- Inferred type --------------------------------------------------------
