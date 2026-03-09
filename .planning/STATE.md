@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 29 in progress, Plan 1 of 2 complete (Leverage and Margin Risk Layer)
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 29 complete (Leverage and Margin Risk Layer), Phase 30 next
 
 ## Current Position
 
-Phase: 29 of 33 (Leverage and Margin Risk Layer)
-Plan: 1 of 2 in current phase — complete
+Phase: 29 of 33 (Leverage and Margin Risk Layer) — complete
+Plan: 2 of 2 in current phase — complete
 Status: Active
-Last activity: 2026-03-09 — 29-01 complete (computeLeverage, getMarginMode pure functions, extended config/types/schema, marginMode DB round-trip)
+Last activity: 2026-03-09 — 29-02 complete (PerpRiskGate with three sequential checks, balance cache, wired into PerpPositionManager and PaperPerpEngine)
 
-Progress: [███░░░░░░░] 47% of v1.4 (7/15 plans complete)
+Progress: [████░░░░░░] 53% of v1.4 (8/15 plans complete)
 
 ## Performance Metrics
 
@@ -78,6 +78,9 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 29-01: computeLeverage clamps conviction to [0,1] before scaling — prevents out-of-range inputs from exceeding maxLeverageCap
 - 29-01: Bot-internal leverage/margin mode — Coinbase FCM has no setLeverage or setMarginMode API; values are sizing multipliers and risk policy only
 - 29-01: marginMode column nullable in perpSessions for backward-compat — legacy rows round-trip as undefined on PerpSession
+- 29-02: openPaperPosition made async to support await riskGate.check() inline; _handleMarkPrice uses .catch() fire-and-forget for signal dispatch
+- 29-02: Paper mode mock balance (initialMargin=0, availableMargin=1000000) always passes utilization; in-process sessions count toward notional cap
+- 29-02: riskGate optional on both PerpPositionManager and PaperPerpEngine — null when absent; zero breaking changes for existing callers
 
 ### Open Issues / Tech Debt
 
@@ -91,5 +94,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 29-01-PLAN.md (computeLeverage, getMarginMode pure functions, extended config/types/schema/store)
-Resume with: `/gsd:execute-phase 29` (Phase 29 Plan 2: risk gate)
+Stopped at: Completed 29-02-PLAN.md (PerpRiskGate, wired into PerpPositionManager and PaperPerpEngine, barrel exports)
+Resume with: `/gsd:execute-phase 30` (Phase 30: Perp Strategies)

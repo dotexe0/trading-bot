@@ -65,8 +65,8 @@
 
 - [ ] **Phase 26: INTX API Client** — Coinbase INTX REST + WebSocket connectivity, credentials, account balance, and real-time mark/index/funding streams for BTC-PERP and ETH-PERP
 - [ ] **Phase 27: Perp Position Execution** — Open/close long and short positions, liquidation price calculation, paper perp mode, crash recovery and reconciliation, emergency close on low liquidation distance
-- [ ] **Phase 28: Post-Only Limit Order Engine** — Cancel-and-reprice entry loop, immediate take-profit limit order after fill, ATR-based trailing stop-limit, and full order cleanup on position close
-- [ ] **Phase 29: Leverage and Margin Risk Layer** — Configurable leverage with regime-driven sizing, isolated/cross margin mode switching, per-trade max loss and total exposure cap enforcement
+- [x] **Phase 28: Post-Only Limit Order Engine** — Cancel-and-reprice entry loop, immediate take-profit limit order after fill, ATR-based trailing stop-limit, and full order cleanup on position close
+- [x] **Phase 29: Leverage and Margin Risk Layer** — Configurable leverage with regime-driven sizing, isolated/cross margin mode switching, per-trade max loss and total exposure cap enforcement
 - [ ] **Phase 30: Perp Strategies and Tournament** — Two perp-specific IStrategy implementations generating LONG/SHORT signals with funding-rate confidence adjustment, evaluated in existing tournament pipeline with separate perp leaderboard
 - [ ] **Phase 31: Funding Rate Tracking** — Real-time cumulative funding cost per position, P&L component logging, and funding-drain exit trigger
 - [ ] **Phase 32: Perp Analytics and CLI Report** — Separate SQLite table for perp trade records, `npm run report` perp section with directional win rate and funding stats, enforced P&L separation from spot
@@ -157,11 +157,11 @@ Plans:
 4. A new perp entry is rejected with a logged `EXPOSURE_CAP_EXCEEDED` reason when adding the position would push total open perp notional above the configured percentage of account value
 5. Per-trade max loss for perps is computed from the risk framework (consistent with Kelly sizing) and enforced before order placement; entries that exceed the limit are blocked
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 29-01: Leverage and margin mode — per-trade leverage sizing, regime-to-margin-mode mapping, isolated/cross switching
-- [ ] 29-02: Perp risk gates — margin utilization ceiling, total exposure cap, per-trade max loss enforcement
+- [ ] 29-01-PLAN.md — Pure leverage sizer, margin mode mapping, extended config schema, marginMode DB column
+- [ ] 29-02-PLAN.md — PerpRiskGate with margin utilization, exposure cap, and max-loss checks; wired into position manager and paper engine
 
 ---
 
@@ -179,11 +179,13 @@ Plans:
 3. Running `npm run tournament -- --perp` completes a walk-forward tournament using only perp strategies and produces a perp-specific leaderboard separate from the spot leaderboard
 4. The perp leaderboard integrates with the regime-aware auto-switch state machine in the perp paper and live engines, using the same cooldown and deferral guards as the spot system
 
-**Plans:** TBD
+**Plans:** 4 plans
 
 Plans:
-- [ ] 30-01: Perp strategy implementations — PerpMomentumStrategy and PerpMeanReversionStrategy with funding-rate confidence adjustment
-- [ ] 30-02: Perp tournament integration — perp leaderboard, walk-forward validation, regime-aware auto-switch wiring
+- [ ] 30-01-PLAN.md — TDD: PerpMomentumStrategy with funding-rate confidence adjustment
+- [ ] 30-02-PLAN.md — TDD: PerpMeanReversionStrategy with funding-rate confidence adjustment
+- [ ] 30-03-PLAN.md — Perp strategies barrel, config schema extension, tournament CLI
+- [ ] 30-04-PLAN.md — Regime auto-switch wiring in PaperPerpEngine and PerpPositionManager
 
 ---
 
@@ -280,9 +282,9 @@ Plans:
 | 25. Pipeline Integration | v1.3 | 1/1 | Complete | 2026-03-08 |
 | 26. INTX API Client | v1.4 | 0/2 | Not started | - |
 | 27. Perp Position Execution | v1.4 | 0/2 | Not started | - |
-| 28. Post-Only Limit Order Engine | v1.4 | 0/2 | Not started | - |
-| 29. Leverage and Margin Risk Layer | v1.4 | 0/2 | Not started | - |
-| 30. Perp Strategies and Tournament | v1.4 | 0/2 | Not started | - |
+| 28. Post-Only Limit Order Engine | v1.4 | 2/2 | Complete | 2026-03-09 |
+| 29. Leverage and Margin Risk Layer | v1.4 | 2/2 | Complete | 2026-03-09 |
+| 30. Perp Strategies and Tournament | v1.4 | 0/4 | Not started | - |
 | 31. Funding Rate Tracking | v1.4 | 0/1 | Not started | - |
 | 32. Perp Analytics and CLI Report | v1.4 | 0/2 | Not started | - |
 | 33. Dashboard Perp Panels | v1.4 | 0/2 | Not started | - |
