@@ -39,6 +39,12 @@ function makeConfig(overrides: Partial<IntxConfig> = {}): IntxConfig {
     repriceTimeoutMs: 60000,
     maxRepriceAttempts: 20,
     entryOrderTimeoutMs: 300000,
+    maxLeverageCap: 5,
+    defaultLeverage: 3,
+    leverageByRegime: { VOLATILE: 2, TRENDING: 5, RANGING: 3 },
+    marginUtilizationCeiling: 0.8,
+    perpExposureCapPct: 0.5,
+    perpMaxLossPct: 0.02,
     ...overrides,
   };
 }

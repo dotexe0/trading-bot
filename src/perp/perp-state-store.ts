@@ -27,6 +27,16 @@ export class PerpStateStore {
     this.db = conn.db;
     this.sqlite = conn.sqlite;
     initializeSchema(conn.sqlite);
+
+    // Guard: add margin_mode column to existing DBs that pre-date this column.
+    // CREATE TABLE IF NOT EXISTS does not alter existing tables, so existing DBs
+    // lack this column until we add it here. The catch is intentional:
+    // SQLite throws "duplicate column name" if the column already exists.
+    try {
+      conn.sqlite.prepare('ALTER TABLE perp_sessions ADD COLUMN margin_mode TEXT').run();
+    } catch {
+      // column already exists — no action needed
+    }
   }
 
   // ── Session CRUD ──────────────────────────────────────────────────
@@ -48,6 +58,7 @@ export class PerpStateStore {
         leverage: session.leverage,
         liquidationPrice: session.liquidationPrice,
         maintenanceMarginRate: session.maintenanceMarginRate,
+        marginMode: session.marginMode ?? null,
         markPrice: session.markPrice ?? null,
         unrealizedPnl: session.unrealizedPnl ?? null,
         status: session.status,
@@ -229,6 +240,7 @@ export class PerpStateStore {
       leverage: row.leverage,
       liquidationPrice: row.liquidationPrice,
       maintenanceMarginRate: row.maintenanceMarginRate,
+      marginMode: row.marginMode as 'isolated' | 'cross' | undefined ?? undefined,
       markPrice: row.markPrice ?? undefined,
       unrealizedPnl: row.unrealizedPnl ?? undefined,
       status: row.status as PerpSession['status'],

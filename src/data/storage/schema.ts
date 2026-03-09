@@ -327,6 +327,7 @@ export const perpSessions = sqliteTable('perp_sessions', {
   leverage: integer('leverage').notNull(),
   liquidationPrice: text('liquidation_price').notNull(),
   maintenanceMarginRate: text('maintenance_margin_rate').notNull(),
+  marginMode: text('margin_mode'),  // 'isolated' | 'cross'; nullable for backward compat
   markPrice: text('mark_price'),
   unrealizedPnl: text('unrealized_pnl'),
   status: text('status').notNull().default('open'),

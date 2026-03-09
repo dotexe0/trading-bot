@@ -26,6 +26,16 @@ export const fcmConfigSchema = z
     repriceTimeoutMs: z.number().default(60000),
     maxRepriceAttempts: z.number().default(20),
     entryOrderTimeoutMs: z.number().default(300000),
+    maxLeverageCap: z.number().int().min(1).max(20).default(5),
+    defaultLeverage: z.number().int().min(1).max(10).default(3),
+    leverageByRegime: z.object({
+      VOLATILE: z.number().int().min(1).max(10).default(2),
+      TRENDING: z.number().int().min(1).max(20).default(5),
+      RANGING: z.number().int().min(1).max(10).default(3),
+    }).default({ VOLATILE: 2, TRENDING: 5, RANGING: 3 }),
+    marginUtilizationCeiling: z.number().min(0.1).max(1.0).default(0.8),
+    perpExposureCapPct: z.number().min(0.1).max(1.0).default(0.5),
+    perpMaxLossPct: z.number().min(0.001).max(0.2).default(0.02),
   })
   .refine(
     (data) => !data.enabled || (!!data.apiKey && !!data.apiSecret),

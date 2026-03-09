@@ -110,6 +110,7 @@ export interface PerpSession {
   maintenanceMarginRate: string; // decimal string (e.g. '0.0333')
   markPrice?: string;           // last known mark price
   unrealizedPnl?: string;       // decimal string
+  marginMode?: 'isolated' | 'cross'; // bot-internal margin policy; undefined for legacy rows
   status: PerpSessionStatus;
   openedAt: number;             // Unix ms
   closedAt?: number;            // Unix ms
@@ -150,6 +151,23 @@ export interface PerpOrderEngineEvents {
   entryFailed: [{ reason: string; attempts: number }];
   repriced: [{ attempt: number; oldPrice: string; newPrice: string }];
   error: [Error];
+}
+
+// ── Risk Gate Types ───────────────────────────────────────────────────
+
+/** Result of a PerpRiskGate check. */
+export interface RiskGateResult {
+  approved: boolean;
+  rejectReason?: 'MARGIN_UTILIZATION_EXCEEDED' | 'EXPOSURE_CAP_EXCEEDED' | 'MAX_LOSS_EXCEEDED';
+  details: Record<string, string>;
+}
+
+/** Input parameters for PerpRiskGate.check(). */
+export interface PerpRiskGateParams {
+  instrument: string;
+  proposedNotional: string; // decimal string: size * entryPrice (before leverage divisor)
+  proposedMaxLoss: string;  // decimal string: proposedNotional * stopDistancePct
+  accountValue: string;     // decimal string: total FCM account equity
 }
 
 // ── Config re-export ─────────────────────────────────────────────────
