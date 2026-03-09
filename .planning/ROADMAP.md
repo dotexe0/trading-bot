@@ -134,7 +134,7 @@ Plans:
 4. The trailing stop-limit ratchets in the position's favour as mark price moves; the stop price never retreats; ATR sets the trail distance
 5. When a position closes by any path (manual, stop hit, TP hit, emergency close), all associated open orders (TP + stop) are cancelled before the position record is marked closed
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 28-01: Post-only entry loop — maker-only submission, cancel-and-reprice on timeout or taker-would-fill
