@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A quant-grade cryptocurrency trading bot targeting Coinbase Advanced Trade API, built with TypeScript/Node.js. It runs automated trading strategies on BTC-USD and ETH-USD, selected through empirical backtesting tournaments with walk-forward validation. The system covers the full lifecycle: historical data ingestion, technical indicator computation, strategy evaluation, backtesting, Monte Carlo robustness testing, risk management with correlation-aware sizing, paper trading, live trading, tournament-based strategy selection with regime detection, and a real-time web dashboard with backtest visualization and portfolio heat map.
+A quant-grade cryptocurrency trading bot targeting Coinbase Advanced Trade API, built with TypeScript/Node.js. It runs automated trading strategies on BTC-USD and ETH-USD, selected through empirical backtesting tournaments with walk-forward validation. The system covers the full lifecycle: historical data ingestion, technical indicator computation, strategy evaluation, backtesting, Monte Carlo robustness testing, risk management with correlation-aware sizing, paper trading, live trading, regime-aware tournament-based strategy selection, live strategy auto-switching, exit parameter optimization, and a real-time web dashboard. Running `npm start` executes the full adaptive pipeline end-to-end.
 
 ## Core Value
 
@@ -38,10 +38,16 @@ The bot must reliably execute trades with correct position sizing, risk limits, 
 - ✓ ATR-dynamic stop-loss with fallback to percentage when ATR unavailable (EXIT-04) — v1.2
 - ✓ CLI performance report (`npm run report`) with win rate, avg win/loss, best/worst trades — v1.2
 - ✓ Dashboard PerformancePanel with real-time useMemo metrics and orderFilled trade refresh — v1.2
+- ✓ Z-score mean reversion strategy (6th) — regime-filtered to RANGING only — v1.3
+- ✓ Momentum breakout strategy with volume confirmation (7th) — regime-filtered to TRENDING only — v1.3
+- ✓ Exit config optimizer: grid search over all 4 exit param types with walk-forward validation — v1.3
+- ✓ Regime-aware tournament: separate TRENDING/RANGING/VOLATILE leaderboards — v1.3
+- ✓ Live auto-switching: engine swaps to regime's best strategy on change, defers if position open, 10-candle cooldown — v1.3
+- ✓ `npm start` extended to 4-step pipeline: sync → optimize exits → regime tournament → dashboard — v1.3
 
 ### Active
 
-(None — define requirements for next milestone with `/gsd:new-milestone`)
+(None — v1.3 milestone complete. Planning v1.4 next.)
 
 ### Out of Scope
 
@@ -57,17 +63,18 @@ The bot must reliably execute trades with correct position sizing, risk limits, 
 
 ## Context
 
-Shipped v1.2 with ~30,600 LOC TypeScript across ~185 files.
+Shipped v1.3 with ~35,000 LOC TypeScript across ~220 files, 638 tests.
 
 **v1.0 baseline:** 55,764 LOC, 149 files, 773 tests
 **v1.1 additions:** +5,520 net lines, 68 files changed, 444 tests passing
 **v1.2 additions:** +3,340 net lines, 30 files changed, 527 tests passing
+**v1.3 additions:** +4,225 net lines, 49 files changed, 638 tests passing
 
 **Tech stack:** TypeScript/Node.js (ESM), better-sqlite3 + Drizzle ORM, Fastify + React 19 + Vite 6, Lightweight Charts v5, decimal.js, simple-statistics, fast-technical-indicators, coinbase-api (tiagosiebler), Zod v4, Pino, Vitest.
 
-**Architecture:** Event-driven with interface abstraction — strategy code runs identically in backtest, paper, and live modes. EventEmitter pipeline connects trading engines to dashboard via WebSocket. All subsystems in a single Node.js process (avoids SQLite BUSY). ExitLogicManager is stateful per-position, instantiated at entry, providing priority-ordered exits (partial > trailing > atrStop > time) across all engines.
+**Architecture:** Event-driven with interface abstraction — strategy code runs identically in backtest, paper, and live modes. EventEmitter pipeline connects trading engines to dashboard via WebSocket. All subsystems in a single Node.js process (avoids SQLite BUSY). ExitLogicManager is stateful per-position, instantiated at entry, providing priority-ordered exits (partial > trailing > atrStop > time) across all engines. Auto-switching state machine in paper/live engines consults regimeLeaderboards on every candle, defers swaps while positions are open, and enforces a 10-candle cooldown.
 
-**Test coverage:** 527 tests across 49 test files (all passing).
+**Test coverage:** 638 tests across 53 test files (all passing).
 
 ## Constraints
 
@@ -81,7 +88,7 @@ Shipped v1.2 with ~30,600 LOC TypeScript across ~185 files.
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| TypeScript/Node.js | Developer preference, good async I/O for WebSocket streams | ✓ Good — 27K LOC, type safety caught many bugs |
+| TypeScript/Node.js | Developer preference, good async I/O for WebSocket streams | ✓ Good — 35K LOC, type safety caught many bugs |
 | Coinbase Advanced Trade API | Current primary Coinbase trading API | ✓ Good — REST + WebSocket worked well |
 | BTC + ETH only | High liquidity, simpler universe management | ✓ Good — kept scope manageable |
 | better-sqlite3 | Synchronous API fast for backtest loops | ✓ Good — zero overhead in hot path |
@@ -103,7 +110,13 @@ Shipped v1.2 with ~30,600 LOC TypeScript across ~185 files.
 | Priority tree: partial > trailing > atrStop > time (v1.2) | Partial first captures profit; trailing tracks peak; ATR provides dynamic floor; time prevents dead capital | ✓ Good — intuitive priority, no conflicts |
 | Breakeven floor after partial exit (v1.2) | ATR stop floored at entryPrice after partial fires | ✓ Good — prevents stop sliding below entry after taking partial profit |
 | Client-side useMemo for dashboard metrics (v1.2) | Avoids new WS events, REST endpoints, or duplicate data pipeline | ✓ Good — zero infrastructure cost, instant updates |
-| pnlPct already a percentage string convention (v1.2) | TradeData.pnlPct is already a percentage (e.g., "5.0" = 5%) — no × 100 needed | ✓ Good — consistent with TradeHistory.tsx convention |
+| SD uses close prices for Z-score (v1.3) | Mean reversion requires close-price standard deviation | ✓ Good — consistent with Z-score conventions |
+| Prior-candle breakout in momentum strategy (v1.3) | Highest/Lowest on candles.slice(0,-1) avoids tautology | ✓ Good — signals are genuine breakouts |
+| Exits excluded from strategy config hash (v1.3) | Prevents infinite re-optimization loop | ✓ Good — optimizer only re-runs when strategy params change |
+| regimeLeaderboards optional on all engine options (v1.3) | Backward compat — absent means behavior unchanged | ✓ Good — zero breaking changes across existing code |
+| First undefined-to-known transition does NOT switch (v1.3) | Requires currentRegime !== undefined to trigger | ✓ Good — prevents spurious switch on first candle |
+| ExitLogicManager cleared on strategy switch (v1.3) | State never transferred across strategies | ✓ Good — prevents stale exit state corrupting new strategy |
+| checkAndExecutePendingSwitch at all close paths (v1.3) | Paper: 3 close paths; Live: onOrderFilled EXIT/STOP_LOSS | ✓ Good — deferred switch fires reliably on position close |
 
 ---
-*Last updated: 2026-02-28 after v1.2 milestone completion*
+*Last updated: 2026-03-08 after v1.3 milestone*

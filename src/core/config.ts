@@ -8,6 +8,7 @@
 import 'dotenv/config';
 import { z } from 'zod';
 import { ConfigError } from './errors.js';
+import { intxConfigSchema } from '../perp/config.js';
 
 const configSchema = z.object({
   coinbase: z.object({
@@ -31,6 +32,7 @@ const configSchema = z.object({
       .enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal'])
       .default('info'),
   }),
+  intx: intxConfigSchema,
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -46,6 +48,12 @@ export type Config = z.infer<typeof configSchema>;
  * - TRADING_PAIRS -> data.pairs (comma-separated)
  * - HISTORY_DAYS -> data.historyDays (parsed as int)
  * - LOG_LEVEL -> logging.level
+ * - INTX_ENABLED -> intx.enabled (default false)
+ * - INTX_API_KEY -> intx.apiKey (required when INTX_ENABLED=true)
+ * - INTX_API_SECRET -> intx.apiSecret (required when INTX_ENABLED=true)
+ * - INTX_API_PASSPHRASE -> intx.apiPassphrase (required when INTX_ENABLED=true)
+ * - INTX_PORTFOLIO_ID -> intx.portfolioId (required when INTX_ENABLED=true)
+ * - INTX_TESTNET -> intx.testnet (default false)
  *
  * @throws ConfigError on validation failure
  */
@@ -71,6 +79,14 @@ export function loadConfig(): Config {
     },
     logging: {
       level: env.LOG_LEVEL ?? 'info',
+    },
+    intx: {
+      enabled: env.INTX_ENABLED === 'true',
+      apiKey: env.INTX_API_KEY,
+      apiSecret: env.INTX_API_SECRET,
+      apiPassphrase: env.INTX_API_PASSPHRASE,
+      portfolioId: env.INTX_PORTFOLIO_ID,
+      testnet: env.INTX_TESTNET === 'true',
     },
   };
 
