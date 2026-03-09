@@ -27,7 +27,7 @@ try {
 
 if (!config.intx.enabled) {
   console.error(
-    'INTX is disabled. Set INTX_ENABLED=true in .env to use perpetual futures.',
+    'FCM is disabled. Set FCM_ENABLED=true in .env to use perpetual futures.',
   );
   process.exit(1);
 }
@@ -53,7 +53,7 @@ paperEngine.on('liquidationDistance', (detail) => {
 await intxClient.start();
 paperEngine.start();
 
-log.info('[PAPER] Perp paper mode started — monitoring mark price stream (Ctrl+C to stop)');
+log.info('[PAPER] FCM perp paper mode started — monitoring mark price stream (Ctrl+C to stop)');
 
 // Graceful shutdown on SIGINT/SIGTERM
 function shutdown(): void {

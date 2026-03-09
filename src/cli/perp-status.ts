@@ -1,11 +1,12 @@
 /**
- * CLI entry point for INTX account status.
+ * CLI entry point for FCM futures account status.
  *
  * Usage: npm run perp:status
  *        npm run perp:status -- --json
  *
- * Requires INTX_ENABLED=true and valid INTX credentials in .env.
- * Routes to testnet if INTX_TESTNET=true.
+ * Requires FCM_ENABLED=true in .env.
+ * FCM reuses COINBASE_API_KEY_NAME / COINBASE_API_KEY_SECRET — no separate keys needed.
+ * Routes to testnet if FCM_TESTNET=true.
  */
 
 import { Command } from 'commander';
@@ -17,7 +18,7 @@ const program = new Command();
 
 program
   .name('perp:status')
-  .description('Show INTX account balance, margin, and open positions')
+  .description('Show FCM futures account balance, margin, and open positions')
   .option('--json', 'Output raw JSON instead of formatted table')
   .action(async (opts) => {
     let config;
@@ -29,7 +30,7 @@ program
     }
 
     if (!config.intx.enabled) {
-      out.error('INTX is disabled. Set INTX_ENABLED=true in .env to use perpetual futures.');
+      out.error('FCM is disabled. Set FCM_ENABLED=true in .env to use perpetual futures.');
       process.exit(1);
     }
 
@@ -43,24 +44,23 @@ program
         return;
       }
 
-      out.banner('INTX Account Status');
-      out.table('Network', config.intx.testnet ? 'Testnet (sandbox)' : 'Mainnet');
-      out.table('Portfolio ID', config.intx.portfolioId ?? '—');
+      out.banner('FCM Futures Account Status');
+      out.table('Network', config.intx.testnet ? 'FCM Testnet' : 'FCM Mainnet (CDE)');
 
-      out.info('--- Summary ---');
+      out.info('--- FCM Balance Summary ---');
       console.log(JSON.stringify(state.summary, null, 2));
 
-      out.info('--- Balances ---');
+      out.info('--- FCM Balance Summary (balances) ---');
       console.log(JSON.stringify(state.balances, null, 2));
 
-      out.info('--- Open Positions ---');
+      out.info('--- Open FCM Positions ---');
       if (Array.isArray(state.positions) && state.positions.length === 0) {
         out.info('No open positions');
       } else {
         console.log(JSON.stringify(state.positions, null, 2));
       }
     } catch (err) {
-      out.error(`Failed to fetch INTX account state: ${(err as Error).message}`);
+      out.error(`Failed to fetch FCM account state: ${(err as Error).message}`);
       process.exit(1);
     }
   });

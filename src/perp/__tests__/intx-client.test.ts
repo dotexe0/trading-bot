@@ -1,15 +1,15 @@
 /**
- * Tests for IntxClient and intxConfigSchema.
+ * Tests for IntxClient (FCM) and fcmConfigSchema / intxConfigSchema.
  *
- * All CBInternationalClient and WebsocketClient interactions are mocked — no live network calls.
+ * All CBAdvancedTradeClient and WebsocketClient interactions are mocked — no live network calls.
  * Tests validate:
  *   - Config schema refine rules (enabled + missing credentials)
  *   - IntxClient constructor guard (enabled=false throws)
- *   - IntxClient constructor success (CBInternationalClient instantiated)
- *   - getAccountState() calls getPortfolioDetails with portfolioId and maps response
+ *   - IntxClient constructor success (CBAdvancedTradeClient instantiated)
+ *   - getAccountState() calls getFuturesBalanceSummary + getFuturesPositions and maps response
  *   - WebSocket start() double-start guard
- *   - markPrice event emitted on RISK channel update
- *   - fundingRate event emitted on FUNDING channel update
+ *   - ticker channel update emits markPrice with correct fields and isStale=false
+ *   - futures_balance_summary channel emits fundingRate
  *   - isStale set on close, disconnected emitted
  *   - reconnectFailed after MAX_RECONNECT_ATTEMPTS close events
  *   - stop() clears pending reconnect timer and calls ws.closeAll()
@@ -19,12 +19,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 
 // ── Hoisted mock helpers (must be defined before vi.mock is hoisted) ─
-const { mockGetPortfolioDetails, mockCloseAll, mockSubscribe, wsInstances } = vi.hoisted(() => {
-  const mockGetPortfolioDetails = vi.fn();
+const { mockGetFuturesBalanceSummary, mockGetFuturesPositions, mockCloseAll, mockSubscribe, wsInstances } = vi.hoisted(() => {
+  const mockGetFuturesBalanceSummary = vi.fn();
+  const mockGetFuturesPositions = vi.fn();
   const mockCloseAll = vi.fn();
   const mockSubscribe = vi.fn();
   const wsInstances: EventEmitter[] = [];
-  return { mockGetPortfolioDetails, mockCloseAll, mockSubscribe, wsInstances };
+  return { mockGetFuturesBalanceSummary, mockGetFuturesPositions, mockCloseAll, mockSubscribe, wsInstances };
 });
 
 vi.mock('coinbase-api', () => {
@@ -39,9 +40,10 @@ vi.mock('coinbase-api', () => {
     static _instances: MockWebsocketClient[] = [];
   }
   return {
-    CBInternationalClient: class MockCBInternationalClient {
+    CBAdvancedTradeClient: class MockCBAdvancedTradeClient {
       constructor(public opts: unknown) {}
-      getPortfolioDetails = mockGetPortfolioDetails;
+      getFuturesBalanceSummary = mockGetFuturesBalanceSummary;
+      getFuturesPositions = mockGetFuturesPositions;
     },
     WebsocketClient: MockWebsocketClient,
   };
@@ -58,8 +60,6 @@ const VALID_ENABLED_CONFIG = {
   enabled: true,
   apiKey: 'test-key',
   apiSecret: 'test-secret',
-  apiPassphrase: 'test-passphrase',
-  portfolioId: 'portfolio-uuid-001',
   testnet: true,
 };
 
@@ -77,7 +77,7 @@ function lastWsInstance(): EventEmitter {
 
 // ── intxConfigSchema tests ────────────────────────────────────────────
 
-describe('intxConfigSchema', () => {
+describe('intxConfigSchema (FCM)', () => {
   it('Test 1: validates successfully with enabled=false and no credentials', () => {
     const result = intxConfigSchema.safeParse({ enabled: false });
     expect(result.success).toBe(true);
@@ -86,44 +86,39 @@ describe('intxConfigSchema', () => {
     }
   });
 
-  it('Test 2: validates successfully with enabled=true and all four credentials', () => {
+  it('Test 2: validates successfully with enabled=true and apiKey + apiSecret', () => {
     const result = intxConfigSchema.safeParse(VALID_ENABLED_CONFIG);
     expect(result.success).toBe(true);
     if (result.success) {
       expect(result.data.enabled).toBe(true);
       expect(result.data.apiKey).toBe('test-key');
-      expect(result.data.apiPassphrase).toBe('test-passphrase');
-      expect(result.data.portfolioId).toBe('portfolio-uuid-001');
+      expect(result.data.apiSecret).toBe('test-secret');
     }
   });
 
-  it('Test 3: fails when enabled=true and apiPassphrase is missing', () => {
+  it('Test 3: fails when enabled=true and apiKey is missing', () => {
     const result = intxConfigSchema.safeParse({
       enabled: true,
-      apiKey: 'test-key',
+      // apiKey omitted
       apiSecret: 'test-secret',
-      // apiPassphrase omitted
-      portfolioId: 'portfolio-uuid-001',
     });
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((i) => i.message);
-      expect(messages.some((m) => m.includes('INTX_API_PASSPHRASE'))).toBe(true);
+      expect(messages.some((m) => m.includes('COINBASE_API_KEY_NAME'))).toBe(true);
     }
   });
 
-  it('Test 4: fails when enabled=true and portfolioId is missing', () => {
+  it('Test 4: fails when enabled=true and apiSecret is missing', () => {
     const result = intxConfigSchema.safeParse({
       enabled: true,
       apiKey: 'test-key',
-      apiSecret: 'test-secret',
-      apiPassphrase: 'test-passphrase',
-      // portfolioId omitted
+      // apiSecret omitted
     });
     expect(result.success).toBe(false);
     if (!result.success) {
       const messages = result.error.issues.map((i) => i.message);
-      expect(messages.some((m) => m.includes('INTX_PORTFOLIO_ID'))).toBe(true);
+      expect(messages.some((m) => m.includes('COINBASE_API_KEY_SECRET'))).toBe(true);
     }
   });
 });
@@ -139,7 +134,7 @@ describe('IntxClient constructor', () => {
   it('Test 5: throws when instantiated with enabled=false', () => {
     const disabledConfig = intxConfigSchema.parse({ enabled: false });
     expect(() => new IntxClient(disabledConfig)).toThrow(
-      'IntxClient instantiated with INTX_ENABLED=false',
+      'IntxClient instantiated with FCM_ENABLED=false',
     );
   });
 
@@ -158,26 +153,31 @@ describe('IntxClient.getAccountState()', () => {
     (MockWSCtor as any)._instances = [];
   });
 
-  it('Test 7: calls getPortfolioDetails with portfolioId and maps response to IntxAccountState', async () => {
-    const mockResponse = {
-      balances: [{ asset: 'USD', quantity: '10000' }],
-      positions: [{ instrument: 'BTC-PERP', netSize: '0.5' }],
-      summary: { initialMargin: '500', maintenanceMargin: '250' },
+  it('Test 7: calls getFuturesBalanceSummary + getFuturesPositions and maps response to IntxAccountState', async () => {
+    const mockBalanceSummary = {
+      balance_summary: {
+        futures_buying_power: { value: '10000', currency: 'USD' },
+        total_usd_balance: { value: '10000', currency: 'USD' },
+      },
     };
-    mockGetPortfolioDetails.mockResolvedValueOnce(mockResponse);
+    const mockPositions = {
+      positions: [
+        { product_id: 'BIP-20DEC30-CDE', side: 'LONG', number_of_contracts: '1' },
+      ],
+    };
+    mockGetFuturesBalanceSummary.mockResolvedValueOnce(mockBalanceSummary);
+    mockGetFuturesPositions.mockResolvedValueOnce(mockPositions);
 
     const config = intxConfigSchema.parse(VALID_ENABLED_CONFIG);
     const client = new IntxClient(config);
     const state = await client.getAccountState();
 
-    expect(mockGetPortfolioDetails).toHaveBeenCalledOnce();
-    expect(mockGetPortfolioDetails).toHaveBeenCalledWith({
-      portfolio: 'portfolio-uuid-001',
-    });
+    expect(mockGetFuturesBalanceSummary).toHaveBeenCalledOnce();
+    expect(mockGetFuturesPositions).toHaveBeenCalledOnce();
 
-    expect(state.balances).toEqual(mockResponse.balances);
-    expect(state.positions).toEqual(mockResponse.positions);
-    expect(state.summary).toEqual(mockResponse.summary);
+    expect(state.balances).toEqual(mockBalanceSummary.balance_summary);
+    expect(state.positions).toEqual(mockPositions.positions);
+    expect(state.summary).toEqual(mockBalanceSummary.balance_summary);
   });
 });
 
@@ -196,11 +196,11 @@ describe('IntxClient WebSocket streaming', () => {
   it('Test 8: start() throws if called twice (double-start guard)', async () => {
     const client = makeClient();
     await client.start();
-    await expect(client.start()).rejects.toThrow('IntxClient already started');
+    await expect(client.start()).rejects.toThrow('FcmClient already started');
     await client.stop();
   });
 
-  it('Test 9: RISK channel update emits markPrice with correct fields and isStale=false', async () => {
+  it('Test 9: ticker channel update emits markPrice with correct fields and isStale=false', async () => {
     const client = makeClient();
     await client.start();
 
@@ -208,24 +208,31 @@ describe('IntxClient WebSocket streaming', () => {
     client.on('markPrice', (evt) => received.push(evt));
 
     const ws = lastWsInstance();
+    // Simulate nested ticker event structure
     ws.emit('update', {
-      channel: 'RISK',
-      product_id: 'BTC-PERP',
-      mark_price: '50000.00',
-      index_price: '49990.00',
+      channel: 'ticker',
+      events: [
+        {
+          tickers: [
+            {
+              product_id: 'BIP-20DEC30-CDE',
+              price: '50000.00',
+            },
+          ],
+        },
+      ],
     });
 
     expect(received).toHaveLength(1);
-    expect(received[0]!.instrument).toBe('BTC-PERP');
+    expect(received[0]!.instrument).toBe('BIP-20DEC30-CDE');
     expect(received[0]!.markPrice).toBe('50000.00');
-    expect(received[0]!.indexPrice).toBe('49990.00');
     expect(received[0]!.isStale).toBe(false);
     expect(typeof received[0]!.timestamp).toBe('number');
 
     await client.stop();
   });
 
-  it('Test 10: FUNDING channel update emits fundingRate with correct fields and isStale=false', async () => {
+  it('Test 10: futures_balance_summary channel emits fundingRate with correct fields', async () => {
     const client = makeClient();
     await client.start();
 
@@ -234,16 +241,20 @@ describe('IntxClient WebSocket streaming', () => {
 
     const ws = lastWsInstance();
     ws.emit('update', {
-      channel: 'FUNDING',
-      product_id: 'ETH-PERP',
-      funding_rate: '0.0001',
-      is_final: true,
+      channel: 'futures_balance_summary',
+      events: [
+        {
+          fcm_balance_summary: {
+            funding_hold: '0.0001',
+          },
+        },
+      ],
     });
 
     expect(received).toHaveLength(1);
-    expect(received[0]!.instrument).toBe('ETH-PERP');
+    expect(received[0]!.instrument).toBe('FCM');
     expect(received[0]!.fundingRate).toBe('0.0001');
-    expect(received[0]!.isFinal).toBe(true);
+    expect(received[0]!.isFinal).toBe(false);
     expect(received[0]!.isStale).toBe(false);
     expect(typeof received[0]!.timestamp).toBe('number');
 

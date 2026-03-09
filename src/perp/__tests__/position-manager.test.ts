@@ -28,9 +28,9 @@ function makeConfig(overrides: Partial<IntxConfig> = {}): IntxConfig {
     enabled: true,
     apiKey: 'key',
     apiSecret: 'secret',
-    apiPassphrase: 'pass',
-    portfolioId: 'port-1',
     testnet: false,
+    btcProductId: 'BIP-20DEC30-CDE',
+    ethProductId: 'ETP-20DEC30-CDE',
     liquidationSafetyThresholdPct: 5.0,
     defaultMaintenanceMarginRate: '0.0333',
     ...overrides,
@@ -334,7 +334,7 @@ describe('PerpPositionManager', () => {
       (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
       (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
         balances: [],
-        positions: [{ instrument: 'BTC-PERP', net_size: '0.1', vwap: '50000', mark_price: '51000' }],
+        positions: [{ product_id: 'BTC-PERP', side: 'LONG', number_of_contracts: '1', avg_entry_price: '50000', current_price: '51000' }],
         summary: {},
       });
       (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
@@ -363,7 +363,7 @@ describe('PerpPositionManager', () => {
       (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
       (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
         balances: [],
-        positions: [{ instrument: 'ETH-PERP', net_size: '0', vwap: '3000', mark_price: '3100' }],
+        positions: [{ product_id: 'ETH-PERP', side: 'LONG', number_of_contracts: '0', avg_entry_price: '3000', current_price: '3100' }],
         summary: {},
       });
       (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
@@ -412,7 +412,7 @@ describe('PerpPositionManager', () => {
       (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([pendingOrder]);
       (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
         balances: [],
-        positions: [{ instrument: 'BTC-PERP', net_size: '0.1', vwap: '50000', mark_price: '51000' }],
+        positions: [{ product_id: 'BTC-PERP', side: 'LONG', number_of_contracts: '1', avg_entry_price: '50000', current_price: '51000' }],
         summary: {},
       });
 
