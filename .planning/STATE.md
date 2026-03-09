@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 30 in progress (Perp Strategies and Tournament), Plan 3 of N complete
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 30 complete (Perp Strategies and Tournament), all 4 plans done
 
 ## Current Position
 
-Phase: 30 of 33 (Perp Strategies and Tournament) — in progress
-Plan: 3 complete in current phase
+Phase: 30 of 33 (Perp Strategies and Tournament) — complete
+Plan: 4 of 4 complete in current phase
 Status: Active
-Last activity: 2026-03-09 — 30-03 complete (perp registry factories, config schema extension, npm run tournament:perp CLI)
+Last activity: 2026-03-09 — 30-04 complete (regime auto-switch state machine wired into PaperPerpEngine and PerpPositionManager)
 
-Progress: [████░░░░░░] 69% of v1.4 (11/16 plans complete)
+Progress: [█████░░░░░] 75% of v1.4 (12/16 plans complete)
 
 ## Performance Metrics
 
@@ -93,6 +93,11 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 30-03: createLivePerpRegistry(provider) factory for live/paper engine use — injects real funding callback so FundingAdj fires at runtime
 - 30-03: Perp tournament CLI omits ExitConfigStore — exit parameters from Zod schema defaults, no per-strategy exit config persistence for tournament
 - 30-03: TournamentRunner unchanged — only registry and CLI differ from spot tournament (zero modification to core infrastructure)
+- 30-04: PaperPerpEngine deferral guard uses this.currentPosition (PaperPerpPosition | null) — correct field for paper engine open-position state
+- 30-04: PerpPositionManager deferral guard uses this.currentSession (PerpSession | null) — consistent with all existing code in that class
+- 30-04: pendingSwitch also fires in closePaperPosition/closePosition so deferred switches execute when position closes via mark-price emergency paths
+- 30-04: strategySwitch event added to PerpPositionManagerEvents — required for typed emit() override to compile
+- 30-04: Internal registry built via createLivePerpRegistry(fundingRateProvider ?? () => null) when regimeLeaderboards provided but no explicit strategyRegistry
 
 ### Open Issues / Tech Debt
 
@@ -106,5 +111,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 30-03-PLAN.md (perp registry factories, config schema extension, npm run tournament:perp CLI)
-Resume with: `/gsd:execute-phase 30` (Phase 30: continue with next plan)
+Stopped at: Completed 30-04-PLAN.md (regime auto-switch state machine wired into PaperPerpEngine and PerpPositionManager)
+Resume with: `/gsd:execute-phase 31` (Phase 31: next phase)
