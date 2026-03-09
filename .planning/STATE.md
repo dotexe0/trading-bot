@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-08)
 ## Current Position
 
 Phase: 28 of 33 (Post-Only Limit Order Engine)
-Plan: 1 of 2 in current phase — complete
+Plan: 2 of 2 in current phase — complete
 Status: Active
-Last activity: 2026-03-09 — 28-01 complete (PerpOrderEngine, post-only entry loop, FCM user channel)
+Last activity: 2026-03-09 — 28-02 complete (TrailingStopManager, post-fill TP/stop orders, ratchet loop, closeAndCleanup)
 
-Progress: [█░░░░░░░░░] 33% of v1.4 (5/15 plans complete)
+Progress: [██░░░░░░░░] 40% of v1.4 (6/15 plans complete)
 
 ## Performance Metrics
 
@@ -71,6 +71,10 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 28-01: NON_RETRYABLE_REASONS set (INSUFFICIENT_FUND, INVALID_SIZE, INVALID_PRICE, INVALID_PRODUCT) — abort immediately without retrying
 - 28-01: Fill detection uses repriceTimeoutMs (60s) per-attempt, entryOrderTimeoutMs (300s) total loop timeout
 - 28-01: cancelOrders() public batch method on IntxClient — cancelAllOpenOrders never accesses restClient directly
+- 28-02: TrailingStopManager pure class (no EventEmitter) — ratchet loop lives in order-engine.ts for API access
+- 28-02: closePosition() single cleanup point — executeEmergencyClose delegates to closePosition, preventing double-cleanup
+- 28-02: TP failure does not block stop placement — trailing stop is critical risk-management order
+- 28-02: closeAndCleanup uses tracked exchange IDs + DB query to cancel all TP/stop orders including ratcheted ones
 
 ### Open Issues / Tech Debt
 
@@ -84,5 +88,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-09
-Stopped at: Completed 28-01-PLAN.md (PerpOrderEngine, post-only entry loop, FCM user channel, cancel-reprice loop)
-Resume with: `/gsd:execute-phase 28` (Phase 28, Plan 02: ratchet stop and TP/SL orders)
+Stopped at: Completed 28-02-PLAN.md (TrailingStopManager, post-fill TP/stop orders, ratchet loop, closeAndCleanup wiring)
+Resume with: `/gsd:execute-phase 29` (Phase 29: next phase)
