@@ -42,19 +42,26 @@ export interface IntxClientEvents {
 // ── REST Types ────────────────────────────────────────────────────────
 
 /**
- * INTX account state: balances, open positions, and portfolio summary.
- * Typed loosely — Phase 27 will tighten based on CBInternationalClient
- * response shape.
+ * FCM account state: futures balance summary and open positions.
  */
 export interface IntxAccountState {
   balances: unknown;
-  positions: unknown;
+  positions: Array<{
+    product_id?: string;
+    side?: string;        // 'LONG' | 'SHORT'
+    number_of_contracts?: string;
+    current_price?: string;
+    avg_entry_price?: string;
+    unrealized_pnl?: string;
+    [key: string]: unknown;
+  }>;
   summary: unknown;
 }
 
-/** Parameters for placing a perpetual order on INTX. */
+/** Parameters for placing a perpetual futures order via FCM. */
 export interface PlaceOrderParams {
-  instrument: string;
+  productId?: string;   // FCM product ID (preferred): 'BIP-20DEC30-CDE', 'ETP-20DEC30-CDE'
+  instrument?: string;  // legacy alias — falls back to productId if productId not set
   side: 'BUY' | 'SELL';
   size: string;
   orderType: 'MARKET' | 'LIMIT';
@@ -63,10 +70,10 @@ export interface PlaceOrderParams {
   closeOnly?: boolean;
 }
 
-/** Parameters for cancelling a perpetual order on INTX. */
+/** Parameters for cancelling a perpetual futures order via FCM. */
 export interface CancelOrderParams {
   orderId: string;
-  portfolioId: string;
+  portfolioId?: string; // optional — not used by FCM
 }
 
 // ── Perp Position Types ──────────────────────────────────────────────
@@ -80,7 +87,7 @@ export type PerpSessionStatus = 'open' | 'closed' | 'emergency_closed';
 /** An open or closed perp position session. */
 export interface PerpSession {
   id: string;                   // UUID session ID
-  instrument: string;           // 'BTC-PERP' | 'ETH-PERP'
+  instrument: string;           // 'BIP-20DEC30-CDE' | 'ETP-20DEC30-CDE'
   direction: PerpDirection;
   entryPrice: string;           // decimal string
   size: string;                 // base units (decimal string)

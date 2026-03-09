@@ -15,7 +15,7 @@
 
 import { EventEmitter } from 'node:events';
 import crypto from 'node:crypto';
-import { d, ZERO } from '../core/decimal.js';
+import { d } from '../core/decimal.js';
 import { createModuleLogger } from '../core/logger.js';
 import { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
 import type { IntxClient } from './intx-client.js';
@@ -167,6 +167,7 @@ export class PerpPositionManager extends EventEmitter {
 
     // Place order via IntxClient
     const result = await this.intxClient.placeOrder({
+      productId: instrument,
       instrument,
       side: order.side,
       size,
@@ -236,6 +237,7 @@ export class PerpPositionManager extends EventEmitter {
 
     // Place close order
     const result = await this.intxClient.placeOrder({
+      productId: instrument,
       instrument,
       side: closeSide,
       size,
@@ -299,15 +301,15 @@ export class PerpPositionManager extends EventEmitter {
   }
 
   /**
-   * Reconcile internal state with INTX on startup after a crash or restart.
+   * Reconcile internal state with FCM on startup after a crash or restart.
    *
    * Strategy:
    * 1. Query PerpStateStore for any session with status='open'
    * 2. For each open session, call intxClient.getAccountState() and parse positions
-   * 3. Match by instrument; parse net_size as Decimal:
-   *    - gt(ZERO) → still long on exchange
-   *    - lt(ZERO) → still short on exchange
-   *    - isZero() → position closed externally → mark session closed
+   * 3. Match by product_id; check FCM position shape:
+   *    - side === 'LONG' → still long on exchange
+   *    - side === 'SHORT' → still short on exchange
+   *    - missing or number_of_contracts === 0 → position closed externally
    * 4. If exchange confirms position open: restore this.currentSession from DB
    * 5. If exchange shows no position: mark session closed with closeReason='external_close'
    * 6. Check for PENDING orders: log at warn and mark FAILED (conservative; prevents double-entry)
@@ -323,12 +325,7 @@ export class PerpPositionManager extends EventEmitter {
     }
 
     const accountState = await this.intxClient.getAccountState();
-    const positions = (accountState.positions as Array<{
-      instrument: string;
-      net_size: string;
-      vwap: string;
-      mark_price: string;
-    }>) ?? [];
+    const positions = accountState.positions ?? [];
 
     let restored = false;
     let closedExternally = false;
@@ -344,13 +341,13 @@ export class PerpPositionManager extends EventEmitter {
         this.stateStore.persistOrder({ ...order, status: 'FAILED', updatedAt: Date.now() });
       }
 
-      // Find matching position on exchange
-      const exchangePos = positions.find((p) => p.instrument === dbSession.instrument);
-      const netSize = exchangePos ? d(exchangePos.net_size) : null;
+      // Find matching FCM position on exchange by product_id
+      const exchangePos = positions.find((p) => p.product_id === dbSession.instrument);
+      const contracts = exchangePos?.number_of_contracts;
+      const isZeroOnExchange = !exchangePos || Number(contracts) === 0;
 
-      const isLongOnExchange = netSize?.gt(ZERO) ?? false;
-      const isShortOnExchange = netSize?.lt(ZERO) ?? false;
-      const isZeroOnExchange = netSize?.isZero() ?? true;
+      const isLongOnExchange = !isZeroOnExchange && exchangePos?.side === 'LONG';
+      const isShortOnExchange = !isZeroOnExchange && exchangePos?.side === 'SHORT';
 
       const sessionMatchesExchange =
         (dbSession.direction === 'long' && isLongOnExchange) ||
@@ -365,7 +362,7 @@ export class PerpPositionManager extends EventEmitter {
           'recoverFromRestart: session restored from DB — exchange position confirmed open',
         );
       } else {
-        // Position closed externally (or net_size is wrong direction)
+        // Position closed externally
         const closedAt = Date.now();
         this.stateStore.updateSession(dbSession.id, {
           status: 'closed',
@@ -374,7 +371,7 @@ export class PerpPositionManager extends EventEmitter {
         });
         closedExternally = true;
         log.info(
-          { sessionId: dbSession.id, instrument: dbSession.instrument, exchangeNetSize: exchangePos?.net_size ?? '0' },
+          { sessionId: dbSession.id, instrument: dbSession.instrument, numberOfContracts: contracts ?? '0' },
           'recoverFromRestart: session closed externally — marked closed in DB',
         );
       }
