@@ -62,6 +62,7 @@ export class IntxClient extends EventEmitter {
       apiKey: config.apiKey!,
       apiSecret: config.apiSecret!,
     });
+    // FCM_TESTNET: no real sandbox exists; this flag is for mock/dev paths only
     log.info(
       { testnet: config.testnet },
       'FcmClient initialized (FCM via Advanced Trade API)',
@@ -163,6 +164,8 @@ export class IntxClient extends EventEmitter {
         // Funding rate from balance summary
         const summary = data?.events?.[0]?.fcm_balance_summary ?? data;
         if (summary?.funding_hold) {
+          // FCM limitation: futures_balance_summary yields an account-level funding_hold aggregate,
+          // not per-instrument 8h funding rates. No per-instrument funding rate WebSocket channel exists in FCM.
           this.emit('fundingRate', {
             instrument: 'FCM',
             fundingRate: summary.funding_hold,
