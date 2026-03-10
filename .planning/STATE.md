@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 30 complete (Perp Strategies and Tournament), all 4 plans done
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 31 in progress (Funding Rate Tracking), plan 1 of 3 done
 
 ## Current Position
 
-Phase: 30 of 33 (Perp Strategies and Tournament) — complete
-Plan: 4 of 4 complete in current phase
+Phase: 31 of 33 (Funding Rate Tracking) — in progress
+Plan: 1 of 3 complete in current phase
 Status: Active
-Last activity: 2026-03-09 — 30-04 complete (regime auto-switch state machine wired into PaperPerpEngine and PerpPositionManager)
+Last activity: 2026-03-10 — 31-01 complete (FundingRateTracker pure accumulator class, 21 tests passing)
 
-Progress: [█████░░░░░] 75% of v1.4 (12/16 plans complete)
+Progress: [█████░░░░░] 76% of v1.4 (13/17 plans complete)
 
 ## Performance Metrics
 
@@ -98,6 +98,9 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 30-04: pendingSwitch also fires in closePaperPosition/closePosition so deferred switches execute when position closes via mark-price emergency paths
 - 30-04: strategySwitch event added to PerpPositionManagerEvents — required for typed emit() override to compile
 - 30-04: Internal registry built via createLivePerpRegistry(fundingRateProvider ?? () => null) when regimeLeaderboards provided but no explicit strategyRegistry
+- 31-01: drainTriggered guards on cumulativeCost.isNegative() — receiving funding (positive cost) never triggers drain even if abs(pct) >= threshold
+- 31-01: Session ID null guard uses single branch (sessionId !== session.id) — handles both null→first-id and id1→id2 session switch
+- 31-01: No instrument filter on fundingRate events — FCM channel emits instrument='FCM' (account-level), not product ID
 
 ### Open Issues / Tech Debt
 
@@ -110,6 +113,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-09
-Stopped at: Completed 30-04-PLAN.md (regime auto-switch state machine wired into PaperPerpEngine and PerpPositionManager)
-Resume with: `/gsd:execute-phase 31` (Phase 31: next phase)
+Last session: 2026-03-10
+Stopped at: Completed 31-01-PLAN.md (FundingRateTracker pure accumulator class with 21 passing tests)
+Resume with: `/gsd:execute-phase 31` (Phase 31 plan 02: paper perp engine funding integration)

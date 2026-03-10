@@ -45,6 +45,7 @@ function makeConfig(overrides: Partial<IntxConfig> = {}): IntxConfig {
     marginUtilizationCeiling: 0.8,
     perpExposureCapPct: 0.5,
     perpMaxLossPct: 0.02,
+    fundingDrainThresholdPct: 0.005,
     ...overrides,
   };
 }

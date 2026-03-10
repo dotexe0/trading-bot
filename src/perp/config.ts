@@ -36,6 +36,7 @@ export const fcmConfigSchema = z
     marginUtilizationCeiling: z.number().min(0.1).max(1.0).default(0.8),
     perpExposureCapPct: z.number().min(0.1).max(1.0).default(0.5),
     perpMaxLossPct: z.number().min(0.001).max(0.2).default(0.02),
+    fundingDrainThresholdPct: z.number().min(0.001).max(0.1).default(0.005),
   })
   .refine(
     (data) => !data.enabled || (!!data.apiKey && !!data.apiSecret),

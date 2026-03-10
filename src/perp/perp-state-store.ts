@@ -37,6 +37,12 @@ export class PerpStateStore {
     } catch {
       // column already exists — no action needed
     }
+
+    try {
+      conn.sqlite.prepare('ALTER TABLE perp_sessions ADD COLUMN cumulative_funding_cost TEXT').run();
+    } catch {
+      // column already exists — no action needed
+    }
   }
 
   // ── Session CRUD ──────────────────────────────────────────────────
@@ -59,6 +65,7 @@ export class PerpStateStore {
         liquidationPrice: session.liquidationPrice,
         maintenanceMarginRate: session.maintenanceMarginRate,
         marginMode: session.marginMode ?? null,
+        cumulativeFundingCost: session.cumulativeFundingCost ?? null,
         markPrice: session.markPrice ?? null,
         unrealizedPnl: session.unrealizedPnl ?? null,
         status: session.status,
@@ -112,13 +119,14 @@ export class PerpStateStore {
     updates: Partial<
       Pick<
         PerpSession,
-        'markPrice' | 'unrealizedPnl' | 'status' | 'closedAt' | 'closeReason'
+        'markPrice' | 'unrealizedPnl' | 'cumulativeFundingCost' | 'status' | 'closedAt' | 'closeReason'
       >
     >,
   ): void {
     const setFields: Record<string, unknown> = {};
     if (updates.markPrice !== undefined) setFields['markPrice'] = updates.markPrice;
     if (updates.unrealizedPnl !== undefined) setFields['unrealizedPnl'] = updates.unrealizedPnl;
+    if (updates.cumulativeFundingCost !== undefined) setFields['cumulativeFundingCost'] = updates.cumulativeFundingCost;
     if (updates.status !== undefined) setFields['status'] = updates.status;
     if (updates.closedAt !== undefined) setFields['closedAt'] = updates.closedAt;
     if (updates.closeReason !== undefined) setFields['closeReason'] = updates.closeReason;
@@ -241,6 +249,7 @@ export class PerpStateStore {
       liquidationPrice: row.liquidationPrice,
       maintenanceMarginRate: row.maintenanceMarginRate,
       marginMode: row.marginMode as 'isolated' | 'cross' | undefined ?? undefined,
+      cumulativeFundingCost: row.cumulativeFundingCost ?? undefined,
       markPrice: row.markPrice ?? undefined,
       unrealizedPnl: row.unrealizedPnl ?? undefined,
       status: row.status as PerpSession['status'],
