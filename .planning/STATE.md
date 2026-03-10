@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — COMPLETE. All 33 phases, 18 plans finished. Ready for `/gsd:new-milestone` to start v1.5.
+**Current focus:** v1.4 re-execution — Phase 26 FCM rewrite (INTX → FCM). Plan 26-01 complete.
 
 ## Current Position
 
-Phase: 33 of 33 (Dashboard Perp Panels) — COMPLETE
-Plan: 2 of 2 complete
-Status: Complete
-Last activity: 2026-03-10 — 33-02 fully complete; human-verify checkpoint approved ("I see all 3 panels"); v1.4 milestone finished
+Phase: 26 of 33 (INTX API Client — FCM rewrite)
+Plan: 1 of 2 complete
+Status: In Progress
+Last activity: 2026-03-10 — 26-01 complete; FCM config/types/IntxClient verified; Test 14 added (14/14 tests pass)
 
-Progress: [██████████] 100% of v1.4 (18/18 plans complete)
+Progress: [██████████] 100% of v1.4 original (18/18 plans) — now re-executing Phase 26+ with FCM corrections
 
 ## Performance Metrics
 
@@ -119,6 +119,10 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 33-02: fundingRates map in App.tsx keyed by FCM product ID (funding.instrument); DISPLAY_NAME map in PerpFundingPanel converts to 'BTC-PERP'/'ETH-PERP' for UI labels
 - 33-02: perpPositionUpdate handler filters by id then re-adds only if status === 'open' — closed/emergency_closed positions fall off the panel
 - 33-02: perpExposure initial state uses '0.00' strings matching server emission defaults — gauge rests at 0% until first perpExposureUpdate
+- 26-01 (re-exec): fcmConfigSchema.refine() requires both apiKey+apiSecret when enabled=true; error message names COINBASE_API_KEY_NAME and COINBASE_API_KEY_SECRET
+- 26-01 (re-exec): intxConfigSchema is a backward-compat alias for fcmConfigSchema — all downstream code compiles unchanged
+- 26-01 (re-exec): FCM credentials reuse COINBASE_API_KEY_NAME/SECRET — no separate FCM env vars; FCM_ENABLED (not INTX_ENABLED) controls activation
+- 26-01 (re-exec): User channel FILLED-only filter — non-FILLED orders (OPEN, CANCELLED) do not emit orderFill event
 
 ### Open Issues / Tech Debt
 
@@ -132,5 +136,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-10
-Stopped at: Completed 33-02-PLAN.md — v1.4 milestone complete (18/18 plans)
-Resume with: Run `/gsd:new-milestone` to begin v1.5 planning
+Stopped at: Completed 26-01-PLAN.md — FCM config/types/IntxClient verified; Test 14 added
+Resume with: Execute 26-02-PLAN.md (WebSocket streaming)
