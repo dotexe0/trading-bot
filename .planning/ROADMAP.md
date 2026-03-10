@@ -63,20 +63,20 @@
 
 **Milestone Goal:** Add Coinbase FCM nano perp futures (BIP-20DEC30-CDE, ETP-20DEC30-CDE) as a second trading system running alongside existing spot. Post-only limit order entries with cancel-and-reprice logic, ATR-based trailing stop-limit exits, configurable leverage with regime-driven margin mode, two perp-specific IStrategy-compatible strategies evaluated in the existing tournament, funding rate tracking with hold-time exit trigger, separate analytics, and three new dashboard panels.
 
-- [ ] **Phase 26: INTX API Client** — Coinbase INTX REST + WebSocket connectivity, credentials, account balance, and real-time mark/index/funding streams for BTC-PERP and ETH-PERP
+- [ ] **Phase 26: FCM API Client** — Coinbase FCM REST + WebSocket connectivity via Advanced Trade API, account balance, and real-time mark/funding streams for BTC-PERP and ETH-PERP
 - [ ] **Phase 27: Perp Position Execution** — Open/close long and short positions, liquidation price calculation, paper perp mode, crash recovery and reconciliation, emergency close on low liquidation distance
 - [x] **Phase 28: Post-Only Limit Order Engine** — Cancel-and-reprice entry loop, immediate take-profit limit order after fill, ATR-based trailing stop-limit, and full order cleanup on position close
 - [x] **Phase 29: Leverage and Margin Risk Layer** — Configurable leverage with regime-driven sizing, isolated/cross margin mode switching, per-trade max loss and total exposure cap enforcement
 - [x] **Phase 30: Perp Strategies and Tournament** — Two perp-specific IStrategy implementations generating LONG/SHORT signals with funding-rate confidence adjustment, evaluated in existing tournament pipeline with separate perp leaderboard
 - [x] **Phase 31: Funding Rate Tracking** — Real-time cumulative funding cost per position, P&L component logging, and funding-drain exit trigger
-- [ ] **Phase 32: Perp Analytics and CLI Report** — Separate SQLite table for perp trade records, `npm run report` perp section with directional win rate and funding stats, enforced P&L separation from spot
-- [ ] **Phase 33: Dashboard Perp Panels** — Open positions panel with live unrealized P&L and liquidation price, real-time funding rate display, and leverage utilization meter
+- [x] **Phase 32: Perp Analytics and CLI Report** — Separate SQLite table for perp trade records, `npm run report` perp section with directional win rate and funding stats, enforced P&L separation from spot
+- [x] **Phase 33: Dashboard Perp Panels** — Open positions panel with live unrealized P&L and liquidation price, real-time funding rate display, and leverage utilization meter
 
 ---
 
-#### Phase 26: INTX API Client
+#### Phase 26: FCM API Client
 
-**Goal:** The bot can authenticate to Coinbase INTX and stream live market data for BTC-PERP and ETH-PERP, using the same Advanced Trade credentials as spot.
+**Goal:** The bot can authenticate to Coinbase FCM via the Advanced Trade API and stream live market data for BTC-PERP (BIP-20DEC30-CDE) and ETH-PERP (ETP-20DEC30-CDE), using the same COINBASE_API_KEY_NAME/COINBASE_API_KEY_SECRET credentials as spot trading.
 
 **Depends on:** Phase 25 (existing spot system is the integration baseline)
 
@@ -84,31 +84,31 @@
 
 **Success Criteria** (what must be TRUE):
 1. Bot connects to FCM via Advanced Trade API using existing COINBASE_API_KEY_NAME/COINBASE_API_KEY_SECRET; no separate credential set needed
-2. `npm run perp:status` (or equivalent CLI) prints current INTX account balance, available margin, and any open positions from a live or testnet account
+2. `npm run perp:status` prints current FCM account balance, available margin, and any open positions
 3. WebSocket subscription streams real-time mark price, index price, and 8-hour funding rate for both BTC-PERP and ETH-PERP; values update on each event and are observable in logs
-4. All INTX API interactions are encapsulated behind a typed `IntxClient` interface, keeping INTX code isolated from the Advanced Trade code path
+4. All FCM API interactions are encapsulated behind a typed `IntxClient` interface, keeping FCM code isolated from the Advanced Trade spot code path
 
 **Plans:** 2 plans
 
 Plans:
-- [ ] 26-01-PLAN.md — Perp module foundation: types, config schema with fail-fast validation, IntxClient REST account query and order stubs, unit tests
-- [ ] 26-02-PLAN.md — WebSocket RISK + FUNDING stream with exponential backoff reconnect, stale-data flagging, and perp:status CLI command
+- [ ] 26-01-PLAN.md — Perp module foundation: verify fcmConfigSchema wiring, types.ts, IntxClient REST (getAccountState/placeOrder), and add missing orderFill unit test
+- [ ] 26-02-PLAN.md — WebSocket ticker+funding streams with exponential backoff reconnect, stale-data flagging, and perp:status CLI command + npm script
 
 ---
 
 #### Phase 27: Perp Position Execution
 
-**Goal:** The bot can open and close long and short positions on INTX, calculates and logs liquidation price before every entry, and recovers correctly from crashes.
+**Goal:** The bot can open and close long and short positions on FCM, calculates and logs liquidation price before every entry, and recovers correctly from crashes.
 
-**Depends on:** Phase 26 (INTX connectivity required)
+**Depends on:** Phase 26 (FCM connectivity required)
 
 **Requirements:** PERP-01, PERP-02, PERP-03, PERP-04, RISK-03, RISK-04
 
 **Success Criteria** (what must be TRUE):
-1. Bot opens a long or short position on BTC-PERP or ETH-PERP and the resulting position is visible in the INTX account (or testnet simulation in paper mode)
+1. Bot opens a long or short position on BTC-PERP or ETH-PERP and the resulting position is visible in the FCM account (or testnet simulation in paper mode)
 2. Liquidation price is computed and logged before every entry; the log line includes instrument, direction, entry price, leverage, and liquidation price
-3. Paper perp mode completes a full round-trip (open → fill → close) using mark-price simulation without touching live INTX funds
-4. After a simulated crash and restart, the bot reconciles with INTX, restores open position state, and resumes without duplicating orders
+3. Paper perp mode completes a full round-trip (open → fill → close) using mark-price simulation without touching live FCM funds
+4. After a simulated crash and restart, the bot reconciles with FCM, restores open position state, and resumes without duplicating orders
 5. Bot triggers an emergency close and logs a `LIQUIDATION_RISK` warning when liquidation distance falls below the configured safety threshold
 
 **Plans:** 2 plans
@@ -130,7 +130,7 @@ Plans:
 **Success Criteria** (what must be TRUE):
 1. Every perp entry order is submitted as post-only; if it would execute as a taker, it is cancelled and the bot logs a `REPRICE` event rather than taking the fill
 2. When an unfilled entry order exceeds the configured timeout, the bot cancels it and submits a new post-only limit at the current mid-price; this cycle repeats until the order fills or the signal is withdrawn
-3. Within one candle of a position fill, the bot has placed a take-profit limit order at the configured price target on the INTX order book
+3. Within one candle of a position fill, the bot has placed a take-profit limit order at the configured price target on the FCM order book
 4. The trailing stop-limit ratchets in the position's favour as mark price moves; the stop price never retreats; ATR sets the trail distance
 5. When a position closes by any path (manual, stop hit, TP hit, emergency close), all associated open orders (TP + stop) are cancelled before the position record is marked closed
 
@@ -241,14 +241,14 @@ Plans:
 
 **Success Criteria** (what must be TRUE):
 1. The dashboard shows an open positions panel listing each perp position with instrument, direction, leverage, current mark price, unrealized P&L, liquidation price, and cumulative funding cost; the panel updates in real time via WebSocket
-2. The dashboard shows the current 8-hour funding rate for BTC-PERP and ETH-PERP, updated on each funding rate event from the INTX stream
+2. The dashboard shows the current 8-hour funding rate for BTC-PERP and ETH-PERP, updated on each funding rate event from the FCM stream
 3. The dashboard shows a leverage utilization meter displaying total open perp notional as a percentage of the configured maximum exposure cap; the meter updates when positions open or close
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 33-01: Perp WebSocket events — extend ENGINE_EVENT_MAP with `perpPositionUpdate`, `perpFundingUpdate`, `perpExposureUpdate`
-- [ ] 33-02: Perp dashboard panels — PerpPositionsPanel, PerpFundingPanel, PerpLeverageMeter React components
+- [ ] 33-01-PLAN.md — Perp WebSocket events: extend ENGINE_EVENT_MAP, DashboardDeps.perpEngines, exposureUpdate emission, GET /api/perp/positions
+- [ ] 33-02-PLAN.md — Perp dashboard panels: PerpPositionsPanel, PerpFundingPanel, PerpLeverageMeter with WS state and REST hydration
 
 ---
 
@@ -281,11 +281,11 @@ Plans:
 | 23. Regime-Aware Tournament | v1.3 | 2/2 | Complete | 2026-03-07 |
 | 24. Live Strategy Auto-Switching | v1.3 | 3/3 | Complete | 2026-03-08 |
 | 25. Pipeline Integration | v1.3 | 1/1 | Complete | 2026-03-08 |
-| 26. INTX API Client | v1.4 | 0/2 | Not started | - |
+| 26. FCM API Client | v1.4 | 0/2 | Not started | - |
 | 27. Perp Position Execution | v1.4 | 0/2 | Not started | - |
 | 28. Post-Only Limit Order Engine | v1.4 | 2/2 | Complete | 2026-03-09 |
 | 29. Leverage and Margin Risk Layer | v1.4 | 2/2 | Complete | 2026-03-09 |
 | 30. Perp Strategies and Tournament | v1.4 | 4/4 | Complete | 2026-03-09 |
 | 31. Funding Rate Tracking | v1.4 | 2/2 | Complete | 2026-03-09 |
-| 32. Perp Analytics and CLI Report | v1.4 | 0/2 | Not started | - |
-| 33. Dashboard Perp Panels | v1.4 | 0/2 | Not started | - |
+| 32. Perp Analytics and CLI Report | v1.4 | 2/2 | Complete | 2026-03-09 |
+| 33. Dashboard Perp Panels | v1.4 | 2/2 | Complete | 2026-03-10 |
