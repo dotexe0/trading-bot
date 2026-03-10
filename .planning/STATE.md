@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 31 in progress (Funding Rate Tracking), plan 1 of 3 done
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 31 in progress (Funding Rate Tracking), plan 2 of 3 done
 
 ## Current Position
 
 Phase: 31 of 33 (Funding Rate Tracking) — in progress
-Plan: 1 of 3 complete in current phase
+Plan: 2 of 3 complete in current phase
 Status: Active
-Last activity: 2026-03-10 — 31-01 complete (FundingRateTracker pure accumulator class, 21 tests passing)
+Last activity: 2026-03-10 — 31-02 complete (FundingRateTracker wired into both engines, FUNDING_DRAIN_EXIT path, 62 tests passing)
 
-Progress: [█████░░░░░] 76% of v1.4 (13/17 plans complete)
+Progress: [█████░░░░░] 82% of v1.4 (14/17 plans complete)
 
 ## Performance Metrics
 
@@ -101,6 +101,10 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 31-01: drainTriggered guards on cumulativeCost.isNegative() — receiving funding (positive cost) never triggers drain even if abs(pct) >= threshold
 - 31-01: Session ID null guard uses single branch (sessionId !== session.id) — handles both null→first-id and id1→id2 session switch
 - 31-01: No instrument filter on fundingRate events — FCM channel emits instrument='FCM' (account-level), not product ID
+- 31-02: fundingTracker optional injection in both engine options — enables test control of drain trigger without real notional math
+- 31-02: drain guard checks both _fundingDrainInProgress and _emergencyCloseInProgress — prevents concurrent close races
+- 31-02: unrealizedPnl updated on every funding event (pricePnl + cumulativeFundingCost) — FUNDING-02 satisfied inline
+- 31-02: _computeUnrealizedPnl falls back to cumulativeFundingCost when markPrice absent — defensive for early-session state
 
 ### Open Issues / Tech Debt
 
@@ -114,5 +118,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-10
-Stopped at: Completed 31-01-PLAN.md (FundingRateTracker pure accumulator class with 21 passing tests)
-Resume with: `/gsd:execute-phase 31` (Phase 31 plan 02: paper perp engine funding integration)
+Stopped at: Completed 31-02-PLAN.md (FundingRateTracker wired into both engines, 62 tests passing)
+Resume with: `/gsd:execute-phase 31` (Phase 31 plan 03: live perp engine funding integration)

@@ -67,8 +67,8 @@
 - [ ] **Phase 27: Perp Position Execution** — Open/close long and short positions, liquidation price calculation, paper perp mode, crash recovery and reconciliation, emergency close on low liquidation distance
 - [x] **Phase 28: Post-Only Limit Order Engine** — Cancel-and-reprice entry loop, immediate take-profit limit order after fill, ATR-based trailing stop-limit, and full order cleanup on position close
 - [x] **Phase 29: Leverage and Margin Risk Layer** — Configurable leverage with regime-driven sizing, isolated/cross margin mode switching, per-trade max loss and total exposure cap enforcement
-- [ ] **Phase 30: Perp Strategies and Tournament** — Two perp-specific IStrategy implementations generating LONG/SHORT signals with funding-rate confidence adjustment, evaluated in existing tournament pipeline with separate perp leaderboard
-- [ ] **Phase 31: Funding Rate Tracking** — Real-time cumulative funding cost per position, P&L component logging, and funding-drain exit trigger
+- [x] **Phase 30: Perp Strategies and Tournament** — Two perp-specific IStrategy implementations generating LONG/SHORT signals with funding-rate confidence adjustment, evaluated in existing tournament pipeline with separate perp leaderboard
+- [x] **Phase 31: Funding Rate Tracking** — Real-time cumulative funding cost per position, P&L component logging, and funding-drain exit trigger
 - [ ] **Phase 32: Perp Analytics and CLI Report** — Separate SQLite table for perp trade records, `npm run report` perp section with directional win rate and funding stats, enforced P&L separation from spot
 - [ ] **Phase 33: Dashboard Perp Panels** — Open positions panel with live unrealized P&L and liquidation price, real-time funding rate display, and leverage utilization meter
 
@@ -202,10 +202,11 @@ Plans:
 2. Cumulative funding cost is recorded as a signed P&L component on the position record (negative when paid, positive when received) and included in the position's unrealized P&L calculation
 3. When cumulative funding cost for a position exceeds the configured threshold (e.g., 0.5% of position value), the bot closes the position immediately and logs a `FUNDING_DRAIN_EXIT` reason
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 31-01: Funding rate tracker — per-position cumulative funding cost, P&L component integration, and funding-drain exit trigger
+- [x] 31-01-PLAN.md — TDD: FundingRateTracker pure class with accumulation, drain threshold, and reset logic
+- [x] 31-02-PLAN.md — Schema/config/types extension, engine wiring in PaperPerpEngine and PerpPositionManager, drain exit tests
 
 ---
 
@@ -222,7 +223,7 @@ Plans:
 2. `npm run report` outputs a perp section showing win rate by direction (long vs short), average leverage across all trades, total funding paid, and net perp P&L
 3. Spot P&L and perp P&L are reported in separate sections with separate totals; no blended summary metric combines them
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 32-01: Perp trade record schema and storage — `perp_trades` table, Drizzle schema, write path from position close
@@ -284,7 +285,7 @@ Plans:
 | 27. Perp Position Execution | v1.4 | 0/2 | Not started | - |
 | 28. Post-Only Limit Order Engine | v1.4 | 2/2 | Complete | 2026-03-09 |
 | 29. Leverage and Margin Risk Layer | v1.4 | 2/2 | Complete | 2026-03-09 |
-| 30. Perp Strategies and Tournament | v1.4 | 0/4 | Not started | - |
-| 31. Funding Rate Tracking | v1.4 | 0/1 | Not started | - |
+| 30. Perp Strategies and Tournament | v1.4 | 4/4 | Complete | 2026-03-09 |
+| 31. Funding Rate Tracking | v1.4 | 2/2 | Complete | 2026-03-09 |
 | 32. Perp Analytics and CLI Report | v1.4 | 0/2 | Not started | - |
 | 33. Dashboard Perp Panels | v1.4 | 0/2 | Not started | - |
