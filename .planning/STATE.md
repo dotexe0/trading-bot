@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 re-execution — Phase 26 FCM rewrite (INTX → FCM). Plan 26-01 complete.
+**Current focus:** v1.4 re-execution — Phase 26 FCM rewrite (INTX → FCM). Plan 26-02 at checkpoint.
 
 ## Current Position
 
 Phase: 26 of 33 (INTX API Client — FCM rewrite)
-Plan: 1 of 2 complete
-Status: In Progress
-Last activity: 2026-03-10 — 26-01 complete; FCM config/types/IntxClient verified; Test 14 added (14/14 tests pass)
+Plan: 2 of 2 — Tasks 1+2 complete, awaiting Task 3 human verify checkpoint
+Status: In Progress (checkpoint)
+Last activity: 2026-03-10 — 26-02 Tasks 1+2 complete; WS streaming + perp-status CLI verified; FCM limitation comments added
 
 Progress: [██████████] 100% of v1.4 original (18/18 plans) — now re-executing Phase 26+ with FCM corrections
 
@@ -136,5 +136,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-10
-Stopped at: Completed 26-01-PLAN.md — FCM config/types/IntxClient verified; Test 14 added
-Resume with: Execute 26-02-PLAN.md (WebSocket streaming)
+Stopped at: 26-02-PLAN.md Task 3 checkpoint — awaiting human verify (npm test 14 tests + perp:status disabled guard)
+Resume with: After user approval, continue 26-02-PLAN.md (create final docs commit)
