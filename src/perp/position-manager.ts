@@ -472,6 +472,15 @@ export class PerpPositionManager extends EventEmitter {
     this.stateStore.createSession(session);
 
     this.emit('positionOpened', session);
+    // Emit exposure update so dashboard meter shows active notional.
+    // exposureCapUsd and utilizationPct are '0.00' because accountValue is not
+    // stored on the instance (it is an optional caller param forwarded to riskGate only).
+    const notional = d(session.size).mul(d(session.entryPrice));
+    this.emit('exposureUpdate', {
+      totalNotionalUsd: notional.toFixed(2),
+      exposureCapUsd: '0.00',
+      utilizationPct: '0.00',
+    });
     return session;
   }
 
@@ -569,6 +578,12 @@ export class PerpPositionManager extends EventEmitter {
     });
 
     this.emit('positionClosed', session);
+    // Position closed — reset exposure to zero.
+    this.emit('exposureUpdate', {
+      totalNotionalUsd: '0.00',
+      exposureCapUsd: '0.00',
+      utilizationPct: '0.00',
+    });
 
     const closedSession = { ...session };
     this.currentSession = null;

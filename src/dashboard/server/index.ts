@@ -21,6 +21,7 @@ import type { BacktestStore } from '../../backtest/backtest-store.js';
 import type { CorrelationStore } from '../../correlation/correlation-store.js';
 import type { CandleRepository } from '../../data/storage/candle-repo.js';
 import type { PaperTradingEngine } from '../../paper/paper-engine.js';
+import type { PerpStateStore } from '../../perp/perp-state-store.js';
 import {
   toApiSession,
   toApiPaperSession,
@@ -41,6 +42,7 @@ import { registerBacktestRoutes } from './routes/backtests.js';
 import { registerPortfolioRoutes } from './routes/portfolio.js';
 import { registerCandleRoutes } from './routes/candles.js';
 import { registerEquitySummaryRoute } from './routes/equity-summary.js';
+import { registerPerpRoutes } from './routes/perp.js';
 
 const log = createModuleLogger('dashboard-server');
 
@@ -62,6 +64,7 @@ export interface DashboardDeps {
   paperEngines?: PaperTradingEngine[];
   /** Optional perp engine event emitters (PerpPositionManager instances) for real-time perp broadcasting. */
   perpEngines?: EventEmitter[];
+  perpStateStore?: PerpStateStore;
 }
 
 export interface RouteDeps {
@@ -75,6 +78,7 @@ export interface RouteDeps {
   repo?: CandleRepository;
   /** Live reference to all active paper engines — used by positions endpoint. */
   paperEngines?: PaperTradingEngine[];
+  perpStateStore?: PerpStateStore;
 }
 
 export interface DashboardServer {
@@ -176,6 +180,7 @@ export async function createDashboardServer(
     correlationStore: deps.correlationStore,
     repo: deps.repo,
     paperEngines: deps.paperEngines,
+    perpStateStore: deps.perpStateStore,
   };
 
   // Register WebSocket handler
@@ -197,6 +202,7 @@ export async function createDashboardServer(
   await registerPortfolioRoutes(app, routeDeps);
   await registerCandleRoutes(app, routeDeps);
   await registerEquitySummaryRoute(app, routeDeps);
+  await registerPerpRoutes(app, routeDeps);
 
   // Health check
   app.get('/api/health', async () => {

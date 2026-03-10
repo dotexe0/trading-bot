@@ -420,6 +420,9 @@ program
       // Collect engine EventEmitters from activated paper engines
       const engines: EventEmitter[] = paperEngines;
 
+      // Perp engine wiring (populated when FCM is enabled — Phase 26/27 integration)
+      const perpEngineEmitters: EventEmitter[] = [];
+
       // Instantiate stores for dashboard routes
       correlationStore = new CorrelationStore({ dbPath: config.database.path });
       backtestStore = new BacktestStore({ dbPath: config.database.path });
@@ -472,6 +475,8 @@ program
         backtestStore,
         repo,
         paperEngines,
+        perpEngines: perpEngineEmitters,
+        perpStateStore: undefined,
       });
 
       await server.start();
