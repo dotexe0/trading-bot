@@ -20,6 +20,8 @@ import {
 import { BacktestStore } from '../backtest/backtest-store.js';
 import { SessionStore } from '../paper/session-store.js';
 import { LiveStateStore } from '../live/state-store.js';
+import { PerpStateStore } from '../perp/perp-state-store.js';
+import { d, ZERO } from '../core/decimal.js';
 import type { Trade } from '../backtest/types.js';
 
 const program = new Command();
@@ -29,7 +31,7 @@ program
   .description('Show performance analytics for a completed session or backtest')
   .option('--session <id>', 'Session or backtest ID')
   .option('--latest', 'Use the most recent session/backtest')
-  .option('--type <type>', 'Session type: backtest|paper|live', 'backtest')
+  .option('--type <type>', 'Session type: backtest|paper|live|perp', 'backtest')
   .option('--trades', 'Show top N best/worst trades')
   .option('-n, --top <n>', 'Number of best/worst trades to show', '5')
   .action(async (opts) => {
@@ -132,8 +134,70 @@ program
           .map(normalizeLiveTrade)
           .filter((t): t is Trade => t !== null);
 
+      } else if (sessionType === 'perp') {
+        const perpStore = new PerpStateStore();
+        try {
+          const trades = perpStore.listClosedTrades();
+
+          if (trades.length === 0) {
+            out.warn('No perp trades found.');
+            return;
+          }
+
+          // Directional split
+          const longTrades = trades.filter((t) => t.direction === 'long');
+          const shortTrades = trades.filter((t) => t.direction === 'short');
+
+          // Long win rate
+          const longWins = longTrades.filter((t) => d(t.realizedPnl).gt(ZERO));
+          const longWinRate =
+            longTrades.length > 0
+              ? d(longWins.length).div(d(longTrades.length))
+              : ZERO;
+
+          // Short win rate
+          const shortWins = shortTrades.filter((t) => d(t.realizedPnl).gt(ZERO));
+          const shortWinRate =
+            shortTrades.length > 0
+              ? d(shortWins.length).div(d(shortTrades.length))
+              : ZERO;
+
+          // Average leverage
+          const avgLeverage = trades
+            .reduce((sum, t) => sum.plus(d(String(t.leverage))), ZERO)
+            .div(d(trades.length));
+
+          // Net funding cost (signed: negative = paid, positive = received)
+          const netFundingCost = trades.reduce(
+            (sum, t) => sum.plus(d(t.cumulativeFundingCost)),
+            ZERO,
+          );
+
+          // Net perp P&L
+          const netPerpPnl = trades.reduce((sum, t) => sum.plus(d(t.realizedPnl)), ZERO);
+
+          out.banner('Perp Trading Report');
+          out.table('Trade Count', String(trades.length));
+          out.table(
+            'Long Trades',
+            `${longTrades.length}  (win rate: ${longWinRate.mul(100).toFixed(1)}%)`,
+          );
+          out.table(
+            'Short Trades',
+            `${shortTrades.length}  (win rate: ${shortWinRate.mul(100).toFixed(1)}%)`,
+          );
+          out.table('Avg Leverage', `${avgLeverage.toFixed(1)}x`);
+          out.table('Net Funding Cost', netFundingCost.toFixed(8));
+          out.table('Net Perp P&L', netPerpPnl.toFixed(8));
+
+          out.success('Report complete');
+        } finally {
+          perpStore.close();
+        }
+        return; // early return — skip spot computePerformanceReport() call below
+
       } else {
-        out.error(`Unknown session type: ${sessionType}. Use backtest|paper|live`);
+        out.error(`Unknown session type: ${sessionType}. Use backtest|paper|live|perp`);
         process.exit(1);
       }
 
