@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 33 in progress (Dashboard Perp Panels), plan 1 of 2 complete
+**Current focus:** v1.4 Perpetual Futures Trading — COMPLETE. All 33 phases, 18 plans finished. Ready for `/gsd:new-milestone` to start v1.5.
 
 ## Current Position
 
-Phase: 33 of 33 (Dashboard Perp Panels) — in progress
-Plan: 1 of 2 complete in current phase
-Status: Active
-Last activity: 2026-03-10 — 33-01 complete (server-side perp WebSocket plumbing: PERP_EVENT_MAP, exposureUpdate emission, GET /api/perp/positions, start.ts wiring)
+Phase: 33 of 33 (Dashboard Perp Panels) — COMPLETE
+Plan: 2 of 2 complete
+Status: Complete
+Last activity: 2026-03-10 — 33-02 fully complete; human-verify checkpoint approved ("I see all 3 panels"); v1.4 milestone finished
 
-Progress: [███████░░░] 94% of v1.4 (17/18 plans complete)
+Progress: [██████████] 100% of v1.4 (18/18 plans complete)
 
 ## Performance Metrics
 
@@ -116,6 +116,9 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 33-01: exposureCapUsd and utilizationPct emitted as '0.00' — accountValue is an optional caller param not stored on PerpPositionManager instance
 - 33-01: perpEngineEmitters placeholder array in start.ts with perpStateStore: undefined — FCM Phase 26/27 populates when ready
 - 33-01: GET /api/perp/positions returns [] when perpStateStore is undefined — safe no-op before FCM integration
+- 33-02: fundingRates map in App.tsx keyed by FCM product ID (funding.instrument); DISPLAY_NAME map in PerpFundingPanel converts to 'BTC-PERP'/'ETH-PERP' for UI labels
+- 33-02: perpPositionUpdate handler filters by id then re-adds only if status === 'open' — closed/emergency_closed positions fall off the panel
+- 33-02: perpExposure initial state uses '0.00' strings matching server emission defaults — gauge rests at 0% until first perpExposureUpdate
 
 ### Open Issues / Tech Debt
 
@@ -129,5 +132,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-10
-Stopped at: Completed 33-01-PLAN.md (server-side perp WebSocket plumbing: PERP_EVENT_MAP, exposureUpdate, GET /api/perp/positions, start.ts placeholder wiring)
-Resume with: Execute Phase 33 Plan 02 — perp dashboard UI panels
+Stopped at: Completed 33-02-PLAN.md — v1.4 milestone complete (18/18 plans)
+Resume with: Run `/gsd:new-milestone` to begin v1.5 planning
