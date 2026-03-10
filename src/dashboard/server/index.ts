@@ -60,6 +60,8 @@ export interface DashboardDeps {
   repo?: CandleRepository;
   /** Live reference to all active paper engines — used by positions endpoint. */
   paperEngines?: PaperTradingEngine[];
+  /** Optional perp engine event emitters (PerpPositionManager instances) for real-time perp broadcasting. */
+  perpEngines?: EventEmitter[];
 }
 
 export interface RouteDeps {
@@ -142,6 +144,21 @@ export async function createDashboardServer(
   // Wire engine events to broadcaster
   for (const engine of deps.engines) {
     for (const [engineEvent, wsType] of Object.entries(ENGINE_EVENT_MAP)) {
+      engine.on(engineEvent, (...args: unknown[]) => {
+        broadcaster.broadcast(wsType as any, args.length === 1 ? args[0] : args);
+      });
+    }
+  }
+
+  // Wire perp engine events to broadcaster — separate from spot ENGINE_EVENT_MAP
+  const PERP_EVENT_MAP: Record<string, string> = {
+    fundingUpdate: 'perpFundingUpdate',
+    positionOpened: 'perpPositionUpdate',
+    positionClosed: 'perpPositionUpdate',
+    exposureUpdate: 'perpExposureUpdate',
+  };
+  for (const engine of (deps.perpEngines ?? [])) {
+    for (const [engineEvent, wsType] of Object.entries(PERP_EVENT_MAP)) {
       engine.on(engineEvent, (...args: unknown[]) => {
         broadcaster.broadcast(wsType as any, args.length === 1 ? args[0] : args);
       });

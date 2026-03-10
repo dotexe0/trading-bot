@@ -149,6 +149,8 @@ export interface PerpPositionManagerEvents {
   fundingUpdate: [{ sessionId: string; instrument: string; currentFundingRate: string; cumulativeFundingCost: string; cumulativeFundingPct: string }];
   /** Emitted when cumulative funding cost exceeds the drain threshold. */
   fundingDrain: [PerpSession, { cumulativeFundingCost: string }];
+  /** Emitted after positionOpened and positionClosed with current total notional vs cap. */
+  exposureUpdate: [{ totalNotionalUsd: string; exposureCapUsd: string; utilizationPct: string }];
   error: [Error];
 }
 
