@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 32 in progress (Perp Analytics and CLI Report), plan 1 of 2 complete
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 32 complete (Perp Analytics and CLI Report), beginning Phase 33 (Live Perp Engine)
 
 ## Current Position
 
-Phase: 32 of 33 (Perp Analytics and CLI Report) — in progress
-Plan: 1 of 2 complete in current phase
+Phase: 32 of 33 (Perp Analytics and CLI Report) — complete
+Plan: 2 of 2 complete in current phase
 Status: Active
-Last activity: 2026-03-10 — 32-01 complete (perpTrades table, recordTrade/listClosedTrades, wired into both close paths, 761 tests passing)
+Last activity: 2026-03-10 — 32-02 complete (--type perp branch in report CLI, directional win rates, avg leverage, net funding/P&L, human-verify checkpoint approved)
 
-Progress: [██████░░░░] 88% of v1.4 (15/17 plans complete)
+Progress: [██████░░░░] 94% of v1.4 (16/17 plans complete)
 
 ## Performance Metrics
 
@@ -108,6 +108,9 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 32-01: cumulativeFundingCost stored as NOT NULL TEXT in perpTrades; callers pass '0.00000000' when no funding events fired — avoids null handling in analytics
 - 32-01: realizedPnl in closePosition() computed as pricePnl + fundingAdj using d() Decimal arithmetic, matching the paper engine formula
 - 32-01: rowToTrade() private mapper follows rowToSession()/rowToOrder() pattern for consistency across all perp store tables
+- 32-02: No blended total metric — early return from perp branch before computePerformanceReport() is the enforcement mechanism (ANALYTICS-03)
+- 32-02: d()/ZERO used for all aggregate math in perp report branch — consistent with 32-01 precision guarantees
+- 32-02: Zero trades case emits out.warn and returns exit 0 — matches the warning pattern used elsewhere in the CLI
 
 ### Open Issues / Tech Debt
 
@@ -121,5 +124,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-10
-Stopped at: Completed 32-01-PLAN.md (perpTrades table, PerpTradeRecord, recordTrade/listClosedTrades, wired both close paths, 761 tests passing)
-Resume with: Execute 32-02-PLAN.md (CLI analytics report reading from listClosedTrades())
+Stopped at: Completed 32-02-PLAN.md (--type perp CLI report, directional win rates, avg leverage, net funding/P&L, human-verify approved)
+Resume with: Execute Phase 33 — live perp engine integration
