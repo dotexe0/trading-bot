@@ -21,7 +21,10 @@ export type WsMessageType =
   | 'snapshot'
   | 'error'
   | 'reconciliation'
-  | 'shutdown';
+  | 'shutdown'
+  | 'perpPositionUpdate'
+  | 'perpFundingUpdate'
+  | 'perpExposureUpdate';
 
 export interface WsMessage {
   type: WsMessageType;
@@ -140,4 +143,33 @@ export interface SnapshotPayload {
   equity: EquityPoint[];
   strategies: StrategyInfo[];
   risk?: RiskStatus;
+}
+
+// ── Perp Payloads ─────────────────────────────────────────────────────
+
+export interface PerpPositionPayload {
+  id: string;
+  instrument: string;
+  direction: 'long' | 'short';
+  leverage: number;
+  entryPrice: string;
+  size: string;
+  liquidationPrice: string;
+  markPrice?: string;
+  unrealizedPnl?: string;
+  cumulativeFundingCost?: string;
+  status: 'open' | 'closed' | 'emergency_closed';
+  openedAt: number;
+}
+
+export interface PerpFundingPayload {
+  instrument: string;
+  currentFundingRate: string;
+  cumulativeFundingCost: string;
+}
+
+export interface PerpExposurePayload {
+  totalNotionalUsd: string;
+  exposureCapUsd: string;
+  utilizationPct: string;
 }

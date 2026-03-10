@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 32 complete (Perp Analytics and CLI Report), beginning Phase 33 (Live Perp Engine)
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 33 in progress (Dashboard Perp Panels), plan 1 of 2 complete
 
 ## Current Position
 
-Phase: 32 of 33 (Perp Analytics and CLI Report) — complete
-Plan: 2 of 2 complete in current phase
+Phase: 33 of 33 (Dashboard Perp Panels) — in progress
+Plan: 1 of 2 complete in current phase
 Status: Active
-Last activity: 2026-03-10 — 32-02 complete (--type perp branch in report CLI, directional win rates, avg leverage, net funding/P&L, human-verify checkpoint approved)
+Last activity: 2026-03-10 — 33-01 complete (server-side perp WebSocket plumbing: PERP_EVENT_MAP, exposureUpdate emission, GET /api/perp/positions, start.ts wiring)
 
-Progress: [██████░░░░] 94% of v1.4 (16/17 plans complete)
+Progress: [███████░░░] 94% of v1.4 (17/18 plans complete)
 
 ## Performance Metrics
 
@@ -111,6 +111,11 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 32-02: No blended total metric — early return from perp branch before computePerformanceReport() is the enforcement mechanism (ANALYTICS-03)
 - 32-02: d()/ZERO used for all aggregate math in perp report branch — consistent with 32-01 precision guarantees
 - 32-02: Zero trades case emits out.warn and returns exit 0 — matches the warning pattern used elsewhere in the CLI
+- 33-01: PERP_EVENT_MAP is a local const inside createDashboardServer (not merged into ENGINE_EVENT_MAP) — prevents spot event name collisions
+- 33-01: positionOpened and positionClosed both map to perpPositionUpdate — UI differentiates by inspecting status field in payload
+- 33-01: exposureCapUsd and utilizationPct emitted as '0.00' — accountValue is an optional caller param not stored on PerpPositionManager instance
+- 33-01: perpEngineEmitters placeholder array in start.ts with perpStateStore: undefined — FCM Phase 26/27 populates when ready
+- 33-01: GET /api/perp/positions returns [] when perpStateStore is undefined — safe no-op before FCM integration
 
 ### Open Issues / Tech Debt
 
@@ -124,5 +129,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-10
-Stopped at: Completed 32-02-PLAN.md (--type perp CLI report, directional win rates, avg leverage, net funding/P&L, human-verify approved)
-Resume with: Execute Phase 33 — live perp engine integration
+Stopped at: Completed 33-01-PLAN.md (server-side perp WebSocket plumbing: PERP_EVENT_MAP, exposureUpdate, GET /api/perp/positions, start.ts placeholder wiring)
+Resume with: Execute Phase 33 Plan 02 — perp dashboard UI panels
