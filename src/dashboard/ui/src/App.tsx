@@ -10,6 +10,9 @@ import { PortfolioHeatMap } from './components/PortfolioHeatMap.js';
 import { RiskPanel } from './components/RiskPanel.js';
 import { PerformancePanel } from './components/PerformancePanel.js';
 import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
+import { PerpPositionsPanel } from './components/PerpPositionsPanel.js';
+import { PerpFundingPanel } from './components/PerpFundingPanel.js';
+import { PerpLeverageMeter } from './components/PerpLeverageMeter.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { BacktestViewer } from './components/BacktestViewer.js';
 import { PortfolioStats } from './components/PortfolioStats.js';
@@ -17,6 +20,9 @@ import type {
   CircuitBreakerEvent,
   EquityPoint,
   EquityUpdatePayload,
+  PerpExposurePayload,
+  PerpFundingPayload,
+  PerpPositionPayload,
   PositionData,
   PriceTickPayload,
   RiskStatus,
@@ -53,6 +59,13 @@ function App(): React.ReactElement {
   const [chartData, setChartData] = useState<CandlestickData[]>([]);
   const [equityVersion, setEquityVersion] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [perpPositions, setPerpPositions] = useState<PerpPositionPayload[]>([]);
+  const [perpFunding, setPerpFunding] = useState<Record<string, PerpFundingPayload>>({});
+  const [perpExposure, setPerpExposure] = useState<PerpExposurePayload>({
+    totalNotionalUsd: '0.00',
+    exposureCapUsd: '0.00',
+    utilizationPct: '0.00',
+  });
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
@@ -119,6 +132,15 @@ function App(): React.ReactElement {
           const posData = (await posRes.json()) as PositionData[];
           setPositions(posData);
         }
+
+        // Fetch open perp positions for initial hydration
+        try {
+          const perpPosRes = await fetch('/api/perp/positions');
+          if (perpPosRes.ok) {
+            const perpPosData = (await perpPosRes.json()) as PerpPositionPayload[];
+            setPerpPositions(perpPosData);
+          }
+        } catch { /* API not ready */ }
 
         // Fetch active strategies
         const stratRes = await fetch('/api/strategies');
@@ -306,6 +328,32 @@ function App(): React.ReactElement {
           break;
         }
 
+        case 'perpPositionUpdate': {
+          const pos = payload as PerpPositionPayload;
+          setPerpPositions((prev) => {
+            const filtered = prev.filter((p) => p.id !== pos.id);
+            // Only keep open positions in the panel (closed/emergency_closed fall off)
+            if (pos.status === 'open') {
+              return [...filtered, pos];
+            }
+            return filtered;
+          });
+          break;
+        }
+
+        case 'perpFundingUpdate': {
+          const funding = payload as PerpFundingPayload;
+          // fundingRates map is keyed by FCM product ID (funding.instrument field)
+          setPerpFunding((prev) => ({ ...prev, [funding.instrument]: funding }));
+          break;
+        }
+
+        case 'perpExposureUpdate': {
+          const exposure = payload as PerpExposurePayload;
+          setPerpExposure(exposure);
+          break;
+        }
+
         default:
           break;
       }
@@ -397,6 +445,21 @@ function App(): React.ReactElement {
           />
 
           <PerformancePanel trades={trades} />
+
+          <div className="panel">
+            <div className="panel-title">Perp Positions</div>
+            <PerpPositionsPanel positions={perpPositions} />
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">Perp Funding Rates</div>
+            <PerpFundingPanel fundingRates={perpFunding} />
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">Perp Leverage Utilization</div>
+            <PerpLeverageMeter exposure={perpExposure} />
+          </div>
 
           <div className="panel">
             <div className="panel-title">Portfolio Heat Map</div>
