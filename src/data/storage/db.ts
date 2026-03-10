@@ -373,6 +373,25 @@ export function initializeSchema(sqlite: Database.Database): void {
 
     CREATE INDEX IF NOT EXISTS idx_perp_orders_session
       ON perp_orders (session_id);
+
+    CREATE TABLE IF NOT EXISTS perp_trades (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      instrument TEXT NOT NULL,
+      direction TEXT NOT NULL,
+      leverage INTEGER NOT NULL,
+      entry_price TEXT NOT NULL,
+      exit_price TEXT NOT NULL,
+      size TEXT NOT NULL,
+      cumulative_funding_cost TEXT NOT NULL,
+      realized_pnl TEXT NOT NULL,
+      opened_at INTEGER NOT NULL,
+      closed_at INTEGER NOT NULL,
+      close_reason TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_perp_trades_session
+      ON perp_trades (session_id);
   `);
 
   // Migrate existing databases: add regime_leaderboards_json if absent.

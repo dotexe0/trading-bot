@@ -72,6 +72,7 @@ function makeStateStore(): PerpStateStore & {
   updateSession: ReturnType<typeof vi.fn>;
   persistOrder: ReturnType<typeof vi.fn>;
   getPendingOrders: ReturnType<typeof vi.fn>;
+  recordTrade: ReturnType<typeof vi.fn>;
 } {
   return {
     createSession: vi.fn(),
@@ -80,6 +81,7 @@ function makeStateStore(): PerpStateStore & {
     persistOrder: vi.fn(),
     getOrderByClientId: vi.fn().mockReturnValue(null),
     getPendingOrders: vi.fn().mockReturnValue([]),
+    recordTrade: vi.fn(),
     close: vi.fn(),
   } as unknown as any;
 }

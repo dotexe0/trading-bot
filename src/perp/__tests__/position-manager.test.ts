@@ -76,6 +76,7 @@ function makeStateStore(): PerpStateStore {
     persistOrder: vi.fn(),
     getOrderByClientId: vi.fn().mockReturnValue(null),
     getPendingOrders: vi.fn().mockReturnValue([]),
+    recordTrade: vi.fn(),
     close: vi.fn(),
   } as unknown as PerpStateStore;
 }

@@ -9,8 +9,30 @@
 import { eq, sql } from 'drizzle-orm';
 import { createModuleLogger } from '../core/logger.js';
 import { createDatabase, initializeSchema } from '../data/storage/db.js';
-import { perpSessions, perpOrders } from '../data/storage/schema.js';
+import { perpSessions, perpOrders, perpTrades } from '../data/storage/schema.js';
 import type { PerpSession, PerpOrder } from './types.js';
+
+// ── PerpTradeRecord ───────────────────────────────────────────────────────────
+
+/**
+ * A durable record of a closed perp trade, written by recordTrade() and
+ * read back by listClosedTrades(). Enables Phase 32-02 CLI analytics.
+ */
+export interface PerpTradeRecord {
+  sessionId: string;
+  instrument: string;
+  direction: 'long' | 'short';
+  leverage: number;
+  entryPrice: string;
+  exitPrice: string;
+  size: string;
+  /** '0.00000000' when no funding events fired during the session. */
+  cumulativeFundingCost: string;
+  realizedPnl: string;
+  openedAt: number;
+  closedAt: number;
+  closeReason?: string;
+}
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type * as schema from '../data/storage/schema.js';
 import type Database from 'better-sqlite3';
@@ -227,6 +249,46 @@ export class PerpStateStore {
     return rows.map((row) => this.rowToOrder(row));
   }
 
+  // ── Trade persistence ─────────────────────────────────────────────
+
+  /**
+   * Insert one closed trade record into perp_trades.
+   * Called by both closePosition() (live) and closePaperPosition() (paper).
+   */
+  recordTrade(record: PerpTradeRecord): void {
+    this.db
+      .insert(perpTrades)
+      .values({
+        sessionId: record.sessionId,
+        instrument: record.instrument,
+        direction: record.direction,
+        leverage: record.leverage,
+        entryPrice: record.entryPrice,
+        exitPrice: record.exitPrice,
+        size: record.size,
+        cumulativeFundingCost: record.cumulativeFundingCost,
+        realizedPnl: record.realizedPnl,
+        openedAt: record.openedAt,
+        closedAt: record.closedAt,
+        closeReason: record.closeReason ?? null,
+      })
+      .run();
+
+    log.info(
+      { sessionId: record.sessionId, instrument: record.instrument, realizedPnl: record.realizedPnl },
+      'Perp trade recorded',
+    );
+  }
+
+  /**
+   * Return all closed trade records from perp_trades, unfiltered.
+   * Used by Phase 32-02 CLI analytics report.
+   */
+  listClosedTrades(): PerpTradeRecord[] {
+    const rows = this.db.select().from(perpTrades).all();
+    return rows.map((row) => this.rowToTrade(row));
+  }
+
   // ── Lifecycle ─────────────────────────────────────────────────────
 
   /**
@@ -276,6 +338,23 @@ export class PerpStateStore {
       stopPrice: row.stopPrice ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+    };
+  }
+
+  private rowToTrade(row: typeof perpTrades.$inferSelect): PerpTradeRecord {
+    return {
+      sessionId: row.sessionId,
+      instrument: row.instrument,
+      direction: row.direction as 'long' | 'short',
+      leverage: row.leverage,
+      entryPrice: row.entryPrice,
+      exitPrice: row.exitPrice,
+      size: row.size,
+      cumulativeFundingCost: row.cumulativeFundingCost,
+      realizedPnl: row.realizedPnl,
+      openedAt: row.openedAt,
+      closedAt: row.closedAt,
+      closeReason: row.closeReason ?? undefined,
     };
   }
 }

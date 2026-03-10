@@ -465,6 +465,22 @@ export class PaperPerpEngine extends EventEmitter {
 
     this.stateStore.updateSession(session.id, { status: 'closed', closedAt, closeReason });
 
+    // Record closed trade for analytics (Phase 32)
+    this.stateStore.recordTrade({
+      sessionId: session.id,
+      instrument: session.instrument,
+      direction: session.direction,
+      leverage: session.leverage,
+      entryPrice: paperEntryPrice,
+      exitPrice: markPrice,
+      size: session.size,
+      cumulativeFundingCost: session.cumulativeFundingCost ?? '0.00000000',
+      realizedPnl,
+      openedAt: session.openedAt,
+      closedAt,
+      closeReason,
+    });
+
     log.info(
       {
         instrument: session.instrument,

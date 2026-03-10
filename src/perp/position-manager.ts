@@ -544,6 +544,30 @@ export class PerpPositionManager extends EventEmitter {
     session.closeReason = closeReason;
     this.stateStore.updateSession(session.id, { status: 'closed', closedAt, closeReason });
 
+    // Record closed trade for analytics (Phase 32)
+    const exitPriceD = d(result.avgPrice);
+    const entryPriceD = d(session.entryPrice);
+    const sizeD = d(session.size);
+    const pricePnl = session.direction === 'long'
+      ? exitPriceD.minus(entryPriceD).mul(sizeD)
+      : entryPriceD.minus(exitPriceD).mul(sizeD);
+    const fundingAdj = d(session.cumulativeFundingCost ?? '0');
+    const realizedPnl = pricePnl.plus(fundingAdj).toFixed(8);
+    this.stateStore.recordTrade({
+      sessionId: session.id,
+      instrument: session.instrument,
+      direction: session.direction,
+      leverage: session.leverage,
+      entryPrice: session.entryPrice,
+      exitPrice: result.avgPrice,
+      size: session.size,
+      cumulativeFundingCost: session.cumulativeFundingCost ?? '0.00000000',
+      realizedPnl,
+      openedAt: session.openedAt,
+      closedAt,
+      closeReason,
+    });
+
     this.emit('positionClosed', session);
 
     const closedSession = { ...session };

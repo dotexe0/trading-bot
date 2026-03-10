@@ -359,6 +359,26 @@ export const perpOrders = sqliteTable(
   (table) => [index('idx_perp_orders_session').on(table.sessionId)],
 );
 
+export const perpTrades = sqliteTable(
+  'perp_trades',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sessionId: text('session_id').notNull(),
+    instrument: text('instrument').notNull(),
+    direction: text('direction').notNull(),
+    leverage: integer('leverage').notNull(),
+    entryPrice: text('entry_price').notNull(),
+    exitPrice: text('exit_price').notNull(),
+    size: text('size').notNull(),
+    cumulativeFundingCost: text('cumulative_funding_cost').notNull(),
+    realizedPnl: text('realized_pnl').notNull(),
+    openedAt: integer('opened_at').notNull(),
+    closedAt: integer('closed_at').notNull(),
+    closeReason: text('close_reason'),
+  },
+  (table) => [index('idx_perp_trades_session').on(table.sessionId)],
+);
+
 // -- Exit Config Optimizer Tables --
 
 export const exitConfigOptimizations = sqliteTable(
