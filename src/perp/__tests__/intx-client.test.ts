@@ -324,4 +324,71 @@ describe('IntxClient WebSocket streaming', () => {
     expect(mockCloseAll).toHaveBeenCalledOnce();
     expect((client as any).ws).toBeNull();
   });
+
+  it('Test 14: user channel FILLED order event emits orderFill with correct fields', async () => {
+    const client = makeClient();
+    await client.start();
+
+    const received: any[] = [];
+    client.on('orderFill', (evt) => received.push(evt));
+
+    const ws = lastWsInstance();
+
+    // Simulate a FILLED order via user channel
+    ws.emit('update', {
+      channel: 'user',
+      events: [
+        {
+          orders: [
+            {
+              status: 'FILLED',
+              order_id: 'ord-1',
+              client_order_id: 'coid-1',
+              product_id: 'BIP-20DEC30-CDE',
+              side: 'BUY',
+              filled_size: '1',
+              average_filled_price: '50000',
+              total_fees: '5',
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.orderId).toBe('ord-1');
+    expect(received[0]!.clientOrderId).toBe('coid-1');
+    expect(received[0]!.productId).toBe('BIP-20DEC30-CDE');
+    expect(received[0]!.side).toBe('BUY');
+    expect(received[0]!.filledSize).toBe('1');
+    expect(received[0]!.avgFillPrice).toBe('50000');
+    expect(received[0]!.totalFees).toBe('5');
+    expect(typeof received[0]!.timestamp).toBe('number');
+
+    // Non-FILLED (OPEN) order must NOT emit orderFill
+    ws.emit('update', {
+      channel: 'user',
+      events: [
+        {
+          orders: [
+            {
+              status: 'OPEN',
+              order_id: 'ord-2',
+              client_order_id: 'coid-2',
+              product_id: 'BIP-20DEC30-CDE',
+              side: 'BUY',
+              filled_size: '0',
+              average_filled_price: '0',
+              total_fees: '0',
+            },
+          ],
+        },
+      ],
+    });
+
+    // Still only 1 event — the OPEN order did not emit
+    expect(received).toHaveLength(1);
+
+    await client.stop();
+  });
 });
