@@ -16,10 +16,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PerpPositionManager } from '../position-manager.js';
+import { FundingRateTracker } from '../funding-tracker.js';
 import type { IntxClient } from '../intx-client.js';
 import type { PerpStateStore } from '../perp-state-store.js';
 import type { IntxConfig } from '../config.js';
-import type { IntxMarkPriceEvent } from '../types.js';
+import type { IntxMarkPriceEvent, IntxFundingRateEvent } from '../types.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -484,6 +485,103 @@ describe('PerpPositionManager', () => {
 
       // Flag must be reset to false
       expect((localManager as any)._emergencyCloseInProgress).toBe(false);
+
+      localManager.stop();
+    });
+  });
+
+  // ── Tests 9-10: FundingRateTracker wiring ─────────────────────────
+  describe('FundingRateTracker wiring', () => {
+    it('fundingUpdate emitted on funding rate event with open position', async () => {
+      manager.start();
+
+      await manager.openPosition({
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        size: '0.1',
+        leverage: 5,
+        entryPrice: '50000',
+      });
+
+      const fundingUpdateFn = vi.fn();
+      manager.on('fundingUpdate', fundingUpdateFn);
+
+      const evt: IntxFundingRateEvent = {
+        instrument: 'FCM',
+        fundingRate: '-25',
+        isFinal: false,
+        timestamp: Date.now(),
+        isStale: false,
+      };
+      intxClient.emit('fundingRate', evt);
+
+      expect(fundingUpdateFn).toHaveBeenCalledOnce();
+      const payload = fundingUpdateFn.mock.calls[0][0];
+      expect(payload.cumulativeFundingCost).toBe('-25.00000000');
+      expect(payload.currentFundingRate).toBe('-25');
+
+      // updateSession called with cumulativeFundingCost
+      expect(stateStore.updateSession).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ cumulativeFundingCost: '-25.00000000' }),
+      );
+
+      manager.stop();
+    });
+
+    it('FUNDING_DRAIN_EXIT initiates closePosition when drain threshold exceeded', async () => {
+      // Inject a FundingRateTracker that always returns drainTriggered=true
+      const mockTracker = {
+        onFundingEvent: vi.fn().mockReturnValue({
+          currentFundingRate: '-50',
+          cumulativeFundingCost: '-50.00000000',
+          cumulativeFundingPct: '0.00500000',
+          drainTriggered: true,
+        }),
+        reset: vi.fn(),
+      } as unknown as FundingRateTracker;
+
+      const localManager = new PerpPositionManager({
+        intxClient,
+        stateStore,
+        config,
+        fundingTracker: mockTracker,
+      });
+      localManager.start();
+
+      await localManager.openPosition({
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        size: '0.1',
+        leverage: 5,
+        entryPrice: '50000',
+      });
+
+      const fundingDrainFn = vi.fn();
+      localManager.on('fundingDrain', fundingDrainFn);
+
+      const evt: IntxFundingRateEvent = {
+        instrument: 'FCM',
+        fundingRate: '-50',
+        isFinal: false,
+        timestamp: Date.now(),
+        isStale: false,
+      };
+      intxClient.emit('fundingRate', evt);
+
+      // fundingDrain event emitted synchronously
+      expect(fundingDrainFn).toHaveBeenCalledOnce();
+
+      // Wait for async closePosition to complete
+      await new Promise((resolve) => setTimeout(resolve, 50));
+
+      // closePosition was called (placeOrder called with closeOnly:true)
+      expect(intxClient.placeOrder).toHaveBeenLastCalledWith(
+        expect.objectContaining({ closeOnly: true }),
+      );
+
+      // currentSession should be null after close
+      expect(localManager.getCurrentSession()).toBeNull();
 
       localManager.stop();
     });

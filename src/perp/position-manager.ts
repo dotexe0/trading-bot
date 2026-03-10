@@ -30,6 +30,7 @@ import { createModuleLogger } from '../core/logger.js';
 import { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
 import { RegimeClassifier } from '../regime/classifier.js';
 import { createLivePerpRegistry } from './strategies/index.js';
+import { FundingRateTracker } from './funding-tracker.js';
 import type { IntxClient } from './intx-client.js';
 import type { PerpStateStore } from './perp-state-store.js';
 import type { IntxConfig } from './config.js';
@@ -45,6 +46,7 @@ import type {
   PerpOrder,
   PerpPositionManagerEvents,
   PerpDirection,
+  IntxFundingRateEvent,
 } from './types.js';
 import type { IntxMarkPriceEvent } from './types.js';
 
@@ -92,6 +94,12 @@ export interface PerpPositionManagerOptions {
    * data; that rate must flow through to strategies created via executeStrategySwitch().
    */
   fundingRateProvider?: () => number | null;
+  /**
+   * Optional pre-built FundingRateTracker instance. If not provided, one is
+   * created from config.fundingDrainThresholdPct. Useful for testing with
+   * controlled drain trigger behavior.
+   */
+  fundingTracker?: FundingRateTracker;
 }
 
 export class PerpPositionManager extends EventEmitter {
@@ -106,6 +114,9 @@ export class PerpPositionManager extends EventEmitter {
   private currentSession: PerpSession | null = null;
   private _emergencyCloseInProgress = false;
   private _onMarkPrice: ((evt: IntxMarkPriceEvent) => void) | null = null;
+  private _fundingRateTracker: FundingRateTracker;
+  private _fundingDrainInProgress = false;
+  private _onFundingRate: ((evt: IntxFundingRateEvent) => void) | null = null;
 
   // ── Regime auto-switch state ───────────────────────────────────────────────
   /** Active strategy for candle-based signal evaluation. */
@@ -141,6 +152,10 @@ export class PerpPositionManager extends EventEmitter {
     this.botSessionId = options.sessionId ?? crypto.randomUUID();
     this._orderEngine = options.orderEngine ?? null;
     this._riskGate = options.riskGate ?? null;
+
+    // Funding rate tracker
+    this._fundingRateTracker = options.fundingTracker
+      ?? new FundingRateTracker({ drainThresholdPct: options.config.fundingDrainThresholdPct });
 
     // Regime auto-switch wiring
     this.regimeLeaderboards = options.regimeLeaderboards ?? null;
@@ -192,6 +207,38 @@ export class PerpPositionManager extends EventEmitter {
     };
 
     this.intxClient.on('markPrice', this._onMarkPrice);
+
+    this._onFundingRate = (evt: IntxFundingRateEvent) => {
+      if (!this.currentSession) return;
+      const session = this.currentSession;
+      // NOTE: evt.instrument is always 'FCM' — do NOT filter by instrument
+      const update = this._fundingRateTracker.onFundingEvent(evt, session);
+      this.stateStore.updateSession(session.id, {
+        cumulativeFundingCost: update.cumulativeFundingCost,
+        unrealizedPnl: this._computeUnrealizedPnl(session, update.cumulativeFundingCost),
+      });
+      this.emit('fundingUpdate', {
+        sessionId: session.id,
+        instrument: session.instrument,
+        currentFundingRate: update.currentFundingRate,
+        cumulativeFundingCost: update.cumulativeFundingCost,
+        cumulativeFundingPct: update.cumulativeFundingPct,
+      });
+      if (update.drainTriggered && !this._fundingDrainInProgress && !this._emergencyCloseInProgress) {
+        this._fundingDrainInProgress = true;
+        log.warn({ sessionId: session.id }, 'FUNDING_DRAIN_EXIT triggered');
+        this.emit('fundingDrain', session, { cumulativeFundingCost: update.cumulativeFundingCost });
+        this.closePosition('FUNDING_DRAIN_EXIT').catch((err) => {
+          log.error(
+            { err: err instanceof Error ? err.message : String(err) },
+            'FUNDING_DRAIN_EXIT: closePosition failed',
+          );
+        }).finally(() => {
+          this._fundingDrainInProgress = false;
+        });
+      }
+    };
+    this.intxClient.on('fundingRate', this._onFundingRate);
   }
 
   /**
@@ -201,6 +248,10 @@ export class PerpPositionManager extends EventEmitter {
     if (this._onMarkPrice) {
       this.intxClient.off('markPrice', this._onMarkPrice);
       this._onMarkPrice = null;
+    }
+    if (this._onFundingRate) {
+      this.intxClient.off('fundingRate', this._onFundingRate);
+      this._onFundingRate = null;
     }
   }
 
@@ -497,6 +548,7 @@ export class PerpPositionManager extends EventEmitter {
 
     const closedSession = { ...session };
     this.currentSession = null;
+    this._fundingRateTracker.reset();
 
     // Execute any pending regime strategy switch now that position is closed
     if (this.pendingSwitch) {
@@ -621,6 +673,19 @@ export class PerpPositionManager extends EventEmitter {
     );
 
     return { restored, closedExternally };
+  }
+
+  // ── Funding helpers ───────────────────────────────────────────────────────
+
+  private _computeUnrealizedPnl(session: PerpSession, cumulativeFundingCost: string): string {
+    if (!session.markPrice) return cumulativeFundingCost;
+    const markPriceD = d(session.markPrice);
+    const entryD = d(session.entryPrice);
+    const sizeD = d(session.size);
+    const pricePnl = session.direction === 'long'
+      ? markPriceD.minus(entryD).mul(sizeD)
+      : entryD.minus(markPriceD).mul(sizeD);
+    return pricePnl.plus(d(cumulativeFundingCost)).toFixed(8);
   }
 
   // ── Regime auto-switch helpers ────────────────────────────────────────────

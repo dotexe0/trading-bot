@@ -16,10 +16,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PaperPerpEngine } from '../paper-perp-engine.js';
+import { FundingRateTracker } from '../funding-tracker.js';
 import type { IntxClient } from '../intx-client.js';
 import type { PerpStateStore } from '../perp-state-store.js';
 import type { IntxConfig } from '../config.js';
-import type { IntxMarkPriceEvent } from '../types.js';
+import type { IntxMarkPriceEvent, IntxFundingRateEvent } from '../types.js';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -92,6 +93,16 @@ function makeMarkPriceEvt(
     instrument,
     markPrice,
     indexPrice: markPrice,
+    timestamp: Date.now(),
+    isStale,
+  };
+}
+
+function makeFundingRateEvt(fundingRate: string, isStale = false): IntxFundingRateEvent {
+  return {
+    instrument: 'FCM',
+    fundingRate,
+    isFinal: false,
     timestamp: Date.now(),
     isStale,
   };
@@ -295,6 +306,81 @@ describe('PaperPerpEngine', () => {
 
       // placeOrder never called
       expect(intxClient.placeOrder).not.toHaveBeenCalled();
+    });
+  });
+
+  // ── Tests 7-8: FundingRateTracker wiring ──────────────────────────
+  describe('FundingRateTracker wiring', () => {
+    it('fundingUpdate event emitted on funding rate event with open position', async () => {
+      const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+      engine.start();
+
+      // Open long: size='0.1', entryPrice='100000'
+      await engine.openPaperPosition('BTC-PERP', 'long', '0.1', 5, '100000');
+
+      const fundingUpdateFn = vi.fn();
+      engine.on('fundingUpdate', fundingUpdateFn);
+
+      // Emit funding event: fundingRate='-25' (paid funding)
+      intxClient.emit('fundingRate', makeFundingRateEvt('-25'));
+
+      expect(fundingUpdateFn).toHaveBeenCalledOnce();
+      const payload = fundingUpdateFn.mock.calls[0][0];
+      expect(payload.cumulativeFundingCost).toBe('-25.00000000');
+      expect(payload.currentFundingRate).toBe('-25');
+
+      // updateSession called with cumulativeFundingCost
+      expect(stateStore.updateSession).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ cumulativeFundingCost: '-25.00000000' }),
+      );
+
+      engine.stop();
+    });
+
+    it('FUNDING_DRAIN_EXIT closes position when drain threshold exceeded', async () => {
+      // Inject a FundingRateTracker that always returns drainTriggered=true
+      const mockTracker = {
+        onFundingEvent: vi.fn().mockReturnValue({
+          currentFundingRate: '-50',
+          cumulativeFundingCost: '-50.00000000',
+          cumulativeFundingPct: '0.00500000',
+          drainTriggered: true,
+        }),
+        reset: vi.fn(),
+      } as unknown as FundingRateTracker;
+
+      const engine = new PaperPerpEngine({
+        intxClient,
+        stateStore,
+        config,
+        fundingTracker: mockTracker,
+      });
+      engine.start();
+
+      // Open long position
+      await engine.openPaperPosition('BTC-PERP', 'long', '0.1', 5, '100000');
+
+      const fundingDrainFn = vi.fn();
+      engine.on('fundingDrain', fundingDrainFn);
+
+      // Emit funding event — drain triggers immediately
+      intxClient.emit('fundingRate', makeFundingRateEvt('-50'));
+
+      // fundingDrain event emitted
+      expect(fundingDrainFn).toHaveBeenCalledOnce();
+
+      // updateSession called with closeReason=FUNDING_DRAIN_EXIT
+      expect(stateStore.updateSession).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ closeReason: 'FUNDING_DRAIN_EXIT' }),
+      );
+
+      // Position is closed
+      expect(engine.getCurrentSession()).toBeNull();
+      expect(engine.isPositionOpen()).toBe(false);
+
+      engine.stop();
     });
   });
 });
