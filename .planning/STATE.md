@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-08)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.4 Perpetual Futures Trading — Phase 31 in progress (Funding Rate Tracking), plan 2 of 3 done
+**Current focus:** v1.4 Perpetual Futures Trading — Phase 32 in progress (Perp Analytics and CLI Report), plan 1 of 2 complete
 
 ## Current Position
 
-Phase: 31 of 33 (Funding Rate Tracking) — in progress
-Plan: 2 of 3 complete in current phase
+Phase: 32 of 33 (Perp Analytics and CLI Report) — in progress
+Plan: 1 of 2 complete in current phase
 Status: Active
-Last activity: 2026-03-10 — 31-02 complete (FundingRateTracker wired into both engines, FUNDING_DRAIN_EXIT path, 62 tests passing)
+Last activity: 2026-03-10 — 32-01 complete (perpTrades table, recordTrade/listClosedTrades, wired into both close paths, 761 tests passing)
 
-Progress: [█████░░░░░] 82% of v1.4 (14/17 plans complete)
+Progress: [██████░░░░] 88% of v1.4 (15/17 plans complete)
 
 ## Performance Metrics
 
@@ -105,6 +105,9 @@ All v1.0, v1.1, v1.2, and v1.3 decisions logged in PROJECT.md Key Decisions tabl
 - 31-02: drain guard checks both _fundingDrainInProgress and _emergencyCloseInProgress — prevents concurrent close races
 - 31-02: unrealizedPnl updated on every funding event (pricePnl + cumulativeFundingCost) — FUNDING-02 satisfied inline
 - 31-02: _computeUnrealizedPnl falls back to cumulativeFundingCost when markPrice absent — defensive for early-session state
+- 32-01: cumulativeFundingCost stored as NOT NULL TEXT in perpTrades; callers pass '0.00000000' when no funding events fired — avoids null handling in analytics
+- 32-01: realizedPnl in closePosition() computed as pricePnl + fundingAdj using d() Decimal arithmetic, matching the paper engine formula
+- 32-01: rowToTrade() private mapper follows rowToSession()/rowToOrder() pattern for consistency across all perp store tables
 
 ### Open Issues / Tech Debt
 
@@ -118,5 +121,5 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-10
-Stopped at: Completed 31-02-PLAN.md (FundingRateTracker wired into both engines, 62 tests passing)
-Resume with: `/gsd:execute-phase 31` (Phase 31 plan 03: live perp engine funding integration)
+Stopped at: Completed 32-01-PLAN.md (perpTrades table, PerpTradeRecord, recordTrade/listClosedTrades, wired both close paths, 761 tests passing)
+Resume with: Execute 32-02-PLAN.md (CLI analytics report reading from listClosedTrades())
