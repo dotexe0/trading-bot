@@ -33,8 +33,10 @@ import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { CorrelationStore } from '../correlation/correlation-store.js';
 import { BacktestStore } from '../backtest/backtest-store.js';
-import { IntxClient } from '../perp/index.js';
+import { IntxClient, PaperPerpEngine, PerpPositionManager } from '../perp/index.js';
 import { PerpStateStore } from '../perp/perp-state-store.js';
+import { runPerpTournament } from '../perp/perp-tournament-runner.js';
+import type { Candle } from '../core/types.js';
 import type { EventEmitter } from 'node:events';
 import {
   ExitConfigOptimizer,
@@ -114,6 +116,7 @@ program
   .option('--port <port>', 'Dashboard port', '3001')
   .option('--skip-sync', 'Skip data sync step (for quick restarts)')
   .option('--skip-optimize', 'Skip exit config optimization step (uses cached configs if available)')
+  .option('--skip-perp-tournament', 'Skip perp tournament step (uses no regime leaderboards)')
   .option('--mode <mode>', 'Activation mode: paper or none', 'paper')
   .action(async (opts) => {
     // ── Step 0: Bootstrap ──────────────────────────────────────────
@@ -137,6 +140,7 @@ program
     const port = parseInt(opts.port, 10);
     const skipSync = opts.skipSync === true;
     const skipOptimize = opts.skipOptimize === true;
+    const skipPerpTournament = opts.skipPerpTournament === true;
     const mode = opts.mode as 'paper' | 'none';
 
     // Determine which pairs to trade: --pair overrides, otherwise all configured pairs
@@ -482,10 +486,127 @@ program
 
         await perpClient.start();
 
-        // INFRA-04: perp engine before intxClient in resources[] — engine stops first,
-        // then client, then dashboard (dashboard is pushed below and stays last).
-        // PaperPerpEngine instantiation is Phase 35 work — stub the resource entry now
-        // so shutdown ordering is established and tested.
+        // PIPE-01: Run perp tournament to get regime leaderboards
+        let perpRegimeLeaderboards: RegimeLeaderboards | undefined;
+        let perpActivationReady = false;
+
+        if (!skipPerpTournament) {
+          try {
+            const perpResult = await runPerpTournament({
+              pair: 'BTC-USD',
+              timeframe,
+              days,
+              capital,
+              topN,
+              mc: false,
+              dbPath: config.database.path,
+            });
+            perpRegimeLeaderboards = perpResult.regimeLeaderboards;
+            out.info(
+              `${perpResult.strategiesEvaluated} perp strategies evaluated in ${(perpResult.durationMs / 1000).toFixed(1)}s`,
+            );
+            for (const entry of perpResult.leaderboard.slice(0, topN)) {
+              const sharpe = entry.oosMetrics.sharpeRatio.toFixed(4);
+              out.table(`#${entry.rank}`, `${entry.strategyName} [PERP] (OOS Sharpe: ${sharpe})`);
+            }
+            const hasOosTrades = perpResult.leaderboard.some(
+              (e) => e.oosMetrics.totalTrades > 0,
+            );
+            if (hasOosTrades) {
+              out.success('Perp tournament complete');
+              perpActivationReady = true;
+            } else {
+              out.warn('Perp tournament produced zero OOS trades — perp engine will not activate');
+            }
+          } catch (perpErr) {
+            out.warn(
+              `Perp tournament failed: ${perpErr instanceof Error ? perpErr.message : String(perpErr)} — perp engine will not activate`,
+            );
+          }
+        } else {
+          out.info('Skipping perp tournament (--skip-perp-tournament)');
+          perpActivationReady = true;
+        }
+
+        // PIPE-02/03: Activate perp engine only when tournament succeeded with OOS trades
+        // (or --skip-perp-tournament was passed)
+        if (perpActivationReady) {
+          const fundingRateProvider = (): number | null => null;
+
+          const perpLiveFeed = new LiveDataFeed({
+            apiKey: config.coinbase.apiKeyName,
+            apiSecret: config.coinbase.apiKeySecret,
+          });
+
+          if (config.intx.perpMode === 'paper') {
+            // PIPE-02: PaperPerpEngine
+            const paperPerpEngine = new PaperPerpEngine({
+              intxClient: perpClient,
+              stateStore: perpStateStore!,
+              config: config.intx,
+              regimeLeaderboards: perpRegimeLeaderboards,
+              fundingRateProvider,
+            });
+
+            paperPerpEngine.start();
+            perpEngineEmitters.push(paperPerpEngine);
+
+            perpLiveFeed.on('candle', (candle: Candle) => {
+              paperPerpEngine.onCandle(candle);
+            });
+            perpLiveFeed.start(['BTC-USD'], undefined);
+
+            // INFRA-04: engine stops BEFORE perp-intx-client (engine pushed first)
+            resources.push({
+              name: 'paper-perp-engine',
+              stop: async () => {
+                paperPerpEngine.stop();
+                perpLiveFeed.stop();
+              },
+            });
+
+            out.table('  Activated', 'PaperPerpEngine [BTC-PERP]');
+          } else if (config.intx.perpMode === 'live') {
+            // PIPE-03: PerpPositionManager
+            const perpManager = new PerpPositionManager({
+              intxClient: perpClient,
+              stateStore: perpStateStore!,
+              config: config.intx,
+              regimeLeaderboards: perpRegimeLeaderboards,
+              fundingRateProvider,
+            });
+
+            // PIPE-03: recoverFromRestart() BEFORE start()
+            const recovery = await perpManager.recoverFromRestart();
+            if (recovery.restored) {
+              out.info('PerpPositionManager: open position restored from previous run');
+            }
+            if (recovery.closedExternally) {
+              out.warn('PerpPositionManager: position was closed externally since last run');
+            }
+
+            perpManager.start();
+            perpEngineEmitters.push(perpManager);
+
+            perpLiveFeed.on('candle', (candle: Candle) => {
+              perpManager.onCandle(candle);
+            });
+            perpLiveFeed.start(['BTC-USD'], undefined);
+
+            // INFRA-04: engine stops BEFORE perp-intx-client
+            resources.push({
+              name: 'perp-position-manager',
+              stop: async () => {
+                perpManager.stop();
+                perpLiveFeed.stop();
+              },
+            });
+
+            out.table('  Activated', 'PerpPositionManager [BTC-PERP] (live)');
+          }
+        }
+
+        // INFRA-04: perp-intx-client always pushed after engine (engine stops first, then client, then dashboard)
         resources.push({
           name: 'perp-intx-client',
           stop: async () => perpClient.stop(),
