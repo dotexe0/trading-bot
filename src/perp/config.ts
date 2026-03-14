@@ -37,12 +37,20 @@ export const fcmConfigSchema = z
     perpExposureCapPct: z.number().min(0.1).max(1.0).default(0.5),
     perpMaxLossPct: z.number().min(0.001).max(0.2).default(0.02),
     fundingDrainThresholdPct: z.number().min(0.001).max(0.1).default(0.005),
+    perpMode: z.enum(['paper', 'live', 'none']).default('none'),
   })
   .refine(
     (data) => !data.enabled || (!!data.apiKey && !!data.apiSecret),
     {
       message: 'COINBASE_API_KEY_NAME and COINBASE_API_KEY_SECRET are required when FCM_ENABLED=true',
       path: ['apiKey'],
+    },
+  )
+  .refine(
+    (data) => data.perpMode === 'none' || data.enabled === true,
+    {
+      message: 'FCM_ENABLED=true is required when PERP_MODE is paper or live',
+      path: ['perpMode'],
     },
   );
 

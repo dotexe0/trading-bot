@@ -21,6 +21,9 @@ const configSchema = z.object({
   database: z.object({
     path: z.string().default('./data/trading.db'),
   }),
+  perpDatabase: z.object({
+    path: z.string().default('./data/perp.db'),
+  }),
   data: z.object({
     pairs: z
       .array(z.enum(['BTC-USD', 'ETH-USD']))
@@ -50,6 +53,8 @@ export type Config = z.infer<typeof configSchema>;
  * - LOG_LEVEL -> logging.level
  * - FCM_ENABLED -> intx.enabled (default false)
  * - FCM_TESTNET -> intx.testnet (default false)
+ * - PERP_MODE -> intx.perpMode (default 'none', options: 'none'|'paper'|'live')
+ * - PERP_DB_PATH -> perpDatabase.path (default './data/perp.db')
  * (FCM reuses COINBASE_API_KEY_NAME / COINBASE_API_KEY_SECRET — no separate FCM keys needed)
  *
  * @throws ConfigError on validation failure
@@ -68,6 +73,9 @@ export function loadConfig(): Config {
     database: {
       path: env.DB_PATH ?? './data/trading.db',
     },
+    perpDatabase: {
+      path: env.PERP_DB_PATH ?? './data/perp.db',
+    },
     data: {
       pairs: env.TRADING_PAIRS
         ? env.TRADING_PAIRS.split(',').map((s) => s.trim())
@@ -82,6 +90,7 @@ export function loadConfig(): Config {
       apiKey: env.COINBASE_API_KEY_NAME,
       apiSecret: env.COINBASE_API_KEY_SECRET,
       testnet: env.FCM_TESTNET === 'true',
+      perpMode: env.PERP_MODE ?? 'none',
     },
   };
 
