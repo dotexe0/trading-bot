@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A quant-grade cryptocurrency trading bot targeting Coinbase Advanced Trade API, built with TypeScript/Node.js. It runs automated trading strategies on BTC-USD and ETH-USD, selected through empirical backtesting tournaments with walk-forward validation. The system covers the full lifecycle: historical data ingestion, technical indicator computation, strategy evaluation, backtesting, Monte Carlo robustness testing, risk management with correlation-aware sizing, paper trading, live trading, regime-aware tournament-based strategy selection, live strategy auto-switching, exit parameter optimization, and a real-time web dashboard. Running `npm start` executes the full adaptive pipeline end-to-end.
+A quant-grade cryptocurrency trading bot targeting Coinbase Advanced Trade API, built with TypeScript/Node.js. It runs automated trading strategies on BTC-USD, ETH-USD, BTC-PERP, and ETH-PERP, selected through empirical backtesting tournaments with walk-forward validation. The system covers the full lifecycle: historical data ingestion, technical indicator computation, strategy evaluation, backtesting, Monte Carlo robustness testing, risk management with correlation-aware sizing, paper trading, live trading, regime-aware tournament-based strategy selection, live strategy auto-switching, exit parameter optimization, perpetual futures trading with leverage/margin management and funding rate tracking, separate analytics, and a real-time web dashboard with perp panels. Running `npm start` executes the full adaptive pipeline end-to-end.
 
 ## Core Value
 
@@ -44,10 +44,36 @@ The bot must reliably execute trades with correct position sizing, risk limits, 
 - ✓ Regime-aware tournament: separate TRENDING/RANGING/VOLATILE leaderboards — v1.3
 - ✓ Live auto-switching: engine swaps to regime's best strategy on change, defers if position open, 10-candle cooldown — v1.3
 - ✓ `npm start` extended to 4-step pipeline: sync → optimize exits → regime tournament → dashboard — v1.3
+- ✓ FCM connectivity via Advanced Trade API; IntxClient wraps CBAdvancedTradeClient for perp isolation — v1.4
+- ✓ WebSocket streams for real-time mark price, index price, and funding rate (BTC-PERP, ETH-PERP) — v1.4
+- ✓ `npm run perp:status` — FCM account balance, available margin, and open positions — v1.4
+- ✓ PerpPositionManager: open/close/emergency-close long and short positions with pre-entry liquidation logging — v1.4
+- ✓ PaperPerpEngine: mark-price-driven perp simulation with zero REST calls — v1.4
+- ✓ Crash recovery: recoverFromRestart() reconciles DB sessions with FCM on restart — v1.4
+- ✓ Post-only limit entry loop with cancel-and-reprice; NON_RETRYABLE_REASONS abort immediately — v1.4
+- ✓ TP limit order + ATR trailing stop-limit ratchet; full order cleanup on position close — v1.4
+- ✓ computeLeverage() and getMarginMode(): regime + conviction → integer leverage; isolated/cross policy — v1.4
+- ✓ PerpRiskGate: margin utilization, exposure cap, and max-loss gate before every order — v1.4
+- ✓ PerpMomentumStrategy + PerpMeanReversionStrategy: LONG/SHORT signals with funding-rate confidence adjustment — v1.4
+- ✓ `npm run tournament:perp` — perp-specific walk-forward tournament with separate leaderboard — v1.4
+- ✓ Regime auto-switch in PaperPerpEngine and PerpPositionManager with 10-candle cooldown — v1.4
+- ✓ FundingRateTracker: cumulative cost per position, FUNDING_DRAIN_EXIT trigger — v1.4
+- ✓ perpTrades SQLite table; `npm run report --type perp` with directional win rate, leverage, funding stats — v1.4
+- ✓ Dashboard perp panels: PerpPositionsPanel, PerpFundingPanel, PerpLeverageMeter via WebSocket — v1.4
+
+- ✓ `perpMode` (paper|live|none) in FCM config schema with cross-field refine — PERP_MODE=live without FCM_ENABLED fails at startup — v1.5
+- ✓ PerpStateStore isolated to `data/perp.db` (separate from `data/trading.db`) — prevents SQLITE_BUSY — v1.5
+- ✓ IntxClient error listener registered before `.start()` — transient FCM errors no longer crash the process — v1.5
+- ✓ Correct shutdown ordering: perp engine → IntxClient → dashboard — no "Database is not open" on exit — v1.5
+- ✓ `npm start` runs perp tournament (PIPE-01) and captures regime leaderboards for engine use — v1.5
+- ✓ `npm start` launches PaperPerpEngine with BTC-USD candle routing when PERP_MODE=paper — v1.5
+- ✓ `npm start` launches PerpPositionManager with recoverFromRestart() when PERP_MODE=live — v1.5
+- ✓ `--skip-perp-tournament` flag skips tournament step, activates engine without leaderboards — v1.5
+- ✓ Zero-trade guard: engine does not activate when perp tournament produces no OOS trades — v1.5
 
 ### Active
 
-(None — v1.3 milestone complete. Planning v1.4 next.)
+<!-- v1.6 and beyond — to be defined with /gsd:new-milestone -->
 
 ### Out of Scope
 
@@ -58,23 +84,26 @@ The bot must reliably execute trades with correct position sizing, risk limits, 
 - Cloud deployment — runs locally, cloud is a future consideration
 - AI/ML price prediction — overfitting trap for personal use
 - Multi-exchange support — Coinbase only reduces complexity
-- Options/futures — different instruments with different risk models
+- Options (calls/puts) — different pricing model (Black-Scholes, Greeks); deferred to v2.0+
 - Advanced analytics (Sortino, Calmar, Omega) — deferred to v2.0+
 
 ## Context
 
-Shipped v1.3 with ~35,000 LOC TypeScript across ~220 files, 638 tests.
+Shipped v1.4 with ~65,166 LOC TypeScript across 78 test files, 1,122 tests.
 
 **v1.0 baseline:** 55,764 LOC, 149 files, 773 tests
 **v1.1 additions:** +5,520 net lines, 68 files changed, 444 tests passing
 **v1.2 additions:** +3,340 net lines, 30 files changed, 527 tests passing
 **v1.3 additions:** +4,225 net lines, 49 files changed, 638 tests passing
+**v1.4 additions:** +11,542 net lines, 66 files changed, 1,122 tests passing
 
 **Tech stack:** TypeScript/Node.js (ESM), better-sqlite3 + Drizzle ORM, Fastify + React 19 + Vite 6, Lightweight Charts v5, decimal.js, simple-statistics, fast-technical-indicators, coinbase-api (tiagosiebler), Zod v4, Pino, Vitest.
 
-**Architecture:** Event-driven with interface abstraction — strategy code runs identically in backtest, paper, and live modes. EventEmitter pipeline connects trading engines to dashboard via WebSocket. All subsystems in a single Node.js process (avoids SQLite BUSY). ExitLogicManager is stateful per-position, instantiated at entry, providing priority-ordered exits (partial > trailing > atrStop > time) across all engines. Auto-switching state machine in paper/live engines consults regimeLeaderboards on every candle, defers swaps while positions are open, and enforces a 10-candle cooldown.
+**Architecture:** Event-driven with interface abstraction — strategy code runs identically in backtest, paper, and live modes. EventEmitter pipeline connects trading engines to dashboard via WebSocket. All subsystems in a single Node.js process (avoids SQLite BUSY). ExitLogicManager is stateful per-position, instantiated at entry, providing priority-ordered exits (partial > trailing > atrStop > time) across all engines. Auto-switching state machine in spot and perp engines consults regimeLeaderboards on every candle, defers swaps while positions are open, and enforces a 10-candle cooldown. Perp system runs alongside spot: PerpPositionManager handles live FCM orders, PaperPerpEngine handles simulation (zero REST calls), PerpRiskGate gates every entry, and FundingRateTracker monitors drain exit triggers. `npm start` runs the full adaptive pipeline: sync → optimize exits → spot tournament → perp tournament → activate engines → dashboard.
 
-**Test coverage:** 638 tests across 53 test files (all passing).
+**v1.5 additions:** +446/−113 lines, 11 files changed, 789 tests passing (11 new structural tests).
+
+**Test coverage:** 789 tests across 64 test files (all passing).
 
 ## Constraints
 
@@ -117,6 +146,19 @@ Shipped v1.3 with ~35,000 LOC TypeScript across ~220 files, 638 tests.
 | First undefined-to-known transition does NOT switch (v1.3) | Requires currentRegime !== undefined to trigger | ✓ Good — prevents spurious switch on first candle |
 | ExitLogicManager cleared on strategy switch (v1.3) | State never transferred across strategies | ✓ Good — prevents stale exit state corrupting new strategy |
 | checkAndExecutePendingSwitch at all close paths (v1.3) | Paper: 3 close paths; Live: onOrderFilled EXIT/STOP_LOSS | ✓ Good — deferred switch fires reliably on position close |
+| CBAdvancedTradeClient for FCM (v1.4) | FCM available via Advanced Trade API using same spot credentials; no separate CBInternationalClient needed | ✓ Good — single credential set, simpler auth path |
+| IOC MARKET orders only for perp entry/exit (v1.4) | No partial fills to track; simplifies position state management | ✓ Good — clean fill semantics, no partial-fill edge cases |
+| PaperPerpEngine separate from PerpPositionManager (v1.4) | Guarantees zero REST calls in paper path; no placeOrder/cancelOrder in simulation | ✓ Good — safe to run paper without FCM credentials |
+| Bot-internal leverage and margin mode (v1.4) | Coinbase FCM has no setLeverage or setMarginMode API; values are sizing policy only | ✓ Good — avoids confusion; explicit in logs |
+| PerpRiskGate optional injection on both engines (v1.4) | null when absent; zero breaking changes for existing callers | ✓ Good — backward-compat; risk gate is opt-in |
+| No blended P&L metric in report (v1.4) | Spot and perp P&L separate; early return enforces separation | ✓ Good — no accidental cross-contamination of performance |
+| PERP_EVENT_MAP local const (v1.4) | Not merged into ENGINE_EVENT_MAP; prevents spot event name collisions | ✓ Good — clean isolation between spot and perp event pipelines |
+| createLivePerpRegistry(provider) factory (v1.4) | Injects real funding callback so funding adjustment fires at runtime; null in tournament | ✓ Good — decoupled; tournament mode and live mode use same strategies |
+| FundingRateTracker optional injection (v1.4) | Test control without real notional math; drain guard checks both drain and emergency flags | ✓ Good — concurrent close races prevented |
+| perpMode chained .refine() on fcmConfigSchema (v1.5) | Not .omit() — documented Zod v4 pitfall breaks refined schemas | ✓ Good — clean cross-field validation |
+| perpActivationReady boolean sentinel (v1.5) | Avoids double resources.push and sentinel-undefined confusion in zero-trade and error paths | ✓ Good — clear activation gate |
+| fundingRateProvider = () => null in npm start (v1.5) | FCM funding rate not yet integrated into start.ts; FundingRateTracker handles drain internally via events | ✓ Good — correct for paper mode; live can wire later |
+| Separate data/perp.db for PerpStateStore (v1.5) | Prevents SQLITE_BUSY with concurrent spot tournament writes | ✓ Good — zero contention confirmed |
 
 ---
-*Last updated: 2026-03-08 after v1.3 milestone*
+*Last updated: 2026-03-14 after v1.5 milestone — Perp End-to-End Integration shipped*

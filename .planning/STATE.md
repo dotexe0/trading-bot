@@ -11,10 +11,10 @@ See: .planning/PROJECT.md (updated 2026-03-13)
 
 Phase: 35 of 35 (Perp Paper Trading Pipeline)
 Plan: 2 of 2 in current phase
-Status: In progress
-Last activity: 2026-03-14 — Phase 35 Plan 01 complete (PIPE-01/02/03 wired into start.ts, perp tournament + engine activation, 778 tests passing)
+Status: Complete
+Last activity: 2026-03-14 — Phase 35 Plan 02 complete (PIPE-01/02/03 structural tests, 789 tests passing, v1.5 milestone complete)
 
-Progress: [████░░░░░░] 50% of v1.5
+Progress: [██████████] 100% of v1.5
 
 ## Performance Metrics
 
@@ -53,6 +53,10 @@ All v1.0–v1.4 decisions logged in PROJECT.md Key Decisions table.
 - fundingRateProvider = () => null in npm start is correct for paper mode (FCM funding rate not yet integrated)
 - perpLiveFeed declared inside if (perpActivationReady) block — avoids unnecessary WebSocket connections when not activating
 
+**v1.5 Phase 35 Plan 02 decisions:**
+- Used /await createDashboardServer\s*\(/ regex (not /createDashboardServer/) to skip import line — lineOf() must match call site not import
+- Math.min(paperLine, liveLine) < clientLine pattern for mutually-exclusive if/else branch ordering tests
+
 ### Open Issues / Tech Debt
 
 - fast-technical-indicators createRequire workaround (inherited, low priority)
@@ -66,4 +70,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Completed 35-01-PLAN.md (PIPE-01/02/03 perp tournament + engine activation wired into start.ts, zero-trade guard, --skip-perp-tournament flag)
+Stopped at: Completed 35-02-PLAN.md (PIPE-01/02/03 structural tests, 789 tests passing, v1.5 Perp End-to-End Integration milestone complete)
