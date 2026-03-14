@@ -33,6 +33,8 @@ import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { CorrelationStore } from '../correlation/correlation-store.js';
 import { BacktestStore } from '../backtest/backtest-store.js';
+import { IntxClient } from '../perp/index.js';
+import { PerpStateStore } from '../perp/perp-state-store.js';
 import type { EventEmitter } from 'node:events';
 import {
   ExitConfigOptimizer,
@@ -55,6 +57,7 @@ const resources: Stoppable[] = [];
 let isShuttingDown = false;
 let correlationStore: CorrelationStore | undefined;
 let backtestStore: BacktestStore | undefined;
+let perpStateStore: PerpStateStore | undefined;
 
 // ── Graceful shutdown ──────────────────────────────────────────────
 
@@ -84,6 +87,7 @@ async function gracefulShutdown(
 
   try { correlationStore?.close(); } catch { /* ignore */ }
   try { backtestStore?.close(); } catch { /* ignore */ }
+  try { perpStateStore?.close(); } catch { /* ignore */ }
 
   try {
     dbClose();
@@ -464,6 +468,30 @@ program
         return { sessionId: session.id };
       };
 
+      // ── Perp engine wiring (INFRA-03: error listener, INFRA-04: shutdown order) ──
+      if (config.intx.enabled && config.intx.perpMode !== 'none') {
+        const perpClient = new IntxClient(config.intx);
+
+        // INFRA-03: error listener MUST be registered before .start() to prevent
+        // Node.js from throwing an uncaught exception on unhandled 'error' events.
+        perpClient.on('error', (err: Error) => {
+          out.warn(`IntxClient error — perp subsystem affected, spot continues: ${err.message}`);
+        });
+
+        perpStateStore = new PerpStateStore({ dbPath: config.perpDatabase.path });
+
+        await perpClient.start();
+
+        // INFRA-04: perp engine before intxClient in resources[] — engine stops first,
+        // then client, then dashboard (dashboard is pushed below and stays last).
+        // PaperPerpEngine instantiation is Phase 35 work — stub the resource entry now
+        // so shutdown ordering is established and tested.
+        resources.push({
+          name: 'perp-intx-client',
+          stop: async () => perpClient.stop(),
+        });
+      }
+
       const server = await createDashboardServer(dashboardConfig, {
         liveStateStore,
         sessionStore,
@@ -476,7 +504,7 @@ program
         repo,
         paperEngines,
         perpEngines: perpEngineEmitters,
-        perpStateStore: undefined,
+        perpStateStore,
       });
 
       await server.start();
