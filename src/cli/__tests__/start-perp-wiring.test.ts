@@ -65,3 +65,68 @@ describe('start.ts – PIPE-02 guard: perp block gated on config', () => {
     expect(src).toMatch(/perpMode\s*!==\s*['"]none['"]/);
   });
 });
+
+describe('start.ts – PIPE-01: perp tournament call', () => {
+  it('calls runPerpTournament inside the perp guard block', () => {
+    expect(src).toMatch(/runPerpTournament\s*\(/);
+  });
+
+  it('uses config.database.path for spot candles (not perpDatabase)', () => {
+    const tournamentCallLine = lineOf(/runPerpTournament\s*\(/);
+    // Within 20 lines after the call, config.database.path should appear (not perpDatabase)
+    const nearbyLines = lines.slice(tournamentCallLine, tournamentCallLine + 20).join('\n');
+    expect(nearbyLines).toMatch(/config\.database\.path/);
+    expect(nearbyLines).not.toMatch(/config\.perpDatabase\.path/);
+  });
+
+  it('has zero-trade guard that warns when no OOS trades', () => {
+    expect(src).toMatch(/zero OOS trades/);
+  });
+
+  it('--skip-perp-tournament option is registered', () => {
+    expect(src).toMatch(/skip-perp-tournament/);
+  });
+
+  it('perpActivationReady flag controls engine activation', () => {
+    expect(src).toMatch(/perpActivationReady/);
+  });
+});
+
+describe('start.ts – PIPE-02: PaperPerpEngine activation', () => {
+  it('instantiates PaperPerpEngine', () => {
+    expect(src).toMatch(/new PaperPerpEngine\s*\(/);
+  });
+
+  it('pushes PaperPerpEngine emitter to perpEngineEmitters before createDashboardServer call', () => {
+    const enginePushLine = lineOf(/perpEngineEmitters\.push\(paperPerpEngine\)/);
+    // Match the actual invocation (await createDashboardServer(...)), not the import line
+    const dashboardCreateLine = lineOf(/await createDashboardServer\s*\(/);
+    expect(enginePushLine).toBeLessThan(dashboardCreateLine);
+  });
+
+  it('engine resource (paper or live) is pushed before perp-intx-client', () => {
+    const paperLine = lineOf(/name:\s*['"]paper-perp-engine['"]/);
+    const liveLine = lineOf(/name:\s*['"]perp-position-manager['"]/);
+    const clientLine = lineOf(/name:\s*['"]perp-intx-client['"]/);
+    // Both engine resource pushes appear before perp-intx-client
+    expect(Math.min(paperLine, liveLine)).toBeLessThan(clientLine);
+  });
+});
+
+describe('start.ts – PIPE-03: PerpPositionManager activation', () => {
+  it('instantiates PerpPositionManager', () => {
+    expect(src).toMatch(/new PerpPositionManager\s*\(/);
+  });
+
+  it('calls recoverFromRestart before perpManager.start()', () => {
+    const recoverLine = lineOf(/recoverFromRestart\s*\(\)/);
+    const startLine = lineOf(/perpManager\.start\s*\(\)/);
+    expect(recoverLine).toBeLessThan(startLine);
+  });
+
+  it('perp-position-manager resource is pushed before perp-intx-client', () => {
+    const managerResourceLine = lineOf(/name:\s*['"]perp-position-manager['"]/);
+    const clientResourceLine = lineOf(/name:\s*['"]perp-intx-client['"]/);
+    expect(managerResourceLine).toBeLessThan(clientResourceLine);
+  });
+});

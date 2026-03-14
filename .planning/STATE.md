@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-13)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v1.5 Perp End-to-End Integration — Phase 34: Perp Infrastructure Foundation
+**Current focus:** v1.5 Perp End-to-End Integration — Phase 35: Pipeline Wiring and Activation
 
 ## Current Position
 
-Phase: 34 of 35 (Perp Infrastructure Foundation)
-Plan: 1 of 2 in current phase
+Phase: 35 of 35 (Perp Paper Trading Pipeline)
+Plan: 2 of 2 in current phase
 Status: In progress
-Last activity: 2026-03-14 — Phase 34 Plan 01 complete (INFRA-01 perpMode validation, INFRA-02 DB isolation, INFRA-03 partial)
+Last activity: 2026-03-14 — Phase 35 Plan 01 complete (PIPE-01/02/03 wired into start.ts, perp tournament + engine activation, 778 tests passing)
 
-Progress: [█░░░░░░░░░] 5% of v1.5
+Progress: [████░░░░░░] 50% of v1.5
 
 ## Performance Metrics
 
@@ -43,6 +43,16 @@ All v1.0–v1.4 decisions logged in PROJECT.md Key Decisions table.
 - PERP_MODE=none (default) allows spot-only users to run without FCM credentials — perp dormant
 - intxClient.on('error') registered before start() in perp-paper.ts (INFRA-03 for perp-paper CLI)
 
+**v1.5 Phase 34 Plan 02 decisions:**
+- Perp wiring block placed before createDashboardServer call — dashboard resources.push stays last (INFRA-04)
+- perpStateStore?.close() added after correlationStore/backtestStore closes in gracefulShutdown finally block
+- Structural tests use lineOf(regex) helper to assert ordering invariants without process execution overhead
+
+**v1.5 Phase 35 Plan 01 decisions:**
+- perpActivationReady boolean flag used as activation sentinel — avoids double resource.push and sentinel-undefined confusion
+- fundingRateProvider = () => null in npm start is correct for paper mode (FCM funding rate not yet integrated)
+- perpLiveFeed declared inside if (perpActivationReady) block — avoids unnecessary WebSocket connections when not activating
+
 ### Open Issues / Tech Debt
 
 - fast-technical-indicators createRequire workaround (inherited, low priority)
@@ -56,4 +66,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-14
-Stopped at: Completed 34-01-PLAN.md (INFRA-01 perpMode validation, INFRA-02 DB isolation, 9 new tests, 80 perp tests passing)
+Stopped at: Completed 35-01-PLAN.md (PIPE-01/02/03 perp tournament + engine activation wired into start.ts, zero-trade guard, --skip-perp-tournament flag)
