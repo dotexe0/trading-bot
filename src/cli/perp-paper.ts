@@ -33,7 +33,7 @@ if (!config.intx.enabled) {
 }
 
 const intxClient = new IntxClient(config.intx);
-const stateStore = new PerpStateStore({ dbPath: config.database.path });
+const stateStore = new PerpStateStore({ dbPath: config.perpDatabase.path });
 const paperEngine = new PaperPerpEngine({ intxClient, stateStore, config: config.intx });
 
 // Wire up event listeners before starting
@@ -50,6 +50,9 @@ paperEngine.on('liquidationDistance', (detail) => {
 });
 
 // Start WebSocket and paper engine
+intxClient.on('error', (err: Error) => {
+  log.warn({ err: err.message }, '[PAPER] IntxClient error — continuing');
+});
 await intxClient.start();
 paperEngine.start();
 

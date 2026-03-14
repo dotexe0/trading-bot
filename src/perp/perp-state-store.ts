@@ -44,7 +44,7 @@ export class PerpStateStore {
   private sqlite: Database.Database;
 
   constructor(options: { dbPath?: string } = {}) {
-    const dbPath = options.dbPath ?? 'data/trading.db';
+    const dbPath = options.dbPath ?? 'data/perp.db';
     const conn = createDatabase(dbPath);
     this.db = conn.db;
     this.sqlite = conn.sqlite;
