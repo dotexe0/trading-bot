@@ -395,11 +395,14 @@ export class PaperPerpEngine extends EventEmitter {
       const stopPct = d(String(stopDistancePct ?? 0.02));
       const proposedNotional = d(size).mul(d(markPrice));
       const proposedMaxLoss = proposedNotional.mul(stopPct);
+      const tpPct = d(String(this.config.tpTargetPct ?? 2.0)).div(d('100'));
+      const expectedGain = proposedNotional.mul(tpPct);
       const gateResult = await this._riskGate.check({
         instrument,
         proposedNotional: proposedNotional.toFixed(8),
         proposedMaxLoss: proposedMaxLoss.toFixed(8),
         accountValue: accountValue ?? '1000000',
+        expectedGain: expectedGain.toFixed(8),
       });
       if (!gateResult.approved) {
         throw new Error(`PerpRiskGate rejected paper entry: ${gateResult.rejectReason}`);

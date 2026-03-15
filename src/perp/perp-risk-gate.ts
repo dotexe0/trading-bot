@@ -1,10 +1,11 @@
 /**
  * PerpRiskGate — pre-entry risk guard for perpetual futures positions.
  *
- * Runs three sequential checks before any entry (live or paper):
+ * Runs four sequential checks before any entry (live or paper):
  *  1. Margin utilization ceiling — rejects if current utilization >= configured ceiling
  *  2. Total exposure cap — rejects if total open notional would exceed account value * perpExposureCapPct
  *  3. Per-trade max loss — rejects if proposedMaxLoss > account value * perpMaxLossPct
+ *  4. Fee drag — rejects if expectedGain <= round-trip taker fee (2 * takerFeeRate * notional)
  *
  * Balance summary REST calls are cached for 5 seconds to avoid per-entry hammering.
  * In paper mode, a mock healthy balance is returned so REST calls are never made.
@@ -112,10 +113,10 @@ export class PerpRiskGate {
   // ── Public: check ────────────────────────────────────────────────────────
 
   /**
-   * Run three sequential risk checks.
+   * Run four sequential risk checks.
    * Returns on first failure — subsequent checks are not evaluated.
    *
-   * @param params - Proposed trade parameters (instrument, notional, max loss, account value)
+   * @param params - Proposed trade parameters (instrument, notional, max loss, account value, expected gain)
    * @returns RiskGateResult with approved:true or approved:false + rejectReason
    */
   async check(params: PerpRiskGateParams): Promise<RiskGateResult> {
@@ -214,6 +215,28 @@ export class PerpRiskGate {
       };
     }
 
+    // ── Check 4: Fee drag ────────────────────────────────────────────────────
+    const takerRate = d(String(this._feeConfig.takerFeeRate));
+    const roundTripFee = takerRate.mul(d('2')).mul(d(params.proposedNotional));
+    if (d(params.expectedGain).lte(roundTripFee)) {
+      log.warn(
+        {
+          expectedGain: params.expectedGain,
+          roundTripFee: roundTripFee.toFixed(6),
+          instrument: params.instrument,
+        },
+        'FEE_DRAG_EXCESSIVE: perp entry rejected',
+      );
+      return {
+        approved: false,
+        rejectReason: 'FEE_DRAG_EXCESSIVE',
+        details: {
+          expectedGain: params.expectedGain,
+          roundTripFee: roundTripFee.toFixed(6),
+        },
+      };
+    }
+
     // ── All checks passed ────────────────────────────────────────────────────
     log.info(
       {
@@ -221,6 +244,8 @@ export class PerpRiskGate {
         utilization: utilization.toFixed(4),
         totalNotional: totalNotional.toFixed(2),
         proposedMaxLoss: params.proposedMaxLoss,
+        expectedGain: params.expectedGain,
+        roundTripFee: roundTripFee.toFixed(6),
       },
       'PerpRiskGate: entry approved',
     );

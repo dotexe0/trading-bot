@@ -402,11 +402,14 @@ export class PerpPositionManager extends EventEmitter {
       const proposedNotional = d(size).mul(d(entryPrice));
       const proposedMaxLoss = proposedNotional.mul(stopPct);
       const accountVal = params.accountValue ?? '0';
+      const tpPct = d(String(this.config.tpTargetPct ?? 2.0)).div(d('100'));
+      const expectedGain = proposedNotional.mul(tpPct);
       const gateResult = await this._riskGate.check({
         instrument,
         proposedNotional: proposedNotional.toFixed(8),
         proposedMaxLoss: proposedMaxLoss.toFixed(8),
         accountValue: accountVal,
+        expectedGain: expectedGain.toFixed(8),
       });
       if (!gateResult.approved) {
         throw new Error(`PerpRiskGate rejected entry: ${gateResult.rejectReason}`);
