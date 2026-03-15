@@ -21,7 +21,7 @@ import { BacktestEngine } from '../backtest/engine.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { IndicatorEngine } from '../indicators/engine.js';
-import type { FeeConfig } from './fee-config.js';
+import { FCM_FALLBACK_TAKER_RATE, FCM_FALLBACK_MAKER_RATE, type FeeConfig } from './fee-config.js';
 
 export interface PerpTournamentOptions {
   /** Trading pair for candle source (perp tournament uses BTC-USD spot candles) */
@@ -106,8 +106,8 @@ export async function runPerpTournament(
       initialCapital: opts.capital,
       topN: opts.topN,
       activationMode: 'none',
-      feeTierTaker: opts.feeConfig?.takerFeeRate,   // undefined → Zod default (0.0075)
-      feeTierMaker: opts.feeConfig?.makerFeeRate,   // undefined → Zod default (0.0035)
+      feeTierTaker: opts.feeConfig?.takerFeeRate ?? FCM_FALLBACK_TAKER_RATE,
+      feeTierMaker: opts.feeConfig?.makerFeeRate ?? FCM_FALLBACK_MAKER_RATE,
       walkForward: {
         trainWindowMs,
         validateWindowMs,
