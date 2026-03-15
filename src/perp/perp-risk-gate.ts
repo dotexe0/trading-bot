@@ -14,6 +14,8 @@
 
 import { d, ZERO } from '../core/decimal.js';
 import { createModuleLogger } from '../core/logger.js';
+import { DEFAULT_FEE_CONFIG } from './fee-config.js';
+import type { FeeConfig } from './fee-config.js';
 import type { FcmConfig } from './config.js';
 import type { IntxClient } from './intx-client.js';
 import type { PerpStateStore } from './perp-state-store.js';
@@ -30,6 +32,7 @@ export interface PerpRiskGateOptions {
   intxClient: IntxClient;
   stateStore: PerpStateStore;
   config: FcmConfig;
+  feeConfig?: FeeConfig;    // optional — defaults to DEFAULT_FEE_CONFIG when absent
   /** When true, skips all REST calls — uses mock healthy balance and in-process notional. Default: false. */
   paperMode?: boolean;
 }
@@ -47,6 +50,7 @@ export class PerpRiskGate {
   private _intxClient: IntxClient;
   private _stateStore: PerpStateStore;
   private _config: FcmConfig;
+  private _feeConfig: FeeConfig;
   private _paperMode: boolean;
 
   private _cachedBalance: CachedBalance | null = null;
@@ -56,6 +60,7 @@ export class PerpRiskGate {
     this._intxClient = options.intxClient;
     this._stateStore = options.stateStore;
     this._config = options.config;
+    this._feeConfig = options.feeConfig ?? DEFAULT_FEE_CONFIG;
     this._paperMode = options.paperMode ?? false;
   }
 

@@ -167,7 +167,7 @@ export interface PerpOrderEngineEvents {
 /** Result of a PerpRiskGate check. */
 export interface RiskGateResult {
   approved: boolean;
-  rejectReason?: 'MARGIN_UTILIZATION_EXCEEDED' | 'EXPOSURE_CAP_EXCEEDED' | 'MAX_LOSS_EXCEEDED';
+  rejectReason?: 'MARGIN_UTILIZATION_EXCEEDED' | 'EXPOSURE_CAP_EXCEEDED' | 'MAX_LOSS_EXCEEDED' | 'FEE_DRAG_EXCESSIVE';
   details: Record<string, string>;
 }
 
@@ -177,6 +177,7 @@ export interface PerpRiskGateParams {
   proposedNotional: string; // decimal string: size * entryPrice (before leverage divisor)
   proposedMaxLoss: string;  // decimal string: proposedNotional * stopDistancePct
   accountValue: string;     // decimal string: total FCM account equity
+  expectedGain: string;     // decimal string: estimated gain for this trade (e.g. notional * tpTargetPct / 100)
 }
 
 // ── Config re-export ─────────────────────────────────────────────────
