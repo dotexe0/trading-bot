@@ -138,6 +138,7 @@ function makeSyntheticBacktestResult(
     equityCurve,
     finalEquity: d(equity),
     totalFees: d(0),
+    fundingCost: ZERO,
     startTimestamp: 1700000000000,
     endTimestamp: 1700000000000 + 90 * DAY_MS,
   };
@@ -360,6 +361,7 @@ describe('MonteCarloEngine', () => {
         equityCurve,
         finalEquity: d(equity),
         totalFees: d(0),
+        fundingCost: ZERO,
         startTimestamp: 1700000000000,
         endTimestamp: 1700000000000 + 90 * DAY_MS,
       };
@@ -399,6 +401,7 @@ describe('MonteCarloEngine', () => {
         equityCurve,
         finalEquity: d(equity),
         totalFees: d(0),
+        fundingCost: ZERO,
         startTimestamp: 1700000000000,
         endTimestamp: 1700000000000 + 90 * DAY_MS,
       };

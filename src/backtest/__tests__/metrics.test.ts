@@ -91,6 +91,7 @@ function makeResult(overrides: Partial<BacktestResult> = {}): BacktestResult {
     equityCurve: [],
     finalEquity: d(10000),
     totalFees: d(0),
+    fundingCost: ZERO,
     startTimestamp: 1700000000000,
     endTimestamp: 1700000000000 + 365 * DAY_MS,
     ...overrides,

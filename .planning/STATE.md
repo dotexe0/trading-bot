@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v2.0 Perp First-Class — Phase 37: FeeConfig Foundation
+**Current focus:** v2.0 Perp First-Class — Phase 38: Fee-Aware Backtest
 
 ## Current Position
 
-Phase: 37 of 41 (FeeConfig Foundation)
-Plan: 3 of TBD
+Phase: 38 of 41 (Fee-Aware Backtest)
+Plan: 1 of TBD
 Status: In Progress
-Last activity: 2026-03-15 — 37-03 complete (FeeConfig wired: fetchFeeConfig in start.ts + feeConfig on PerpTournamentOptions; 2 files, 2 tasks, 4min)
+Last activity: 2026-03-15 — 38-01 complete (fundingCost in BacktestResult/PerformanceMetrics, ZERO-wired in engine+walk-forward, FCM fee fix in perp-tournament-runner, TournamentStore serialization roundtrip; 799 tests passing)
 
 Progress: [██████████████████░░░░░░░░░░░░] ~57% (37/~63 total plans est.)
 
@@ -44,6 +44,7 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - DASH-02: Server-side 1/minute max downsampling; BaselineSeries; ring buffer 1440 pts
 - DASH-03: AreaSeries on existing `perpExposureUpdate` events; explicit zero-point broadcast on position close
 - [Phase 37]: feeConfig optional on PerpTournamentOptions, feeTierTaker/Maker wired to parseTournamentConfig — backward-compatible injection pattern for FCM fee rates
+- [38-01]: fundingCost: Decimal added to BacktestResult and PerformanceMetrics; always ZERO in backtest/walk-forward; TournamentStore serializes/deserializes with ?? '0' backward-compat fallback; perp tournament now uses FCM_FALLBACK_TAKER_RATE (0.0003) not spot 0.0075
 
 ### Open Issues / Tech Debt
 
@@ -58,4 +59,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed 37-03-PLAN.md (FeeConfig wired into startup sequence and perp tournament runner). Ready for 37-04 or next phase.
+Stopped at: Phase 38 Plan 01 complete. fundingCost interfaces wired. FCM fee fix applied. 799 tests passing. Ready for Phase 38 Plan 02.

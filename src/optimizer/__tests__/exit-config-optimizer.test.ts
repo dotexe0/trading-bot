@@ -26,6 +26,7 @@ function makeMetrics(pf: number, totalTrades: number): PerformanceMetrics {
     profitFactor: d(pf),
     totalTrades,
     totalFees: ZERO,
+    fundingCost: ZERO,
     avgTradeReturn: ZERO,
     bestTrade: ZERO,
     worstTrade: ZERO,

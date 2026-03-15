@@ -27,6 +27,7 @@ function makeMetrics(overrides: Partial<PerformanceMetrics> = {}): PerformanceMe
     profitFactor: d('1.5'),
     totalTrades: 10,
     totalFees: d('5'),
+    fundingCost: ZERO,
     avgTradeReturn: d('0.01'),
     bestTrade: d('50'),
     worstTrade: d('-30'),

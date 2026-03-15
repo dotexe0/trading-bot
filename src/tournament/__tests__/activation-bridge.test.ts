@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { d } from '../../core/decimal.js';
+import { d, ZERO } from '../../core/decimal.js';
 import type { PerformanceMetrics } from '../../backtest/metrics.js';
 import type { TournamentResult, LeaderboardEntry } from '../types.js';
 import type { TournamentConfig } from '../config.js';
@@ -25,6 +25,7 @@ function makeMetrics(overrides: Partial<PerformanceMetrics> = {}): PerformanceMe
     profitFactor: d('1.5'),
     totalTrades: 10,
     totalFees: d('5'),
+    fundingCost: ZERO,
     avgTradeReturn: d('0.01'),
     bestTrade: d('50'),
     worstTrade: d('-30'),
