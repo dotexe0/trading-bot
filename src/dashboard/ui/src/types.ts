@@ -24,7 +24,9 @@ export type WsMessageType =
   | 'shutdown'
   | 'perpPositionUpdate'
   | 'perpFundingUpdate'
-  | 'perpExposureUpdate';
+  | 'perpExposureUpdate'
+  | 'perpFundingHistory'
+  | 'perpPnlUpdate';
 
 export interface WsMessage {
   type: WsMessageType;
@@ -143,6 +145,8 @@ export interface SnapshotPayload {
   equity: EquityPoint[];
   strategies: StrategyInfo[];
   risk?: RiskStatus;
+  perpFundingHistory?: PerpFundingBarPayload[];
+  perpPnlHistory?: PerpPnlPointPayload[];
 }
 
 // ── Perp Payloads ─────────────────────────────────────────────────────
@@ -172,4 +176,22 @@ export interface PerpExposurePayload {
   totalNotionalUsd: string;
   exposureCapUsd: string;
   utilizationPct: string;
+}
+
+export interface PerpFundingBarPayload {
+  /** FCM product ID, e.g. 'BTC-PERP-INTX' */
+  instrument: string;
+  /** Unix seconds (Math.floor(timestamp / 1000)) */
+  time: number;
+  /** Bar height = Math.abs(fundingRate) */
+  value: number;
+  /** '#22c55e' for negative rate (longs paid), '#ef4444' for positive (shorts paid) */
+  color: string;
+}
+
+export interface PerpPnlPointPayload {
+  /** Unix seconds */
+  time: number;
+  /** Unrealized P&L as float (positive = profit, negative = loss) */
+  value: number;
 }
