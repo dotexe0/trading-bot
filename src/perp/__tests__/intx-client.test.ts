@@ -19,13 +19,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 
 // ── Hoisted mock helpers (must be defined before vi.mock is hoisted) ─
-const { mockGetFuturesBalanceSummary, mockGetFuturesPositions, mockCloseAll, mockSubscribe, wsInstances } = vi.hoisted(() => {
+const { mockGetFuturesBalanceSummary, mockGetFuturesPositions, mockCloseAll, mockSubscribe, mockGetTransactionSummary, wsInstances } = vi.hoisted(() => {
   const mockGetFuturesBalanceSummary = vi.fn();
   const mockGetFuturesPositions = vi.fn();
   const mockCloseAll = vi.fn();
   const mockSubscribe = vi.fn();
+  const mockGetTransactionSummary = vi.fn();
   const wsInstances: EventEmitter[] = [];
-  return { mockGetFuturesBalanceSummary, mockGetFuturesPositions, mockCloseAll, mockSubscribe, wsInstances };
+  return { mockGetFuturesBalanceSummary, mockGetFuturesPositions, mockCloseAll, mockSubscribe, mockGetTransactionSummary, wsInstances };
 });
 
 vi.mock('coinbase-api', () => {
@@ -44,6 +45,7 @@ vi.mock('coinbase-api', () => {
       constructor(public opts: unknown) {}
       getFuturesBalanceSummary = mockGetFuturesBalanceSummary;
       getFuturesPositions = mockGetFuturesPositions;
+      getTransactionSummary = mockGetTransactionSummary;
     },
     WebsocketClient: MockWebsocketClient,
   };
@@ -419,9 +421,6 @@ describe('IntxClient WebSocket streaming', () => {
 // ── IntxClient.fetchFeeConfig() tests ────────────────────────────────
 
 describe('IntxClient.fetchFeeConfig()', () => {
-  // mockGetTransactionSummary declared locally — NOT yet wired to MockCBAdvancedTradeClient (RED phase)
-  const mockGetTransactionSummary = vi.fn();
-
   beforeEach(() => {
     vi.clearAllMocks();
     (MockWSCtor as any)._instances = [];
