@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 39 of 41 (Fee Gate and New Strategies)
-Plan: 2 of TBD
+Plan: 3 of TBD
 Status: In Progress
-Last activity: 2026-03-15 — 39-02 complete (FundingRateArbitrageStrategy + BasisTradeStrategy + Zod schemas; 827 tests passing)
+Last activity: 2026-03-15 — 39-03 complete (Extended perp registry to 4 strategies; verify-index-price.ts diagnostic script; 835 tests passing)
 
 Progress: [██████████████████░░░░░░░░░░░░] ~58% (39/~63 total plans est.)
 
@@ -48,6 +48,7 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - [38-02]: FEES-02 test (engine.test.ts): higher feeTierTaker produces higher totalFees confirmed. FEES-03 tests (metrics.test.ts): fundingCost passthrough, independence from totalFees, Decimal type all verified. All 7 makeMetrics/makeResult helpers now include fundingCost: ZERO.
 - [39-01]: FEES-04 enforced: PerpRiskGate Check 4 FEE_DRAG_EXCESSIVE uses fixed FeeConfig constant (not swept param). lte() semantics: equal-to-fee rejected. feeConfig optional in PerpRiskGateOptions → DEFAULT_FEE_CONFIG fallback. expectedGain computed from tpTargetPct at both callsites.
 - [39-02]: FundingRateArbitrageStrategy: tournamentMode=true always returns []; regime gate RANGING/VOLATILE only; division guard for indexPrice=0; returns [] when indexPrice===markPrice (current FCM reality). BasisTradeStrategy: no regime filter (basis arb is regime-agnostic); SD=0 guard handles constant basis (FCM reality). markPriceProvider/basisProvider/tournamentMode excluded from Zod schemas (not serializable) — matches perp strategy pattern.
+- [39-03]: createPerpRegistry() now has 4 strategies (perp-momentum, perp-mean-reversion, funding-rate-arb, basis-trade); createLivePerpRegistry() adds optional markPriceProvider second param (existing callers unchanged); tournament:perp exits 0 with all 4 strategies; scripts/verify-index-price.ts documents FCM indexPrice===markPrice static analysis finding.
 
 ### Open Issues / Tech Debt
 
@@ -62,4 +63,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed 39-02-PLAN.md. FundingRateArbitrageStrategy + BasisTradeStrategy + Zod schemas. 827 tests passing.
+Stopped at: Completed 39-03-PLAN.md. Extended perp registry to 4 strategies; verify-index-price.ts diagnostic script; 835 tests passing.
