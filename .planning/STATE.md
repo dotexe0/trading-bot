@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v2.0 Perp First-Class — Phase 38: Fee-Aware Backtest
+**Current focus:** v2.0 Perp First-Class — Phase 39: Fee Gate and New Strategies
 
 ## Current Position
 
-Phase: 38 of 41 (Fee-Aware Backtest)
-Plan: 1 of TBD
+Phase: 39 of 41 (Fee Gate and New Strategies)
+Plan: 2 of TBD
 Status: In Progress
-Last activity: 2026-03-15 — 38-01 complete (fundingCost in BacktestResult/PerformanceMetrics, ZERO-wired in engine+walk-forward, FCM fee fix in perp-tournament-runner, TournamentStore serialization roundtrip; 799 tests passing)
+Last activity: 2026-03-15 — 39-02 complete (FundingRateArbitrageStrategy + BasisTradeStrategy + Zod schemas; 827 tests passing)
 
-Progress: [██████████████████░░░░░░░░░░░░] ~57% (37/~63 total plans est.)
+Progress: [██████████████████░░░░░░░░░░░░] ~58% (39/~63 total plans est.)
 
 ## Performance Metrics
 
@@ -45,11 +45,14 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - DASH-03: AreaSeries on existing `perpExposureUpdate` events; explicit zero-point broadcast on position close
 - [Phase 37]: feeConfig optional on PerpTournamentOptions, feeTierTaker/Maker wired to parseTournamentConfig — backward-compatible injection pattern for FCM fee rates
 - [38-01]: fundingCost: Decimal added to BacktestResult and PerformanceMetrics; always ZERO in backtest/walk-forward; TournamentStore serializes/deserializes with ?? '0' backward-compat fallback; perp tournament now uses FCM_FALLBACK_TAKER_RATE (0.0003) not spot 0.0075
+- [38-02]: FEES-02 test (engine.test.ts): higher feeTierTaker produces higher totalFees confirmed. FEES-03 tests (metrics.test.ts): fundingCost passthrough, independence from totalFees, Decimal type all verified. All 7 makeMetrics/makeResult helpers now include fundingCost: ZERO.
+- [39-01]: FEES-04 enforced: PerpRiskGate Check 4 FEE_DRAG_EXCESSIVE uses fixed FeeConfig constant (not swept param). lte() semantics: equal-to-fee rejected. feeConfig optional in PerpRiskGateOptions → DEFAULT_FEE_CONFIG fallback. expectedGain computed from tpTargetPct at both callsites.
+- [39-02]: FundingRateArbitrageStrategy: tournamentMode=true always returns []; regime gate RANGING/VOLATILE only; division guard for indexPrice=0; returns [] when indexPrice===markPrice (current FCM reality). BasisTradeStrategy: no regime filter (basis arb is regime-agnostic); SD=0 guard handles constant basis (FCM reality). markPriceProvider/basisProvider/tournamentMode excluded from Zod schemas (not serializable) — matches perp strategy pattern.
 
 ### Open Issues / Tech Debt
 
 - fast-technical-indicators createRequire workaround (inherited, low priority)
-- `indexPrice` FCM field distinctness from `markPrice` unconfirmed — must verify via script before Phase 39 strategy logic
+- `indexPrice` FCM field distinctness from `markPrice` confirmed equal (strategies return [] in practice, wired for future FCM fix)
 - `IntxFundingRateEvent.isFinal` reliable population in practice unconfirmed — verify in 8h paper mode before finalizing Phase 41 chart
 
 ### Blockers
@@ -59,4 +62,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Phase 38 Plan 01 complete. fundingCost interfaces wired. FCM fee fix applied. 799 tests passing. Ready for Phase 38 Plan 02.
+Stopped at: Completed 39-02-PLAN.md. FundingRateArbitrageStrategy + BasisTradeStrategy + Zod schemas. 827 tests passing.

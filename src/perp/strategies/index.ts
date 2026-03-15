@@ -1,7 +1,7 @@
 /**
  * Perp strategies barrel export.
  *
- * Re-exports both perp strategy implementations and provides two registry
+ * Re-exports all perp strategy implementations and provides two registry
  * factory functions:
  *
  * - createPerpRegistry(): for tournament / backtesting use where fundingRateProvider
@@ -17,10 +17,14 @@
 import { StrategyRegistry } from '../../strategies/registry.js';
 import { PerpMomentumStrategy } from './perp-momentum.js';
 import { PerpMeanReversionStrategy } from './perp-mean-reversion.js';
+import { FundingRateArbitrageStrategy } from './funding-rate-arb.js';
+import { BasisTradeStrategy } from './basis-trade.js';
 import type { StrategyConfig } from '../../strategies/config.js';
 
 export { PerpMomentumStrategy } from './perp-momentum.js';
 export { PerpMeanReversionStrategy } from './perp-mean-reversion.js';
+export { FundingRateArbitrageStrategy } from './funding-rate-arb.js';
+export { BasisTradeStrategy } from './basis-trade.js';
 
 /**
  * Create a registry pre-loaded with both perp strategies.
@@ -52,11 +56,29 @@ export function createPerpRegistry(): StrategyRegistry {
     });
   });
 
+  registry.register('funding-rate-arb', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'funding-rate-arb' }>;
+    return new FundingRateArbitrageStrategy({
+      threshold: cfg.threshold ?? 0.0005,
+      markPriceProvider: () => null,
+      tournamentMode: true, // always true in tournament/backtest registry
+    });
+  });
+
+  registry.register('basis-trade', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'basis-trade' }>;
+    return new BasisTradeStrategy({
+      period: cfg.period ?? 20,
+      threshold: cfg.threshold ?? 1.5,
+      basisProvider: () => null, // no live basis data in tournament
+    });
+  });
+
   return registry;
 }
 
 /**
- * Create a registry pre-loaded with both perp strategies, wired with a real
+ * Create a registry pre-loaded with all four perp strategies, wired with a real
  * funding rate provider.
  *
  * For live / paper engine use — the passed-in provider is injected into each
@@ -65,9 +87,15 @@ export function createPerpRegistry(): StrategyRegistry {
  *
  * @param fundingRateProvider - Synchronous callback returning the current
  *   funding rate, or null if unavailable.
+ * @param markPriceProvider - Optional synchronous callback returning current
+ *   {markPrice, indexPrice} from the latest IntxMarkPriceEvent. Defaults to
+ *   () => null until Phase 40 wires the real IntxClient cache. All existing
+ *   callers of createLivePerpRegistry(fundingRateProvider) continue to compile
+ *   unchanged.
  */
 export function createLivePerpRegistry(
   fundingRateProvider: () => number | null,
+  markPriceProvider?: () => { markPrice: string; indexPrice: string } | null,
 ): StrategyRegistry {
   const registry = new StrategyRegistry();
 
@@ -89,6 +117,24 @@ export function createLivePerpRegistry(
       threshold: cfg.threshold ?? 1.5,
       fundingThreshold: cfg.fundingThreshold ?? 0.01,
       fundingRateProvider,
+    });
+  });
+
+  registry.register('funding-rate-arb', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'funding-rate-arb' }>;
+    return new FundingRateArbitrageStrategy({
+      threshold: cfg.threshold ?? 0.0005,
+      markPriceProvider: markPriceProvider ?? (() => null),
+      tournamentMode: false,
+    });
+  });
+
+  registry.register('basis-trade', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'basis-trade' }>;
+    return new BasisTradeStrategy({
+      period: cfg.period ?? 20,
+      threshold: cfg.threshold ?? 1.5,
+      basisProvider: () => null, // live basisProvider wired in Phase 40 when ring buffer is implemented
     });
   });
 
