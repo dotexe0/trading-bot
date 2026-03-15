@@ -385,5 +385,41 @@ describe('PaperPerpEngine', () => {
 
       engine.stop();
     });
+
+    it('fundingUpdate emitted with no open position (always-on panel)', () => {
+      const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+      engine.start();
+
+      const fundingUpdateFn = vi.fn();
+      engine.on('fundingUpdate', fundingUpdateFn);
+
+      // No position open — emit a funding rate event
+      intxClient.emit('fundingRate', makeFundingRateEvt('-30'));
+
+      expect(fundingUpdateFn).toHaveBeenCalledOnce();
+      const payload = fundingUpdateFn.mock.calls[0][0];
+      expect(payload.sessionId).toBeNull();
+      expect(payload.currentFundingRate).toBe('-30');
+      expect(payload.cumulativeFundingCost).toBe('0.00000000');
+      // stateStore.updateSession NOT called (no session to update)
+      expect(stateStore.updateSession).not.toHaveBeenCalled();
+
+      engine.stop();
+    });
+
+    it('stale fundingRate event is ignored even with no position', () => {
+      const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+      engine.start();
+
+      const fundingUpdateFn = vi.fn();
+      engine.on('fundingUpdate', fundingUpdateFn);
+
+      // isStale=true — must be dropped
+      intxClient.emit('fundingRate', makeFundingRateEvt('-30', true));
+
+      expect(fundingUpdateFn).not.toHaveBeenCalled();
+
+      engine.stop();
+    });
   });
 });

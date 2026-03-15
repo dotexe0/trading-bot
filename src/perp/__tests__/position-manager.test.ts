@@ -82,6 +82,16 @@ function makeStateStore(): PerpStateStore {
   } as unknown as PerpStateStore;
 }
 
+function makeFundingEvt(fundingRate: string, isStale = false): IntxFundingRateEvent {
+  return {
+    instrument: 'FCM',
+    fundingRate,
+    isFinal: false,
+    timestamp: Date.now(),
+    isStale,
+  };
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────
 
 describe('PerpPositionManager', () => {
@@ -584,6 +594,40 @@ describe('PerpPositionManager', () => {
 
       // currentSession should be null after close
       expect(localManager.getCurrentSession()).toBeNull();
+
+      localManager.stop();
+    });
+
+    it('fundingUpdate emitted with no open session (always-on panel)', () => {
+      const localManager = new PerpPositionManager({ intxClient, stateStore, config });
+      localManager.start();
+
+      const fundingUpdateFn = vi.fn();
+      localManager.on('fundingUpdate', fundingUpdateFn);
+
+      // No session open
+      intxClient.emit('fundingRate', makeFundingEvt('-30'));
+
+      expect(fundingUpdateFn).toHaveBeenCalledOnce();
+      const payload = fundingUpdateFn.mock.calls[0][0];
+      expect(payload.sessionId).toBeNull();
+      expect(payload.currentFundingRate).toBe('-30');
+      expect(payload.cumulativeFundingCost).toBe('0.00000000');
+      expect(stateStore.updateSession).not.toHaveBeenCalled();
+
+      localManager.stop();
+    });
+
+    it('stale fundingRate event ignored with no open session', () => {
+      const localManager = new PerpPositionManager({ intxClient, stateStore, config });
+      localManager.start();
+
+      const fundingUpdateFn = vi.fn();
+      localManager.on('fundingUpdate', fundingUpdateFn);
+
+      intxClient.emit('fundingRate', makeFundingEvt('-30', true));
+
+      expect(fundingUpdateFn).not.toHaveBeenCalled();
 
       localManager.stop();
     });
