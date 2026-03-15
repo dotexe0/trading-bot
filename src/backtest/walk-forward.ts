@@ -240,6 +240,7 @@ export class WalkForwardRunner {
       equityCurve: sortedEquity,
       finalEquity: lastEquity,
       totalFees,
+      fundingCost: ZERO,
       startTimestamp: startTs,
       endTimestamp: endTs,
     };
@@ -254,6 +255,7 @@ export class WalkForwardRunner {
       equityCurve: [],
       finalEquity: d(initialCapital),
       totalFees: ZERO,
+      fundingCost: ZERO,
       startTimestamp: 0,
       endTimestamp: 0,
     };

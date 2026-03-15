@@ -420,6 +420,7 @@ export class BacktestEngine {
       equityCurve,
       finalEquity: portfolio.equity(lastPrice),
       totalFees: state.totalFees,
+      fundingCost: ZERO,
       startTimestamp: candles[0].timestamp,
       endTimestamp: candles[candles.length - 1].timestamp,
       regimeBreakdown,
@@ -434,6 +435,7 @@ export class BacktestEngine {
       equityCurve: [],
       finalEquity: d(config.initialCapital),
       totalFees: ZERO,
+      fundingCost: ZERO,
       startTimestamp: 0,
       endTimestamp: 0,
     };
