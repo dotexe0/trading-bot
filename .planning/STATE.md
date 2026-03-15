@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v2.0 Perp First-Class — Phase 40: Regime-Aware Perp Pipeline
+**Current focus:** v2.0 Perp First-Class — Phase 41: Dashboard Time-Series Panels
 
 ## Current Position
 
-Phase: 40 of 41 (Regime-Aware Perp Pipeline)
-Plan: 2 of TBD
+Phase: 41 of 41 (Dashboard Time-Series Panels)
+Plan: 1 of TBD
 Status: In Progress
-Last activity: 2026-03-15 — 40-02 complete (auto-switch describe blocks in paper-perp-engine.test.ts + position-manager.test.ts; 841 tests passing)
+Last activity: 2026-03-15 — Phase 41 Plan 1 complete (perpFundingHistory + perpPnlUpdate WS types, ring buffers, P&L throttle, snapshot hydration, unrealizedPnl in fundingUpdate emit)
 
 Progress: [██████████████████░░░░░░░░░░░░] ~58% (39/~63 total plans est.)
 
@@ -50,7 +50,9 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - [39-02]: FundingRateArbitrageStrategy: tournamentMode=true always returns []; regime gate RANGING/VOLATILE only; division guard for indexPrice=0; returns [] when indexPrice===markPrice (current FCM reality). BasisTradeStrategy: no regime filter (basis arb is regime-agnostic); SD=0 guard handles constant basis (FCM reality). markPriceProvider/basisProvider/tournamentMode excluded from Zod schemas (not serializable) — matches perp strategy pattern.
 - [39-03]: createPerpRegistry() now has 4 strategies (perp-momentum, perp-mean-reversion, funding-rate-arb, basis-trade); createLivePerpRegistry() adds optional markPriceProvider second param (existing callers unchanged); tournament:perp exits 0 with all 4 strategies; scripts/verify-index-price.ts documents FCM indexPrice===markPrice static analysis finding.
 - [40-01]: executeStrategySwitch regime? param optional (backward-compat); pendingSwitch type carries regime? so deferred switches preserve triggering regime; log format 'regime TRENDING: switching to PerpMomentumStrategy'; PerpPositionManager logs have no [PAPER] prefix per convention.
+- [40-03]: Structural test scans 15 lines after constructor call instead of exact line — tolerates minor formatting changes.
 - [Phase 40]: PERP-SW-02/PM-SW-02: Open position manually before regime candle to test deferred switch — avoids async timing issue with evaluate()-triggered openPaperPosition
+- [41-01]: DASH-01/02 ring buffers sized 500 bars (funding) and 1440 pts (P&L — 24h at 1/min). Dual-listener on fundingUpdate: PERP_EVENT_MAP handles perpFundingUpdate; separate listener handles histogram + P&L. buildSnapshot() extended with optional ring buffer params (not closures). unrealizedPnl? optional in fundingUpdate type (no-session branch omits). Monotonic second guard on P&L broadcast prevents duplicate chart timestamps.
 
 ### Open Issues / Tech Debt
 
@@ -65,4 +67,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed 40-02-PLAN.md. Auto-switch describe blocks in paper-perp-engine.test.ts + position-manager.test.ts (PERP-SW-01/02/03 + PERP-PM-SW-01/02/03); 841 tests passing.
+Stopped at: Completed 41-01-PLAN.md. perpFundingHistory + perpPnlUpdate WS pipeline: types in both files, ring buffers in server/index.ts, unrealizedPnl in fundingUpdate emit, buildSnapshot hydration.
