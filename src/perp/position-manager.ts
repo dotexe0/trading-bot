@@ -128,7 +128,7 @@ export class PerpPositionManager extends EventEmitter {
   /** Candles remaining in cooldown after a strategy switch. */
   private cooldownCandlesRemaining = 0;
   /** Deferred switch config when a position was open at regime-change time. */
-  private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
+  private pendingSwitch: { strategyConfig: Record<string, unknown>; regime?: MarketRegime } | null = null;
   /** Registry used to instantiate new strategies on regime switch. */
   private strategyRegistry: StrategyRegistry | null;
   /** Classifies market regime from candle history. */
@@ -307,9 +307,9 @@ export class PerpPositionManager extends EventEmitter {
         const winnerConfig = this.resolveRegimeWinner(regime);
         if (winnerConfig) {
           if (this.currentSession === null) {
-            this.executeStrategySwitch(winnerConfig);
+            this.executeStrategySwitch(winnerConfig, regime);
           } else {
-            this.pendingSwitch = { strategyConfig: winnerConfig };
+            this.pendingSwitch = { strategyConfig: winnerConfig, regime };
             log.info(
               { regime, currentStrategy: this.strategy?.name },
               'Regime changed with open position -- switch deferred until position closes',
@@ -324,7 +324,7 @@ export class PerpPositionManager extends EventEmitter {
 
     // Execute any pending switch now that position may have closed
     if (this.pendingSwitch && this.currentSession === null) {
-      this.executeStrategySwitch(this.pendingSwitch.strategyConfig);
+      this.executeStrategySwitch(this.pendingSwitch.strategyConfig, this.pendingSwitch.regime);
       this.pendingSwitch = null;
     }
 
@@ -606,7 +606,7 @@ export class PerpPositionManager extends EventEmitter {
 
     // Execute any pending regime strategy switch now that position is closed
     if (this.pendingSwitch) {
-      this.executeStrategySwitch(this.pendingSwitch.strategyConfig);
+      this.executeStrategySwitch(this.pendingSwitch.strategyConfig, this.pendingSwitch.regime);
       this.pendingSwitch = null;
     }
 
@@ -761,12 +761,15 @@ export class PerpPositionManager extends EventEmitter {
   /**
    * Instantiate a new strategy from config, assign it, reset cooldown, emit event.
    */
-  private executeStrategySwitch(strategyConfig: Record<string, unknown>): void {
+  private executeStrategySwitch(strategyConfig: Record<string, unknown>, regime?: MarketRegime): void {
     this.strategy = this.strategyRegistry!.create(strategyConfig);
     this.cooldownCandlesRemaining = STRATEGY_SWITCH_COOLDOWN_CANDLES;
+    const logMsg = regime
+      ? `regime ${regime}: switching to ${this.strategy.name}`
+      : 'Strategy switched due to regime change';
     log.info(
-      { newStrategy: this.strategy.name, cooldown: STRATEGY_SWITCH_COOLDOWN_CANDLES },
-      'Strategy switched due to regime change',
+      { newStrategy: this.strategy.name, regime, cooldown: STRATEGY_SWITCH_COOLDOWN_CANDLES },
+      logMsg,
     );
     this.emit('strategySwitch', { newStrategy: this.strategy.name });
   }
