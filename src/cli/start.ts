@@ -36,6 +36,7 @@ import { BacktestStore } from '../backtest/backtest-store.js';
 import { IntxClient, PaperPerpEngine, PerpPositionManager } from '../perp/index.js';
 import { PerpStateStore } from '../perp/perp-state-store.js';
 import { runPerpTournament } from '../perp/perp-tournament-runner.js';
+import type { FeeConfig } from '../perp/fee-config.js';
 import type { Candle } from '../core/types.js';
 import type { EventEmitter } from 'node:events';
 import {
@@ -486,6 +487,14 @@ program
 
         await perpClient.start();
 
+        // FEES-01: Fetch actual FCM taker fee rate before tournament or engine construction.
+        // fetchFeeConfig() never throws — returns DEFAULT_FEE_CONFIG on any API failure.
+        const feeConfig: FeeConfig = await perpClient.fetchFeeConfig();
+        out.info(
+          `FCM taker fee loaded: ${(feeConfig.takerFeeRate * 100).toFixed(4)}% taker` +
+          ` (source: ${feeConfig.source})`,
+        );
+
         // PIPE-01: Run perp tournament to get regime leaderboards
         let perpRegimeLeaderboards: RegimeLeaderboards | undefined;
         let perpActivationReady = false;
@@ -500,6 +509,7 @@ program
               topN,
               mc: false,
               dbPath: config.database.path,
+              feeConfig,   // FEES-01: pass fetched fee rate
             });
             perpRegimeLeaderboards = perpResult.regimeLeaderboards;
             out.info(
