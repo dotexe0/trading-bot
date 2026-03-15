@@ -32,6 +32,8 @@ export interface PerformanceMetrics {
   totalTrades: number;
   /** Total fees paid */
   totalFees: Decimal;
+  /** Accumulated funding cost (perp only; ZERO for spot backtests) — NEVER add to totalFees */
+  fundingCost: Decimal;
   /** Average PnL per trade / avg entry cost */
   avgTradeReturn: Decimal;
   /** Highest single-trade PnL */
@@ -64,6 +66,7 @@ export class MetricsCalculator {
       profitFactor: this.calcProfitFactor(trades),
       totalTrades: trades.length,
       totalFees: result.totalFees,
+      fundingCost: result.fundingCost,
       avgTradeReturn: this.calcAvgTradeReturn(trades),
       bestTrade: this.calcBestTrade(trades),
       worstTrade: this.calcWorstTrade(trades),

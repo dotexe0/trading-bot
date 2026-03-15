@@ -135,6 +135,8 @@ export interface BacktestResult {
   finalEquity: Decimal;
   /** Total fees paid */
   totalFees: Decimal;
+  /** Accumulated funding cost across all open positions (perp only; ZERO for spot backtests) */
+  fundingCost: Decimal;
   /** Timestamp of first candle */
   startTimestamp: number;
   /** Timestamp of last candle */
