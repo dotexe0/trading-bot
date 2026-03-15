@@ -23,6 +23,8 @@ import type {
   CancelOrderParams,
   FcmOrderFillEvent,
 } from './types.js';
+import type { FeeConfig } from './fee-config.js';
+import { DEFAULT_FEE_CONFIG, FCM_FALLBACK_TAKER_RATE, FCM_FALLBACK_MAKER_RATE } from './fee-config.js';
 
 const log = createModuleLogger('fcm-client');
 
@@ -271,6 +273,40 @@ export class IntxClient extends EventEmitter {
       positions: (positions as any)?.positions ?? positions ?? [],
       summary: (balanceSummary as any)?.balance_summary ?? balanceSummary,
     };
+  }
+
+  /**
+   * Fetch the FCM taker fee rate from Coinbase getTransactionSummary.
+   *
+   * Uses this.restClient (private) so callers never need to access restClient directly.
+   * On any error or malformed response, logs a warning and returns DEFAULT_FEE_CONFIG.
+   * Never throws — fee fetch failure must not abort startup.
+   */
+  async fetchFeeConfig(): Promise<FeeConfig> {
+    try {
+      const summary = await this.restClient.getTransactionSummary({
+        product_type: 'FUTURE',
+        product_venue: 'FCM',
+      });
+      const raw = (summary as any)?.fee_tier?.taker_fee_rate;
+      const rawMaker = (summary as any)?.fee_tier?.maker_fee_rate;
+      const takerRate = typeof raw === 'string' && raw.length > 0 ? parseFloat(raw) : NaN;
+      if (!Number.isFinite(takerRate) || takerRate <= 0 || takerRate > 0.1) {
+        log.warn({ raw }, 'fetchFeeConfig: malformed or missing taker_fee_rate — using fallback');
+        return DEFAULT_FEE_CONFIG;
+      }
+      const makerRate =
+        typeof rawMaker === 'string' && rawMaker.length > 0 ? parseFloat(rawMaker) : FCM_FALLBACK_MAKER_RATE;
+      const makerFeeRate = Number.isFinite(makerRate) && makerRate >= 0 && makerRate <= 0.1
+        ? makerRate
+        : FCM_FALLBACK_MAKER_RATE;
+      log.info({ takerFeeRate: takerRate, makerFeeRate }, 'FCM taker fee rate fetched from API');
+      return { takerFeeRate: takerRate, makerFeeRate, source: 'api' };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ err: message }, 'fetchFeeConfig: API call failed — using fallback rate');
+      return DEFAULT_FEE_CONFIG;
+    }
   }
 
   /**
