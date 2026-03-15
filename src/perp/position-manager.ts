@@ -209,7 +209,19 @@ export class PerpPositionManager extends EventEmitter {
     this.intxClient.on('markPrice', this._onMarkPrice);
 
     this._onFundingRate = (evt: IntxFundingRateEvent) => {
-      if (!this.currentSession) return;
+      if (evt.isStale) return;  // preserve stale guard (must be first check)
+      if (!this.currentSession) {
+        // No session open — emit market-rate-only update so dashboard panel stays live.
+        // NOTE: evt.instrument is always 'FCM' (account-level channel); use config instrument.
+        this.emit('fundingUpdate', {
+          sessionId: null,
+          instrument: this.config.btcProductId,
+          currentFundingRate: evt.fundingRate,
+          cumulativeFundingCost: '0.00000000',
+          cumulativeFundingPct: '0.00000000',
+        });
+        return;
+      }
       const session = this.currentSession;
       // NOTE: evt.instrument is always 'FCM' — do NOT filter by instrument
       const update = this._fundingRateTracker.onFundingEvent(evt, session);

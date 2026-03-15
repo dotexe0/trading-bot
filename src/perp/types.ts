@@ -145,8 +145,8 @@ export interface PerpPositionManagerEvents {
   liquidationDistance: [{ sessionId: string; instrument: string; distancePct: string; markPrice: string }];
   /** Emitted when the active strategy is switched due to a regime change. */
   strategySwitch: [{ newStrategy: string }];
-  /** Emitted on each non-stale funding rate event with an open position. */
-  fundingUpdate: [{ sessionId: string; instrument: string; currentFundingRate: string; cumulativeFundingCost: string; cumulativeFundingPct: string }];
+  /** Emitted on each non-stale funding rate event — even when no position is open (sessionId is null). */
+  fundingUpdate: [{ sessionId: string | null; instrument: string; currentFundingRate: string; cumulativeFundingCost: string; cumulativeFundingPct: string }];
   /** Emitted when cumulative funding cost exceeds the drain threshold. */
   fundingDrain: [PerpSession, { cumulativeFundingCost: string }];
   /** Emitted after positionOpened and positionClosed with current total notional vs cap. */
