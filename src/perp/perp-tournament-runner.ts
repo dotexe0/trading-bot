@@ -21,6 +21,7 @@ import { BacktestEngine } from '../backtest/engine.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { IndicatorEngine } from '../indicators/engine.js';
+import type { FeeConfig } from './fee-config.js';
 
 export interface PerpTournamentOptions {
   /** Trading pair for candle source (perp tournament uses BTC-USD spot candles) */
@@ -37,6 +38,9 @@ export interface PerpTournamentOptions {
   mc: boolean;
   /** Path to the SQLite database file */
   dbPath: string;
+  /** Optional FeeConfig fetched from Coinbase API at startup. When provided,
+   *  overrides the default Zod feeTierTaker (0.0075) with the real FCM rate. */
+  feeConfig?: FeeConfig;
 }
 
 /**
@@ -102,6 +106,8 @@ export async function runPerpTournament(
       initialCapital: opts.capital,
       topN: opts.topN,
       activationMode: 'none',
+      feeTierTaker: opts.feeConfig?.takerFeeRate,   // undefined → Zod default (0.0075)
+      feeTierMaker: opts.feeConfig?.makerFeeRate,   // undefined → Zod default (0.0035)
       walkForward: {
         trainWindowMs,
         validateWindowMs,
