@@ -130,3 +130,18 @@ describe('start.ts – PIPE-03: PerpPositionManager activation', () => {
     expect(managerResourceLine).toBeLessThan(clientResourceLine);
   });
 });
+
+describe('start.ts – PIPE-01/02/03: regimeLeaderboards pass-through', () => {
+  it('passes perpRegimeLeaderboards to PaperPerpEngine constructor', () => {
+    const paperPerpLine = lineOf(/new PaperPerpEngine\s*\(/);
+    // Search within 15 lines after the constructor call for the regimeLeaderboards option
+    const nearbyLines = lines.slice(paperPerpLine, paperPerpLine + 15).join('\n');
+    expect(nearbyLines).toMatch(/regimeLeaderboards:\s*perpRegimeLeaderboards/);
+  });
+
+  it('passes perpRegimeLeaderboards to PerpPositionManager constructor', () => {
+    const perpManagerLine = lineOf(/new PerpPositionManager\s*\(/);
+    const nearbyLines = lines.slice(perpManagerLine, perpManagerLine + 15).join('\n');
+    expect(nearbyLines).toMatch(/regimeLeaderboards:\s*perpRegimeLeaderboards/);
+  });
+});

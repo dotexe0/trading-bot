@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 40 of 41 (Regime-Aware Perp Pipeline)
-Plan: 1 of TBD
+Plan: 2 of TBD
 Status: In Progress
-Last activity: 2026-03-15 — 40-01 complete (executeStrategySwitch regime param in PaperPerpEngine + PerpPositionManager; regime-prefixed log format; 835 tests passing)
+Last activity: 2026-03-15 — 40-02 complete (auto-switch describe blocks in paper-perp-engine.test.ts + position-manager.test.ts; 841 tests passing)
 
 Progress: [██████████████████░░░░░░░░░░░░] ~58% (39/~63 total plans est.)
 
@@ -50,6 +50,7 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - [39-02]: FundingRateArbitrageStrategy: tournamentMode=true always returns []; regime gate RANGING/VOLATILE only; division guard for indexPrice=0; returns [] when indexPrice===markPrice (current FCM reality). BasisTradeStrategy: no regime filter (basis arb is regime-agnostic); SD=0 guard handles constant basis (FCM reality). markPriceProvider/basisProvider/tournamentMode excluded from Zod schemas (not serializable) — matches perp strategy pattern.
 - [39-03]: createPerpRegistry() now has 4 strategies (perp-momentum, perp-mean-reversion, funding-rate-arb, basis-trade); createLivePerpRegistry() adds optional markPriceProvider second param (existing callers unchanged); tournament:perp exits 0 with all 4 strategies; scripts/verify-index-price.ts documents FCM indexPrice===markPrice static analysis finding.
 - [40-01]: executeStrategySwitch regime? param optional (backward-compat); pendingSwitch type carries regime? so deferred switches preserve triggering regime; log format 'regime TRENDING: switching to PerpMomentumStrategy'; PerpPositionManager logs have no [PAPER] prefix per convention.
+- [Phase 40]: PERP-SW-02/PM-SW-02: Open position manually before regime candle to test deferred switch — avoids async timing issue with evaluate()-triggered openPaperPosition
 
 ### Open Issues / Tech Debt
 
@@ -64,4 +65,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed 40-01-PLAN.md. executeStrategySwitch regime param in PaperPerpEngine + PerpPositionManager; regime-prefixed log format; 835 tests passing.
+Stopped at: Completed 40-02-PLAN.md. Auto-switch describe blocks in paper-perp-engine.test.ts + position-manager.test.ts (PERP-SW-01/02/03 + PERP-PM-SW-01/02/03); 841 tests passing.
