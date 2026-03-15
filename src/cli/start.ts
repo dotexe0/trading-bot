@@ -531,7 +531,7 @@ program
         // PIPE-02/03: Activate perp engine only when tournament succeeded with OOS trades
         // (or --skip-perp-tournament was passed)
         if (perpActivationReady) {
-          const fundingRateProvider = (): number | null => null;
+          const fundingRateProvider = (): number | null => perpClient.getLastFundingRate();
 
           const perpLiveFeed = new LiveDataFeed({
             apiKey: config.coinbase.apiKeyName,
@@ -554,7 +554,7 @@ program
             perpLiveFeed.on('candle', (candle: Candle) => {
               paperPerpEngine.onCandle(candle);
             });
-            perpLiveFeed.start(['BTC-USD'], undefined);
+            perpLiveFeed.start(['BTC-USD', 'ETH-USD'], undefined);
 
             // INFRA-04: engine stops BEFORE perp-intx-client (engine pushed first)
             resources.push({
@@ -591,7 +591,7 @@ program
             perpLiveFeed.on('candle', (candle: Candle) => {
               perpManager.onCandle(candle);
             });
-            perpLiveFeed.start(['BTC-USD'], undefined);
+            perpLiveFeed.start(['BTC-USD', 'ETH-USD'], undefined);
 
             // INFRA-04: engine stops BEFORE perp-intx-client
             resources.push({

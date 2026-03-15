@@ -325,6 +325,28 @@ describe('IntxClient WebSocket streaming', () => {
     expect((client as any).ws).toBeNull();
   });
 
+  it('Test 15: getLastFundingRate() returns null initially then cached value after event', async () => {
+    const client = makeClient();
+    await client.start();
+
+    // Before any event: must be null
+    expect(client.getLastFundingRate()).toBeNull();
+
+    // Emit a futures_balance_summary event
+    const ws = lastWsInstance();
+    ws.emit('update', {
+      channel: 'futures_balance_summary',
+      events: [{
+        fcm_balance_summary: { funding_hold: '0.00015' },
+      }],
+    });
+
+    // After event: should return the numeric value
+    expect(client.getLastFundingRate()).toBe(0.00015);
+
+    await client.stop();
+  });
+
   it('Test 14: user channel FILLED order event emits orderFill with correct fields', async () => {
     const client = makeClient();
     await client.start();
