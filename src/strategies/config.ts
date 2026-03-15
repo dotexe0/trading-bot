@@ -108,6 +108,26 @@ const perpMeanReversionSchema = z
   })
   .merge(exitConfigSchema);
 
+// NOTE: markPriceProvider, basisProvider, and tournamentMode are runtime-injected
+// callbacks/flags — NOT part of Zod schemas (not serializable). Only scalar config
+// params are stored here, matching the pattern for perpMomentumSchema and
+// perpMeanReversionSchema.
+
+const fundingRateArbSchema = z
+  .object({
+    strategy: z.literal('funding-rate-arb'),
+    threshold: z.number().positive().default(0.0005),
+  })
+  .merge(exitConfigSchema);
+
+const basisTradeSchema = z
+  .object({
+    strategy: z.literal('basis-trade'),
+    period: z.number().int().positive().default(20),
+    threshold: z.number().positive().default(1.5),
+  })
+  .merge(exitConfigSchema);
+
 // -- Discriminated union --------------------------------------------------
 
 export const strategyConfigSchema = z.discriminatedUnion('strategy', [
@@ -120,6 +140,8 @@ export const strategyConfigSchema = z.discriminatedUnion('strategy', [
   momentumBreakoutSchema,
   perpMomentumSchema,
   perpMeanReversionSchema,
+  fundingRateArbSchema,
+  basisTradeSchema,
 ]);
 
 // -- Inferred type --------------------------------------------------------
