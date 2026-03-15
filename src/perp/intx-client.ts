@@ -41,6 +41,8 @@ export class IntxClient extends EventEmitter {
   private readonly JITTER_FACTOR = 0.2; // ±20%
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  /** Last funding rate received from futures_balance_summary channel. */
+  private _lastFundingRate: number | null = null;
 
   /** Typed emit override — matches ENGINE_EVENT_MAP pattern. */
   override emit<K extends keyof IntxClientEvents>(
@@ -70,6 +72,9 @@ export class IntxClient extends EventEmitter {
   }
 
   get isStale(): boolean { return this._isStale; }
+
+  /** Returns the last funding rate received from IntxClient, or null if none yet received. */
+  getLastFundingRate(): number | null { return this._lastFundingRate; }
 
   // ── WebSocket public API ───────────────────────────────────────────
 
@@ -166,9 +171,11 @@ export class IntxClient extends EventEmitter {
         if (summary?.funding_hold) {
           // FCM limitation: futures_balance_summary yields an account-level funding_hold aggregate,
           // not per-instrument 8h funding rates. No per-instrument funding rate WebSocket channel exists in FCM.
+          const fundingRate = summary.funding_hold;
+          this._lastFundingRate = Number(fundingRate);
           this.emit('fundingRate', {
             instrument: 'FCM',
-            fundingRate: summary.funding_hold,
+            fundingRate,
             isFinal: false,
             timestamp: Date.now(),
             isStale: this._isStale,
