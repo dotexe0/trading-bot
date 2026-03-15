@@ -46,6 +46,18 @@ import { registerPerpRoutes } from './routes/perp.js';
 
 const log = createModuleLogger('dashboard-server');
 
+// ── Ring Buffer ──────────────────────────────────────────────────────
+
+class RingBuffer<T> {
+  private items: T[] = [];
+  constructor(private readonly maxSize: number) {}
+  push(item: T): void {
+    this.items.push(item);
+    if (this.items.length > this.maxSize) this.items.shift();
+  }
+  toArray(): T[] { return [...this.items]; }
+}
+
 // ── Types ────────────────────────────────────────────────────────────
 
 export interface DashboardDeps {
@@ -145,6 +157,13 @@ export async function createDashboardServer(
   // Instantiate broadcaster
   const broadcaster = new WsBroadcaster();
 
+  // Ring buffers for perp time-series panels (DASH-01 and DASH-02)
+  const fundingRingBuffer = new RingBuffer<{ instrument: string; time: number; value: number; color: string }>(500);
+  const pnlRingBuffer = new RingBuffer<{ time: number; value: number }>(1440);
+  let _lastPnlBroadcastMs = 0;
+  let _lastPnlBroadcastSecond = 0;
+  const PNL_THROTTLE_MS = 60_000;
+
   // Wire engine events to broadcaster
   for (const engine of deps.engines) {
     for (const [engineEvent, wsType] of Object.entries(ENGINE_EVENT_MAP)) {
@@ -169,6 +188,40 @@ export async function createDashboardServer(
     }
   }
 
+  // Additional fundingUpdate listener for DASH-01 (funding histogram) and DASH-02 (P&L curve)
+  // This is separate from PERP_EVENT_MAP which handles perpFundingUpdate for the live rate display.
+  for (const engine of (deps.perpEngines ?? [])) {
+    engine.on('fundingUpdate', (payload: { instrument?: string; currentFundingRate?: string; unrealizedPnl?: string }) => {
+      const now = Date.now();
+      const instrument = payload.instrument ?? 'UNKNOWN';
+      const rawRate = parseFloat(payload.currentFundingRate ?? '0');
+
+      // DASH-01: funding rate histogram bar
+      const bar = {
+        instrument,
+        time: Math.floor(now / 1000),
+        value: Math.abs(rawRate),
+        color: rawRate < 0 ? '#22c55e' : '#ef4444',
+      };
+      fundingRingBuffer.push(bar);
+      broadcaster.broadcast('perpFundingHistory' as any, bar);
+
+      // DASH-02: P&L curve (throttled to 1/minute)
+      if (now - _lastPnlBroadcastMs >= PNL_THROTTLE_MS) {
+        _lastPnlBroadcastMs = now;
+        let broadcastSecond = Math.floor(now / 1000);
+        if (broadcastSecond <= _lastPnlBroadcastSecond) {
+          broadcastSecond = _lastPnlBroadcastSecond + 1;
+        }
+        _lastPnlBroadcastSecond = broadcastSecond;
+        const pnlValue = parseFloat(payload.unrealizedPnl ?? '0');
+        const point = { time: broadcastSecond, value: pnlValue };
+        pnlRingBuffer.push(point);
+        broadcaster.broadcast('perpPnlUpdate' as any, point);
+      }
+    });
+  }
+
   // Build route dependencies
   const routeDeps: RouteDeps = {
     liveStateStore: deps.liveStateStore,
@@ -186,7 +239,7 @@ export async function createDashboardServer(
   // Register WebSocket handler
   await wsHandler(app, {
     broadcaster,
-    getSnapshot: () => buildSnapshot(routeDeps),
+    getSnapshot: () => buildSnapshot(routeDeps, fundingRingBuffer, pnlRingBuffer),
     onCommand: (cmd, ws) => handleCommand(cmd, routeDeps, broadcaster),
   });
 
@@ -231,7 +284,11 @@ export async function createDashboardServer(
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-function buildSnapshot(deps: RouteDeps) {
+function buildSnapshot(
+  deps: RouteDeps,
+  fundingRingBuffer?: RingBuffer<{ instrument: string; time: number; value: number; color: string }>,
+  pnlRingBuffer?: RingBuffer<{ time: number; value: number }>,
+) {
   const liveSessions = deps.liveStateStore.listSessions('running').map(toApiSession);
   const paperSessions = deps.sessionStore.listSessions('running').map(toApiPaperSession);
   const sessions = [...liveSessions, ...paperSessions];
@@ -279,7 +336,11 @@ function buildSnapshot(deps: RouteDeps) {
       })()
     : undefined;
 
-  return { sessions, trades, equity, strategies, risk };
+  return {
+    sessions, trades, equity, strategies, risk,
+    perpFundingHistory: fundingRingBuffer?.toArray() ?? [],
+    perpPnlHistory: pnlRingBuffer?.toArray() ?? [],
+  };
 }
 
 async function handleCommand(
