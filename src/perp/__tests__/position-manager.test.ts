@@ -13,14 +13,86 @@
  *  8. Emergency close flag reset — _emergencyCloseInProgress is false after successful close
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PerpPositionManager } from '../position-manager.js';
 import { FundingRateTracker } from '../funding-tracker.js';
+import { RegimeClassifier } from '../../regime/classifier.js';
+import { MarketRegime } from '../../regime/types.js';
+import { StrategyRegistry } from '../../strategies/registry.js';
 import type { IntxClient } from '../intx-client.js';
 import type { PerpStateStore } from '../perp-state-store.js';
 import type { IntxConfig } from '../config.js';
 import type { IntxMarkPriceEvent, IntxFundingRateEvent } from '../types.js';
+import type { RegimeLeaderboards, RegimeLeaderboardEntry, LeaderboardEntry } from '../../tournament/types.js';
+import type { IStrategy } from '../../strategies/types.js';
+import type { Candle } from '../../core/types.js';
+
+// ── Auto-switch helpers ────────────────────────────────────────────────────
+
+/**
+ * Mock registry that dispatches create() based on the 'strategy' field of the
+ * raw config. Enables auto-switch tests where regime change swaps strategies.
+ */
+class MultiStrategyMockRegistry extends StrategyRegistry {
+  private strategies: Map<string, IStrategy>;
+  constructor(strategies: Map<string, IStrategy>) {
+    super();
+    this.strategies = strategies;
+  }
+  override create(rawConfig: unknown): IStrategy {
+    const cfg = rawConfig as Record<string, unknown>;
+    const name = cfg.strategy as string;
+    const s = this.strategies.get(name);
+    if (!s) throw new Error(`No mock strategy registered for '${name}'`);
+    return s;
+  }
+}
+
+function makeRegimeLeaderboards(
+  trendingStrategy: string,
+  rangingStrategy: string,
+): RegimeLeaderboards {
+  const makeRegimeEntry = (strategyName: string): RegimeLeaderboardEntry => ({
+    rank: 1,
+    strategyName,
+    strategyConfig: { strategy: strategyName },
+    regimeSharpeRatio: 1.5,
+    regimeWinRate: 0.6,
+    regimeTradeCount: 10,
+    overallOosSharpe: 1.2,
+  });
+
+  const fallbackEntry: LeaderboardEntry = {
+    rank: 1,
+    strategyName: rangingStrategy,
+    strategyConfig: { strategy: rangingStrategy },
+    oosMetrics: {} as any,
+    isMetrics: {} as any,
+    robustnessRatio: 1.0,
+    windowCount: 3,
+  };
+
+  return {
+    [MarketRegime.TRENDING]: [makeRegimeEntry(trendingStrategy)],
+    [MarketRegime.RANGING]: [makeRegimeEntry(rangingStrategy)],
+    [MarketRegime.VOLATILE]: [],
+    fallbackEntry,
+  };
+}
+
+function makeCandle(close = '50000', index = 0): Candle {
+  return {
+    pair: 'BTC-USD',
+    timeframe: '1h',
+    timestamp: 1700000000000 + index * 3600000,
+    open: close,
+    high: String(Number(close) * 1.01),
+    low: String(Number(close) * 0.99),
+    close,
+    volume: '1',
+  };
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -631,5 +703,203 @@ describe('PerpPositionManager', () => {
 
       localManager.stop();
     });
+  });
+});
+
+// ── Auto-switch tests ──────────────────────────────────────────────────────
+//
+// These tests validate the three behavioral requirements of the regime
+// auto-switching state machine for PerpPositionManager:
+//
+//   PERP-PM-SW-01: immediate switch when no session open
+//   PERP-PM-SW-02: deferred switch executes when session closes
+//   PERP-PM-SW-03: empty regime falls back to overall winner
+//
+// vi.spyOn(RegimeClassifier.prototype, 'classify') controls returned regimes
+// without requiring real candle sequences long enough to produce ADX/ATR values.
+//
+// PerpPositionManager uses currentSession (not currentPosition) to track open state.
+// currentSession === null means flat.
+
+describe('auto-switch', () => {
+  let classifySpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  afterEach(() => {
+    classifySpy?.mockRestore();
+  });
+
+  /**
+   * Build a PerpPositionManager wired for auto-switch tests.
+   */
+  function makeAutoSwitchManager(
+    stratA: IStrategy,
+    stratB: IStrategy,
+    leaderboards: RegimeLeaderboards,
+  ) {
+    const ic = makeIntxClient() as any;
+    const ss = makeStateStore() as any;
+    const strategies = new Map<string, IStrategy>([
+      ['perp-strategy-a', stratA],
+      ['perp-strategy-b', stratB],
+    ]);
+    const mockRegistry = new MultiStrategyMockRegistry(strategies);
+    const mgr = new PerpPositionManager({
+      config: makeConfig(),
+      intxClient: ic,
+      stateStore: ss,
+      strategyRegistry: mockRegistry,
+      regimeLeaderboards: leaderboards,
+    });
+    return { mgr, ic, ss };
+  }
+
+  // PERP-PM-SW-01: Immediate switch when no session open ───────────────
+
+  it('PERP-PM-SW-01: immediately switches strategy on regime change when no session is open', () => {
+    const stratA: IStrategy = {
+      name: 'perp-strategy-a',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const stratB: IStrategy = {
+      name: 'perp-strategy-b',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('perp-strategy-b', 'perp-strategy-a');
+
+    // Call 1 returns RANGING (sets currentRegime=RANGING).
+    // Call 2+ returns TRENDING (regime change -> immediate switch since no session open).
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    const { mgr } = makeAutoSwitchManager(stratA, stratB, leaderboards);
+
+    const switchEvents: any[] = [];
+    mgr.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Candle 1: RANGING -> sets currentRegime=RANGING, no switch (no prior regime)
+    mgr.onCandle(makeCandle('50000', 0));
+    expect(switchEvents).toHaveLength(0);
+
+    // Candle 2: TRENDING -> RANGING!=TRENDING, no session -> immediate switch
+    mgr.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+  });
+
+  // PERP-PM-SW-02: Deferred switch executes when session closes ─────────
+
+  it('PERP-PM-SW-02: defers strategy switch until session closes', async () => {
+    // Approach: open session manually before regime change candle, then close it.
+    // This ensures currentSession is set BEFORE the regime change is detected.
+    //
+    // Timeline:
+    //   openPosition() manually -> currentSession set
+    //   Candle 1: RANGING -> currentRegime=RANGING (no prior regime, no switch)
+    //   Candle 2: TRENDING -> RANGING!=TRENDING, session open -> pendingSwitch set
+    //   closePosition() -> currentSession=null, pendingSwitch executes -> switch fires
+
+    const stratA: IStrategy = {
+      name: 'perp-strategy-a',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const stratB: IStrategy = {
+      name: 'perp-strategy-b',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('perp-strategy-b', 'perp-strategy-a');
+
+    // Call 1 returns RANGING (sets currentRegime=RANGING).
+    // Call 2+ returns TRENDING (triggers deferred switch because session is open).
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    const { mgr } = makeAutoSwitchManager(stratA, stratB, leaderboards);
+
+    const switchEvents: any[] = [];
+    mgr.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Open position manually before any regime change candle
+    await mgr.openPosition({
+      instrument: 'BTC-USD',
+      direction: 'long',
+      size: '0.01',
+      leverage: 5,
+      entryPrice: '50000',
+    });
+    expect(mgr.isPositionOpen()).toBe(true);
+
+    // Candle 1: RANGING -> currentRegime=RANGING; session open but no regime change -> no switch
+    mgr.onCandle(makeCandle('50000', 0));
+    expect(switchEvents).toHaveLength(0);
+
+    // Candle 2: TRENDING -> RANGING!=TRENDING, session open -> pendingSwitch set (deferred)
+    mgr.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(0); // switch deferred
+
+    // Close session -> pendingSwitch executes in closePosition() after currentSession=null
+    await mgr.closePosition('test-close');
+    expect(mgr.isPositionOpen()).toBe(false);
+
+    // Pending switch must have fired
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+  });
+
+  // PERP-PM-SW-03: Empty regime falls back to overall winner ────────────
+
+  it('PERP-PM-SW-03: empty VOLATILE regime falls back to overall tournament winner', () => {
+    const stratA: IStrategy = {
+      name: 'perp-strategy-a',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const stratB: IStrategy = {
+      name: 'perp-strategy-b',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    // VOLATILE is empty in makeRegimeLeaderboards; fallbackEntry uses rangingStrategy='perp-strategy-b'
+    const leaderboards = makeRegimeLeaderboards('perp-strategy-a', 'perp-strategy-b');
+
+    // Call 1 returns TRENDING (sets currentRegime=TRENDING).
+    // Call 2+ returns VOLATILE (empty regime -> fallback to 'perp-strategy-b').
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.TRENDING : MarketRegime.VOLATILE;
+    });
+
+    const { mgr } = makeAutoSwitchManager(stratA, stratB, leaderboards);
+
+    const switchEvents: any[] = [];
+    mgr.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Candle 1: TRENDING -> sets currentRegime=TRENDING, no switch (no prior regime)
+    mgr.onCandle(makeCandle('50000', 0));
+    expect(switchEvents).toHaveLength(0);
+
+    // Candle 2: VOLATILE -> VOLATILE leaderboard empty -> fallback to 'perp-strategy-b'
+    mgr.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
   });
 });

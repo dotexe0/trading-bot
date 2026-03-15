@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-14)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v2.0 Perp First-Class — Phase 39: Fee Gate and New Strategies
+**Current focus:** v2.0 Perp First-Class — Phase 40: Regime-Aware Perp Pipeline
 
 ## Current Position
 
-Phase: 39 of 41 (Fee Gate and New Strategies)
-Plan: 3 of TBD
+Phase: 40 of 41 (Regime-Aware Perp Pipeline)
+Plan: 1 of TBD
 Status: In Progress
-Last activity: 2026-03-15 — 39-03 complete (Extended perp registry to 4 strategies; verify-index-price.ts diagnostic script; 835 tests passing)
+Last activity: 2026-03-15 — 40-01 complete (executeStrategySwitch regime param in PaperPerpEngine + PerpPositionManager; regime-prefixed log format; 835 tests passing)
 
 Progress: [██████████████████░░░░░░░░░░░░] ~58% (39/~63 total plans est.)
 
@@ -49,6 +49,7 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - [39-01]: FEES-04 enforced: PerpRiskGate Check 4 FEE_DRAG_EXCESSIVE uses fixed FeeConfig constant (not swept param). lte() semantics: equal-to-fee rejected. feeConfig optional in PerpRiskGateOptions → DEFAULT_FEE_CONFIG fallback. expectedGain computed from tpTargetPct at both callsites.
 - [39-02]: FundingRateArbitrageStrategy: tournamentMode=true always returns []; regime gate RANGING/VOLATILE only; division guard for indexPrice=0; returns [] when indexPrice===markPrice (current FCM reality). BasisTradeStrategy: no regime filter (basis arb is regime-agnostic); SD=0 guard handles constant basis (FCM reality). markPriceProvider/basisProvider/tournamentMode excluded from Zod schemas (not serializable) — matches perp strategy pattern.
 - [39-03]: createPerpRegistry() now has 4 strategies (perp-momentum, perp-mean-reversion, funding-rate-arb, basis-trade); createLivePerpRegistry() adds optional markPriceProvider second param (existing callers unchanged); tournament:perp exits 0 with all 4 strategies; scripts/verify-index-price.ts documents FCM indexPrice===markPrice static analysis finding.
+- [40-01]: executeStrategySwitch regime? param optional (backward-compat); pendingSwitch type carries regime? so deferred switches preserve triggering regime; log format 'regime TRENDING: switching to PerpMomentumStrategy'; PerpPositionManager logs have no [PAPER] prefix per convention.
 
 ### Open Issues / Tech Debt
 
@@ -63,4 +64,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed 39-03-PLAN.md. Extended perp registry to 4 strategies; verify-index-price.ts diagnostic script; 835 tests passing.
+Stopped at: Completed 40-01-PLAN.md. executeStrategySwitch regime param in PaperPerpEngine + PerpPositionManager; regime-prefixed log format; 835 tests passing.

@@ -13,14 +13,86 @@
  *  6. No placeOrder calls: placeOrder mock throws; full round-trip still succeeds
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import { PaperPerpEngine } from '../paper-perp-engine.js';
 import { FundingRateTracker } from '../funding-tracker.js';
+import { RegimeClassifier } from '../../regime/classifier.js';
+import { MarketRegime } from '../../regime/types.js';
+import { StrategyRegistry } from '../../strategies/registry.js';
 import type { IntxClient } from '../intx-client.js';
 import type { PerpStateStore } from '../perp-state-store.js';
 import type { IntxConfig } from '../config.js';
 import type { IntxMarkPriceEvent, IntxFundingRateEvent } from '../types.js';
+import type { RegimeLeaderboards, RegimeLeaderboardEntry, LeaderboardEntry } from '../../tournament/types.js';
+import type { IStrategy } from '../../strategies/types.js';
+import type { Candle } from '../../core/types.js';
+
+// ── Auto-switch helpers ────────────────────────────────────────────────────
+
+/**
+ * Mock registry that dispatches create() based on the 'strategy' field of the
+ * raw config. Enables auto-switch tests where regime change swaps strategies.
+ */
+class MultiStrategyMockRegistry extends StrategyRegistry {
+  private strategies: Map<string, IStrategy>;
+  constructor(strategies: Map<string, IStrategy>) {
+    super();
+    this.strategies = strategies;
+  }
+  override create(rawConfig: unknown): IStrategy {
+    const cfg = rawConfig as Record<string, unknown>;
+    const name = cfg.strategy as string;
+    const s = this.strategies.get(name);
+    if (!s) throw new Error(`No mock strategy registered for '${name}'`);
+    return s;
+  }
+}
+
+function makeRegimeLeaderboards(
+  trendingStrategy: string,
+  rangingStrategy: string,
+): RegimeLeaderboards {
+  const makeRegimeEntry = (strategyName: string): RegimeLeaderboardEntry => ({
+    rank: 1,
+    strategyName,
+    strategyConfig: { strategy: strategyName },
+    regimeSharpeRatio: 1.5,
+    regimeWinRate: 0.6,
+    regimeTradeCount: 10,
+    overallOosSharpe: 1.2,
+  });
+
+  const fallbackEntry: LeaderboardEntry = {
+    rank: 1,
+    strategyName: rangingStrategy,
+    strategyConfig: { strategy: rangingStrategy },
+    oosMetrics: {} as any,
+    isMetrics: {} as any,
+    robustnessRatio: 1.0,
+    windowCount: 3,
+  };
+
+  return {
+    [MarketRegime.TRENDING]: [makeRegimeEntry(trendingStrategy)],
+    [MarketRegime.RANGING]: [makeRegimeEntry(rangingStrategy)],
+    [MarketRegime.VOLATILE]: [],
+    fallbackEntry,
+  };
+}
+
+function makeCandle(close = '50000', index = 0): Candle {
+  return {
+    pair: 'BTC-USD',
+    timeframe: '1h',
+    timestamp: 1700000000000 + index * 3600000,
+    open: close,
+    high: String(Number(close) * 1.01),
+    low: String(Number(close) * 0.99),
+    close,
+    volume: '1',
+  };
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -421,5 +493,195 @@ describe('PaperPerpEngine', () => {
 
       engine.stop();
     });
+  });
+});
+
+// ── Auto-switch tests ──────────────────────────────────────────────────────
+//
+// These tests validate the three behavioral requirements of the regime
+// auto-switching state machine for PaperPerpEngine:
+//
+//   PERP-SW-01: immediate switch when no position open
+//   PERP-SW-02: deferred switch executes when position closes
+//   PERP-SW-03: empty regime falls back to overall winner
+//
+// vi.spyOn(RegimeClassifier.prototype, 'classify') controls returned regimes
+// without requiring real candle sequences long enough to produce ADX/ATR values.
+
+describe('auto-switch', () => {
+  let classifySpy: ReturnType<typeof vi.spyOn> | undefined;
+
+  afterEach(() => {
+    classifySpy?.mockRestore();
+  });
+
+  /**
+   * Build a PaperPerpEngine wired for auto-switch tests.
+   * Uses a MultiStrategyMockRegistry that returns strategies by name from config.
+   */
+  function makeAutoSwitchEngine(
+    stratA: IStrategy,
+    stratB: IStrategy,
+    leaderboards: RegimeLeaderboards,
+  ) {
+    const ic = makeIntxClient();
+    const ss = makeStateStore();
+    const strategies = new Map<string, IStrategy>([
+      ['perp-strategy-a', stratA],
+      ['perp-strategy-b', stratB],
+    ]);
+    const mockRegistry = new MultiStrategyMockRegistry(strategies);
+    const engine = new PaperPerpEngine({
+      config: makeConfig({ strategyConfig: { strategy: 'perp-strategy-a' } } as any),
+      intxClient: ic,
+      stateStore: ss,
+      strategyRegistry: mockRegistry,
+      regimeLeaderboards: leaderboards,
+    });
+    return { engine, ic, ss };
+  }
+
+  // PERP-SW-01: Immediate switch when no position open ─────────────────
+
+  it('PERP-SW-01: immediately switches strategy on regime change when no position is open', () => {
+    const stratA: IStrategy = {
+      name: 'perp-strategy-a',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const stratB: IStrategy = {
+      name: 'perp-strategy-b',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('perp-strategy-b', 'perp-strategy-a');
+
+    // Call 1 returns RANGING (sets currentRegime=RANGING).
+    // Call 2+ returns TRENDING (regime change -> immediate switch since no position).
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    const { engine } = makeAutoSwitchEngine(stratA, stratB, leaderboards);
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Candle 1: classify returns RANGING -> sets currentRegime=RANGING, no switch (no prior regime)
+    engine.onCandle(makeCandle('50000', 0));
+    expect(switchEvents).toHaveLength(0);
+
+    // Candle 2: classify returns TRENDING -> RANGING!=TRENDING, no position -> immediate switch
+    engine.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+  });
+
+  // PERP-SW-02: Deferred switch executes when position closes ──────────
+
+  it('PERP-SW-02: defers strategy switch until position closes', async () => {
+    // Approach: open position manually before regime change candle, then close it.
+    // This ensures the position is open BEFORE the regime change is detected in onCandle().
+    //
+    // Timeline:
+    //   openPaperPosition() manually -> currentPosition set
+    //   Candle 1: classify returns RANGING -> currentRegime=RANGING (no prior regime, no switch)
+    //   Candle 2: classify returns TRENDING -> RANGING!=TRENDING, position open -> pendingSwitch set
+    //   closePaperPosition() -> currentPosition=null, pendingSwitch executes -> switch fires
+
+    const stratA: IStrategy = {
+      name: 'perp-strategy-a',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const stratB: IStrategy = {
+      name: 'perp-strategy-b',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    const leaderboards = makeRegimeLeaderboards('perp-strategy-b', 'perp-strategy-a');
+
+    // Call 1 returns RANGING (sets currentRegime=RANGING).
+    // Call 2+ returns TRENDING (triggers deferred switch because position is open).
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.RANGING : MarketRegime.TRENDING;
+    });
+
+    const { engine } = makeAutoSwitchEngine(stratA, stratB, leaderboards);
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Open position before regime change detection
+    await engine.openPaperPosition('BTC-USD', 'long', '0.01', 5, '50000');
+    expect(engine.isPositionOpen()).toBe(true);
+
+    // Candle 1: RANGING -> sets currentRegime=RANGING; position open but no regime change -> no switch
+    engine.onCandle(makeCandle('50000', 0));
+    expect(switchEvents).toHaveLength(0);
+
+    // Candle 2: TRENDING -> RANGING!=TRENDING, position open -> pendingSwitch set (deferred)
+    engine.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(0); // switch deferred
+
+    // Close position -> pendingSwitch executes synchronously in closePaperPosition
+    engine.closePaperPosition('51000', 'test-close');
+    expect(engine.isPositionOpen()).toBe(false);
+
+    // Pending switch must have fired
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+  });
+
+  // PERP-SW-03: Empty regime falls back to overall winner ──────────────
+
+  it('PERP-SW-03: empty VOLATILE regime falls back to overall tournament winner', () => {
+    const stratA: IStrategy = {
+      name: 'perp-strategy-a',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const stratB: IStrategy = {
+      name: 'perp-strategy-b',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    // VOLATILE is empty in makeRegimeLeaderboards; fallbackEntry uses rangingStrategy='perp-strategy-b'
+    const leaderboards = makeRegimeLeaderboards('perp-strategy-a', 'perp-strategy-b');
+
+    // Call 1 returns TRENDING (sets currentRegime=TRENDING).
+    // Call 2+ returns VOLATILE (empty regime -> fallback to 'perp-strategy-b').
+    let classifyCallCount = 0;
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockImplementation(() => {
+      classifyCallCount++;
+      return classifyCallCount === 1 ? MarketRegime.TRENDING : MarketRegime.VOLATILE;
+    });
+
+    const { engine } = makeAutoSwitchEngine(stratA, stratB, leaderboards);
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Candle 1: TRENDING -> sets currentRegime=TRENDING, no switch (no prior regime)
+    engine.onCandle(makeCandle('50000', 0));
+    expect(switchEvents).toHaveLength(0);
+
+    // Candle 2: VOLATILE -> VOLATILE leaderboard is empty -> fallback to 'perp-strategy-b'
+    engine.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
   });
 });
