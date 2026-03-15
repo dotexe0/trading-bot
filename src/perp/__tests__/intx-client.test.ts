@@ -53,6 +53,7 @@ vi.mock('coinbase-api', () => {
 import { intxConfigSchema } from '../config.js';
 import { IntxClient } from '../intx-client.js';
 import { WebsocketClient as MockWSCtor } from 'coinbase-api';
+import { DEFAULT_FEE_CONFIG } from '../fee-config.js';
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
@@ -412,5 +413,66 @@ describe('IntxClient WebSocket streaming', () => {
     expect(received).toHaveLength(1);
 
     await client.stop();
+  });
+});
+
+// ── IntxClient.fetchFeeConfig() tests ────────────────────────────────
+
+describe('IntxClient.fetchFeeConfig()', () => {
+  // mockGetTransactionSummary declared locally — NOT yet wired to MockCBAdvancedTradeClient (RED phase)
+  const mockGetTransactionSummary = vi.fn();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (MockWSCtor as any)._instances = [];
+    mockGetTransactionSummary.mockReset();
+  });
+
+  it('Test 16: returns { takerFeeRate: 0.0003, makerFeeRate: 0, source: "api" } when API returns valid rates', async () => {
+    mockGetTransactionSummary.mockResolvedValueOnce({
+      fee_tier: { taker_fee_rate: '0.0003', maker_fee_rate: '0.0000' },
+    });
+    const client = makeClient();
+    const result = await client.fetchFeeConfig();
+    expect(result.takerFeeRate).toBe(0.0003);
+    expect(result.makerFeeRate).toBe(0);
+    expect(result.source).toBe('api');
+  });
+
+  it('Test 17: returns DEFAULT_FEE_CONFIG when API throws an error', async () => {
+    mockGetTransactionSummary.mockRejectedValueOnce(new Error('network timeout'));
+    const client = makeClient();
+    const result = await client.fetchFeeConfig();
+    expect(result).toEqual(DEFAULT_FEE_CONFIG);
+    expect(result.source).toBe('fallback');
+    expect(result.takerFeeRate).toBe(0.0003);
+  });
+
+  it('Test 18: returns DEFAULT_FEE_CONFIG when taker_fee_rate is empty string', async () => {
+    mockGetTransactionSummary.mockResolvedValueOnce({
+      fee_tier: { taker_fee_rate: '' },
+    });
+    const client = makeClient();
+    const result = await client.fetchFeeConfig();
+    expect(result).toEqual(DEFAULT_FEE_CONFIG);
+    expect(result.source).toBe('fallback');
+  });
+
+  it('Test 19: returns DEFAULT_FEE_CONFIG when fee_tier is missing (no fee_tier property)', async () => {
+    mockGetTransactionSummary.mockResolvedValueOnce({});
+    const client = makeClient();
+    const result = await client.fetchFeeConfig();
+    expect(result).toEqual(DEFAULT_FEE_CONFIG);
+    expect(result.source).toBe('fallback');
+  });
+
+  it('Test 20: returns DEFAULT_FEE_CONFIG when taker_fee_rate is out of range (> 0.1)', async () => {
+    mockGetTransactionSummary.mockResolvedValueOnce({
+      fee_tier: { taker_fee_rate: '0.9999' },
+    });
+    const client = makeClient();
+    const result = await client.fetchFeeConfig();
+    expect(result).toEqual(DEFAULT_FEE_CONFIG);
+    expect(result.source).toBe('fallback');
   });
 });
