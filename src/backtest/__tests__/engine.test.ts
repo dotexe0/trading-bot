@@ -424,6 +424,54 @@ describe('BacktestEngine', () => {
   });
 });
 
+// ── FEES-02: fee rate flows through to totalFees ─────────────────────
+
+describe('FEES-02: fee rate flows through to totalFees', () => {
+  it('higher feeTierTaker produces higher totalFees for same trades', () => {
+    candleCounter = 0;
+    const alwaysLong = new AlwaysLongStrategy();
+
+    const lowFeeRegistry = createMockRegistry(alwaysLong);
+    const highFeeRegistry = createMockRegistry(alwaysLong);
+
+    const lowFeeEngine = new BacktestEngine({
+      strategyRegistry: lowFeeRegistry,
+      indicatorEngine: new IndicatorEngine(),
+    });
+    const highFeeEngine = new BacktestEngine({
+      strategyRegistry: highFeeRegistry,
+      indicatorEngine: new IndicatorEngine(),
+    });
+
+    const candles = makeCandles(8);
+
+    const lowFeeConfig: BacktestConfig = {
+      ...makeDefaultConfig(),
+      strategyConfig: { strategy: 'always-long' },
+      feeTierTaker: 0.0003,
+      assumeTaker: true,
+      slippageBps: 0,
+    };
+    const highFeeConfig: BacktestConfig = {
+      ...makeDefaultConfig(),
+      strategyConfig: { strategy: 'always-long' },
+      feeTierTaker: 0.001,
+      assumeTaker: true,
+      slippageBps: 0,
+    };
+
+    const lowResult = lowFeeEngine.run(lowFeeConfig, candles);
+    const highResult = highFeeEngine.run(highFeeConfig, candles);
+
+    // Both runs use the same candles and strategy, so both should generate trades
+    expect(lowResult.trades.length).toBeGreaterThan(0);
+    expect(highResult.trades.length).toBeGreaterThan(0);
+
+    // Higher fee rate must produce strictly higher total fees
+    expect(highResult.totalFees.toNumber()).toBeGreaterThan(lowResult.totalFees.toNumber());
+  });
+});
+
 // ── Engine with RiskManager Integration Tests ─────────────────────────
 
 describe('BacktestEngine with RiskManager', () => {

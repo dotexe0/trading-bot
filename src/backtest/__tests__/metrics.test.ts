@@ -360,3 +360,29 @@ describe('MetricsCalculator', () => {
     });
   });
 });
+
+// ── FEES-03: fundingCost is separate from totalFees ────────────────────
+
+describe('fundingCost — FEES-03', () => {
+  const calc = new MetricsCalculator();
+
+  it('fundingCost passes through from BacktestResult to PerformanceMetrics', () => {
+    const result = makeResult({ fundingCost: ZERO });
+    const metrics = calc.calculate(result, '10000');
+    expect(metrics.fundingCost.isZero()).toBe(true);
+  });
+
+  it('fundingCost and totalFees are independent — adding them yields correct sum', () => {
+    const result = makeResult({ fundingCost: d('10'), totalFees: d('5') });
+    const metrics = calc.calculate(result, '10000');
+    expect(metrics.fundingCost.plus(metrics.totalFees).toNumber()).toBe(15);
+    expect(metrics.totalFees.toNumber()).toBe(5);    // not double-counted
+    expect(metrics.fundingCost.toNumber()).toBe(10); // not double-counted
+  });
+
+  it('fundingCost is a Decimal instance', () => {
+    const result = makeResult({ fundingCost: d('7.5') });
+    const metrics = calc.calculate(result, '10000');
+    expect(metrics.fundingCost).toBeInstanceOf(Decimal);
+  });
+});
