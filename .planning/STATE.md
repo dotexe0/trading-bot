@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 41 of 41 (Dashboard Time-Series Panels)
-Plan: 1 of TBD
+Plan: 2 of TBD
 Status: In Progress
-Last activity: 2026-03-15 — Phase 41 Plan 1 complete (perpFundingHistory + perpPnlUpdate WS types, ring buffers, P&L throttle, snapshot hydration, unrealizedPnl in fundingUpdate emit)
+Last activity: 2026-03-15 — Phase 41 Plan 2 complete (FundingHistoryChart, PnlCurveChart, LeverageHistoryChart components with imperative handles)
 
 Progress: [██████████████████░░░░░░░░░░░░] ~58% (39/~63 total plans est.)
 
@@ -53,6 +53,9 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - [40-03]: Structural test scans 15 lines after constructor call instead of exact line — tolerates minor formatting changes.
 - [Phase 40]: PERP-SW-02/PM-SW-02: Open position manually before regime candle to test deferred switch — avoids async timing issue with evaluate()-triggered openPaperPosition
 - [41-01]: DASH-01/02 ring buffers sized 500 bars (funding) and 1440 pts (P&L — 24h at 1/min). Dual-listener on fundingUpdate: PERP_EVENT_MAP handles perpFundingUpdate; separate listener handles histogram + P&L. buildSnapshot() extended with optional ring buffer params (not closures). unrealizedPnl? optional in fundingUpdate type (no-session branch omits). Monotonic second guard on P&L broadcast prevents duplicate chart timestamps.
+- [Phase 41]: FundingHistoryChart props use HistogramData[] directly (not PerpFundingBarPayload[]) — App.tsx converts at call site
+- [Phase 41]: PnlCurveChart BaselineSeries baseValue: { type: 'price', price: 0 } — type discriminant required by BaseValuePrice
+- [Phase 41]: LeverageHistoryChart is client-side only — no ring buffer hydration per DASH-03; chart shows empty on reconnect
 
 ### Open Issues / Tech Debt
 
@@ -67,4 +70,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed 41-01-PLAN.md. perpFundingHistory + perpPnlUpdate WS pipeline: types in both files, ring buffers in server/index.ts, unrealizedPnl in fundingUpdate emit, buildSnapshot hydration.
+Stopped at: Completed 41-02-PLAN.md. FundingHistoryChart (HistogramSeries), PnlCurveChart (BaselineSeries, zero baseline), LeverageHistoryChart (AreaSeries) — all with imperative handles and ResizeObserver cleanup.

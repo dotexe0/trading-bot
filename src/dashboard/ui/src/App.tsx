@@ -13,6 +13,9 @@ import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
 import { PerpPositionsPanel } from './components/PerpPositionsPanel.js';
 import { PerpFundingPanel } from './components/PerpFundingPanel.js';
 import { PerpLeverageMeter } from './components/PerpLeverageMeter.js';
+import { FundingHistoryChart } from './components/FundingHistoryChart.js';
+import { PnlCurveChart } from './components/PnlCurveChart.js';
+import { LeverageHistoryChart } from './components/LeverageHistoryChart.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { BacktestViewer } from './components/BacktestViewer.js';
 import { PortfolioStats } from './components/PortfolioStats.js';
@@ -22,6 +25,8 @@ import type {
   EquityUpdatePayload,
   PerpExposurePayload,
   PerpFundingPayload,
+  PerpFundingBarPayload,
+  PerpPnlPointPayload,
   PerpPositionPayload,
   PositionData,
   PriceTickPayload,
@@ -31,9 +36,12 @@ import type {
   StrategyInfo,
   TradeData,
 } from './types.js';
-import type { CandlestickData, Time } from 'lightweight-charts';
+import type { CandlestickData, HistogramData, BaselineData, AreaData, Time } from 'lightweight-charts';
 import type { PriceChartHandle } from './components/PriceChart.js';
 import type { EquityCurveHandle } from './components/EquityCurve.js';
+import type { FundingHistoryChartHandle } from './components/FundingHistoryChart.js';
+import type { PnlCurveChartHandle } from './components/PnlCurveChart.js';
+import type { LeverageHistoryChartHandle } from './components/LeverageHistoryChart.js';
 
 const WS_URL =
   typeof window !== 'undefined'
@@ -66,16 +74,28 @@ function App(): React.ReactElement {
     exposureCapUsd: '0.00',
     utilizationPct: '0.00',
   });
+  const [fundingData, setFundingData] = useState<HistogramData[]>([]);
+  const [pnlData, setPnlData] = useState<BaselineData[]>([]);
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
   const equityCurveRef = useRef<EquityCurveHandle>(null);
+  const fundingHistoryRef = useRef<FundingHistoryChartHandle>(null);
+  const pnlCurveRef = useRef<PnlCurveChartHandle>(null);
+  const leverageHistoryRef = useRef<LeverageHistoryChartHandle>(null);
 
   // ── Per-pair candle buffers (no re-render on tick) ────────────────
   const candleBuffers = useRef<Record<'BTC-USD' | 'ETH-USD', CandlestickData[]>>({
     'BTC-USD': [],
     'ETH-USD': [],
   });
+
+  // ── Client-side ring buffers for DASH-01 and DASH-02 ─────────────
+  const fundingBarsRef = useRef<HistogramData[]>([]);
+  const pnlPointsRef = useRef<BaselineData[]>([]);
+  const MAX_PNL_POINTS = 1440;
+  // Track last leverage timestamp for monotonic zero-point (DASH-03 Pitfall 3)
+  const lastLeverageSecondRef = useRef<number>(0);
 
   // ── Fetch initial candle history for both pairs ───────────────────
   useEffect(() => {
@@ -255,6 +275,24 @@ function App(): React.ReactElement {
           if (snap.equity) setEquity(snap.equity);
           if (snap.strategies) setStrategies(snap.strategies);
           if (snap.risk) setRiskStatus(snap.risk);
+          // DASH-01: hydrate funding history from ring buffer snapshot
+          if (snap.perpFundingHistory && snap.perpFundingHistory.length > 0) {
+            fundingBarsRef.current = snap.perpFundingHistory.map((b) => ({
+              time: b.time as Time,
+              value: b.value,
+              color: b.color,
+            }));
+            // setData handled by chart's data prop — trigger re-render via state
+            setFundingData([...fundingBarsRef.current]);
+          }
+          // DASH-02: hydrate P&L history from ring buffer snapshot
+          if (snap.perpPnlHistory && snap.perpPnlHistory.length > 0) {
+            pnlPointsRef.current = snap.perpPnlHistory.map((p) => ({
+              time: p.time as Time,
+              value: p.value,
+            }));
+            setPnlData([...pnlPointsRef.current]);
+          }
           break;
         }
 
@@ -348,9 +386,46 @@ function App(): React.ReactElement {
           break;
         }
 
+        case 'perpFundingHistory': {
+          const bar = payload as PerpFundingBarPayload;
+          const histBar: HistogramData = {
+            time: bar.time as Time,
+            value: bar.value,
+            color: bar.color,
+          };
+          fundingBarsRef.current.push(histBar);
+          fundingHistoryRef.current?.addBar(histBar);
+          break;
+        }
+
+        case 'perpPnlUpdate': {
+          const pnlPayload = payload as PerpPnlPointPayload;
+          const pnlPoint: BaselineData = {
+            time: pnlPayload.time as Time,
+            value: pnlPayload.value,
+          };
+          pnlPointsRef.current.push(pnlPoint);
+          if (pnlPointsRef.current.length > MAX_PNL_POINTS) pnlPointsRef.current.shift();
+          pnlCurveRef.current?.addPoint(pnlPoint);
+          break;
+        }
+
         case 'perpExposureUpdate': {
           const exposure = payload as PerpExposurePayload;
           setPerpExposure(exposure);
+          // DASH-03: push to leverage history chart (client-side time series)
+          const nowSec = Math.floor(Date.now() / 1000);
+          const pointTime = nowSec > lastLeverageSecondRef.current
+            ? nowSec
+            : lastLeverageSecondRef.current + 1;
+          lastLeverageSecondRef.current = pointTime;
+          const utilizationVal = parseFloat(exposure.utilizationPct);
+          leverageHistoryRef.current?.addPoint({ time: pointTime as Time, value: utilizationVal } as AreaData);
+          // DASH-02: clear P&L ring buffer when position closes
+          if (exposure.utilizationPct === '0.00') {
+            pnlPointsRef.current = [];
+            setPnlData([]);
+          }
           break;
         }
 
@@ -459,6 +534,21 @@ function App(): React.ReactElement {
           <div className="panel">
             <div className="panel-title">Perp Leverage Utilization</div>
             <PerpLeverageMeter exposure={perpExposure} />
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">Funding Rate History</div>
+            <FundingHistoryChart ref={fundingHistoryRef} data={fundingData} />
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">P&L Curve</div>
+            <PnlCurveChart ref={pnlCurveRef} data={pnlData} />
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">Leverage Utilization History</div>
+            <LeverageHistoryChart ref={leverageHistoryRef} data={[]} />
           </div>
 
           <div className="panel">
