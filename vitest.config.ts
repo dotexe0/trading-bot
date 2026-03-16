@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    exclude: ['node_modules', 'dist', '.claude', '.planning', 'src/dashboard/ui/node_modules/**'],
+    exclude: ['node_modules', 'dist', '.claude', '.planning', 'src/dashboard/ui/**'],
     passWithNoTests: true,
   },
 });
