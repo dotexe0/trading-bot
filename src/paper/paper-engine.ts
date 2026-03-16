@@ -39,6 +39,7 @@ import type { CorrelationConfig } from '../correlation/index.js';
 import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
 import type { ExitConfig } from '../risk/exit-logic/types.js';
 import type { RegimeLeaderboards } from '../tournament/types.js';
+import type { SpotSignalGate } from '../risk/spot-signal-gate.js';
 
 const log = createModuleLogger('paper-engine');
 
@@ -64,6 +65,8 @@ export interface PaperTradingEngineOptions {
   candleRepo?: CandleRepository;
   /** Regime leaderboards from the latest tournament. When provided, enables auto-switching. */
   regimeLeaderboards?: RegimeLeaderboards;
+  /** When provided, blocks spot entry signals where expected move does not exceed fee drag. */
+  spotSignalGate?: SpotSignalGate;
 }
 
 export class PaperTradingEngine extends EventEmitter {
@@ -93,6 +96,7 @@ export class PaperTradingEngine extends EventEmitter {
   private correlationStore?: CorrelationStore;
   private readonly candleRepo?: CandleRepository;
   private readonly regimeLeaderboards?: RegimeLeaderboards;
+  private readonly spotSignalGate?: SpotSignalGate;
   private currentRegime: import('../regime/types.js').MarketRegime | undefined = undefined;
   private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
   private cooldownCandlesRemaining: number = 0;
@@ -108,6 +112,7 @@ export class PaperTradingEngine extends EventEmitter {
     this.strategyStats = options.strategyStats;
     this.candleRepo = options.candleRepo;
     this.regimeLeaderboards = options.regimeLeaderboards;
+    this.spotSignalGate = options.spotSignalGate;
 
     if (options.correlationConfig?.enabled) {
       this.correlationCalculator = new CorrelationCalculator(
@@ -695,6 +700,19 @@ export class PaperTradingEngine extends EventEmitter {
 
     const currentPrice = d(candle.close);
     const currentEquity = this.portfolio.equity(currentPrice);
+
+    // Spot fee-drag gate: block entries where expected move <= round-trip fee
+    if (this.spotSignalGate) {
+      const key = `${candle.pair}:${candle.timeframe}`;
+      const buf = this.candleBuffer.get(key) ?? [];
+      const atrOutput = this.indicatorEngine.compute({ name: 'ATR', period: 14 }, buf);
+      const currentAtr = atrOutput.values.length > 0
+        ? d(atrOutput.values[atrOutput.values.length - 1] as number)
+        : null;
+      const notional = currentEquity.mul(d(String(DEFAULT_POSITION_SIZE_PCT)));
+      const gateResult = this.spotSignalGate.check(currentAtr, currentPrice, notional);
+      if (!gateResult.approved) return;
+    }
 
     let quantity: Decimal;
 

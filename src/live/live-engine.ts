@@ -37,6 +37,7 @@ import type { CorrelationConfig } from '../correlation/index.js';
 import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
 import type { ExitConfig } from '../risk/exit-logic/types.js';
 import type { RegimeLeaderboards } from '../tournament/types.js';
+import type { SpotSignalGate } from '../risk/spot-signal-gate.js';
 
 const log = createModuleLogger('live-engine');
 
@@ -70,6 +71,8 @@ export interface LiveTradingEngineOptions {
   correlationDbPath?: string;
   /** Regime leaderboards from the latest tournament. When provided, enables auto-switching. */
   regimeLeaderboards?: RegimeLeaderboards;
+  /** When provided, blocks spot entry signals where expected move does not exceed fee drag. */
+  spotSignalGate?: SpotSignalGate;
 }
 
 interface CurrentPosition {
@@ -114,6 +117,7 @@ export class LiveTradingEngine extends EventEmitter {
   private correlationCalculator?: CorrelationCalculator;
   private correlationStore?: CorrelationStore;
   private readonly regimeLeaderboards?: RegimeLeaderboards;
+  private readonly spotSignalGate?: SpotSignalGate;
   private currentRegime: import('../regime/types.js').MarketRegime | undefined = undefined;
   private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
   private cooldownCandlesRemaining: number = 0;
@@ -130,6 +134,7 @@ export class LiveTradingEngine extends EventEmitter {
     this.strategyStats = options.strategyStats;
     this.resumeSessionId = options.resumeSessionId;
     this.regimeLeaderboards = options.regimeLeaderboards;
+    this.spotSignalGate = options.spotSignalGate;
 
     if (options.correlationConfig?.enabled) {
       this.correlationCalculator = new CorrelationCalculator(
@@ -505,6 +510,20 @@ export class LiveTradingEngine extends EventEmitter {
 
     const currentPrice = d(candle.close);
     let equity = this.cashBalance;
+
+    // Spot fee-drag gate: block entries where expected move <= round-trip fee
+    if (this.spotSignalGate) {
+      const key = `${candle.pair}:${candle.timeframe}`;
+      const buf = this.candleBuffer.get(key) ?? [];
+      const atrOutput = this.indicatorEngine.compute({ name: 'ATR', period: 14 }, buf);
+      const currentAtr = atrOutput.values.length > 0
+        ? d(atrOutput.values[atrOutput.values.length - 1] as number)
+        : null;
+      const notional = equity.mul(d('0.95'));
+      const gateResult = this.spotSignalGate.check(currentAtr, currentPrice, notional);
+      if (!gateResult.approved) return;
+    }
+
     let quantity: Decimal;
 
     // Compute correlation discount scalar when in multi-pair mode.

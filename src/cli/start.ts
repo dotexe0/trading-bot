@@ -46,8 +46,9 @@ import {
   DEFAULT_GRID,
 } from '../optimizer/index.js';
 import type { OptimizerConfig } from '../optimizer/index.js';
-import { parseBacktestConfig } from '../backtest/types.js';
+import { parseBacktestConfig, DEFAULT_FEE_TAKER } from '../backtest/types.js';
 import type { RegimeLeaderboards } from '../tournament/types.js';
+import { SpotSignalGate } from '../risk/spot-signal-gate.js';
 
 // ── Resource tracking ──────────────────────────────────────────────
 
@@ -252,11 +253,18 @@ program
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
 
+      // Spot fee-drag gate: blocks entries whose expected move <= round-trip fee * multiple
+      const spotSignalGate = new SpotSignalGate({
+        takerFeeRate: DEFAULT_FEE_TAKER,
+        feeDragMultiple: 2.0,
+      });
+
       const backtestEngine = new BacktestEngine({
         strategyRegistry: registry,
         indicatorEngine,
         riskManager,
         riskConfig,
+        spotSignalGate,
       });
       const metricsCalculator = new MetricsCalculator();
       const walkForwardRunner = new WalkForwardRunner({
@@ -377,6 +385,7 @@ program
               riskManager,
               candleRepo: repo,
               regimeLeaderboards: result.regimeLeaderboards,
+              spotSignalGate,
             });
 
             const session = await engine.start();
@@ -463,6 +472,7 @@ program
           indicatorEngine,
           riskManager,
           candleRepo: repo,
+          spotSignalGate,
         });
         const session = await engine.start();
         paperEngines.push(engine);

@@ -38,12 +38,14 @@ import { MetricsCalculator } from './metrics.js';
 import type { MarketRegime } from '../regime/types.js';
 import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
 import type { ExitConfig } from '../risk/exit-logic/types.js';
+import type { SpotSignalGate } from '../risk/spot-signal-gate.js';
 
 export interface BacktestEngineOptions {
   strategyRegistry: StrategyRegistry;
   indicatorEngine: IndicatorEngine;
   riskManager?: RiskManager;
   riskConfig?: RiskConfig;
+  spotSignalGate?: SpotSignalGate;
 }
 
 export class BacktestEngine {
@@ -51,6 +53,7 @@ export class BacktestEngine {
   private readonly indicatorEngine: IndicatorEngine;
   private readonly riskManager?: RiskManager;
   private readonly riskConfig?: RiskConfig;
+  private readonly spotSignalGate?: SpotSignalGate;
   private readonly classifier = new RegimeClassifier();
 
   constructor(deps: BacktestEngineOptions) {
@@ -58,6 +61,7 @@ export class BacktestEngine {
     this.indicatorEngine = deps.indicatorEngine;
     this.riskManager = deps.riskManager;
     this.riskConfig = deps.riskConfig;
+    this.spotSignalGate = deps.spotSignalGate;
   }
 
   /**
@@ -278,6 +282,20 @@ export class BacktestEngine {
           exitManager = null;
           positionDirection = null;
         } else {
+          // Spot fee-drag gate: block entries where expected move <= round-trip fee
+          if (this.spotSignalGate) {
+            const atrOutput = this.indicatorEngine.compute(
+              { name: 'ATR', period: 14 },
+              candles.slice(0, i + 1),
+            );
+            const currentAtr = atrOutput.values.length > 0
+              ? d(atrOutput.values[atrOutput.values.length - 1] as number)
+              : null;
+            const notional = portfolio.equity(currentPrice).mul(d(validConfig.positionSizePct));
+            const gateResult = this.spotSignalGate.check(currentAtr, currentPrice, notional);
+            if (!gateResult.approved) continue;
+          }
+
           // Entry signal -- use risk manager if available
           let quantity: Decimal;
 

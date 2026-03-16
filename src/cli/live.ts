@@ -23,6 +23,8 @@ import { parseLiveConfig } from '../live/config.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { TournamentStore } from '../tournament/tournament-store.js';
+import { SpotSignalGate } from '../risk/spot-signal-gate.js';
+import { DEFAULT_FEE_TAKER } from '../backtest/types.js';
 
 const program = new Command();
 
@@ -80,6 +82,12 @@ program
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
 
+      // Spot fee-drag gate: blocks entries whose expected move <= round-trip fee * multiple
+      const spotSignalGate = new SpotSignalGate({
+        takerFeeRate: DEFAULT_FEE_TAKER,
+        feeDragMultiple: 2.0,
+      });
+
       const liveConfig = parseLiveConfig({
         pair,
         timeframe,
@@ -112,6 +120,7 @@ program
         indicatorEngine,
         riskManager,
         regimeLeaderboards,
+        spotSignalGate,
       });
 
       // Register SIGINT handler for graceful shutdown
