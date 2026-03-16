@@ -518,6 +518,59 @@ describe('PaperPerpEngine', () => {
       engine.stop();
     });
   });
+
+  // ── Test: markPriceUpdate with non-zero unrealizedPnl ─────────────
+  describe('markPriceUpdate event', () => {
+    it('emits markPriceUpdate with non-zero unrealizedPnl when price moves after open', async () => {
+      const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+      engine.start();
+
+      // Arrange: open a long position at entry price 50000
+      await engine.openPaperPosition(config.btcProductId, 'long', '1', 5, '50000');
+      const updates: Array<{ unrealizedPnl: string; markPrice: string; sessionId: string; instrument: string }> = [];
+      engine.on('markPriceUpdate', (payload) => updates.push(payload));
+
+      // Act: fire a mark price event at 51000 (moved +1000 from entry)
+      const markEvt: IntxMarkPriceEvent = {
+        instrument: config.btcProductId,
+        markPrice: '51000',
+        indexPrice: '51000',
+        timestamp: Date.now(),
+        isStale: false,
+      };
+      intxClient.emit('markPrice', markEvt);
+
+      // Assert
+      expect(updates).toHaveLength(1);
+      const pnl = parseFloat(updates[0].unrealizedPnl);
+      expect(pnl).toBeGreaterThan(0); // long position, price went up
+      expect(updates[0].markPrice).toBe('51000');
+
+      engine.stop();
+    });
+
+    it('does NOT emit markPriceUpdate when no position is open', () => {
+      const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+      engine.start();
+
+      const updates: any[] = [];
+      engine.on('markPriceUpdate', (payload) => updates.push(payload));
+
+      // Fire a mark price event with no open position
+      const markEvt: IntxMarkPriceEvent = {
+        instrument: config.btcProductId,
+        markPrice: '51000',
+        indexPrice: '51000',
+        timestamp: Date.now(),
+        isStale: false,
+      };
+      intxClient.emit('markPrice', markEvt);
+
+      expect(updates).toHaveLength(0);
+
+      engine.stop();
+    });
+  });
 });
 
 // ── Auto-switch tests ──────────────────────────────────────────────────────

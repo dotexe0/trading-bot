@@ -196,6 +196,20 @@ export class PerpPositionManager extends EventEmitter {
         markPrice: evt.markPrice,
       });
 
+      // Fix DASH-01 parity: update in-memory session so _computeUnrealizedPnl uses current price
+      session.markPrice = evt.markPrice;
+      // Emit mark-price-driven P&L update for real-time dashboard
+      const unrealizedPnl = this._computeUnrealizedPnl(
+        session,
+        session.cumulativeFundingCost ?? '0.00000000',
+      );
+      this.emit('markPriceUpdate', {
+        sessionId: session.id,
+        instrument: session.instrument,
+        markPrice: evt.markPrice,
+        unrealizedPnl,
+      });
+
       if (
         distancePct.lt(d(this.config.liquidationSafetyThresholdPct)) &&
         !this._emergencyCloseInProgress

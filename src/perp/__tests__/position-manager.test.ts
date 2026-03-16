@@ -704,6 +704,69 @@ describe('PerpPositionManager', () => {
       localManager.stop();
     });
   });
+
+  // ── Test: markPriceUpdate with non-zero unrealizedPnl ─────────────
+  describe('markPriceUpdate event', () => {
+    it('emits markPriceUpdate with non-zero unrealizedPnl when price moves after openPosition', async () => {
+      manager.start();
+
+      // Arrange: open a long position at entry price 50000
+      await manager.openPosition({
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        size: '1',
+        leverage: 5,
+        entryPrice: '50000',
+      });
+
+      const updates: Array<{ unrealizedPnl: string; markPrice: string; sessionId: string; instrument: string }> = [];
+      manager.on('markPriceUpdate', (payload) => updates.push(payload));
+
+      // Act: fire a mark price event at 51000 (moved +1000 from entry)
+      const markEvt: IntxMarkPriceEvent = {
+        instrument: 'BTC-PERP',
+        markPrice: '51000',
+        indexPrice: '51000',
+        timestamp: Date.now(),
+        isStale: false,
+      };
+      intxClient.emit('markPrice', markEvt);
+
+      // Wait briefly for the async handler
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      // Assert
+      expect(updates).toHaveLength(1);
+      const pnl = parseFloat(updates[0].unrealizedPnl);
+      expect(pnl).toBeGreaterThan(0); // long position, price went up
+      expect(updates[0].markPrice).toBe('51000');
+
+      manager.stop();
+    });
+
+    it('does NOT emit markPriceUpdate when no session is open', async () => {
+      manager.start();
+
+      const updates: any[] = [];
+      manager.on('markPriceUpdate', (payload) => updates.push(payload));
+
+      // Fire a mark price event with no open position
+      const markEvt: IntxMarkPriceEvent = {
+        instrument: 'BTC-PERP',
+        markPrice: '51000',
+        indexPrice: '51000',
+        timestamp: Date.now(),
+        isStale: false,
+      };
+      intxClient.emit('markPrice', markEvt);
+
+      await new Promise((resolve) => setTimeout(resolve, 10));
+
+      expect(updates).toHaveLength(0);
+
+      manager.stop();
+    });
+  });
 });
 
 // ── Auto-switch tests ──────────────────────────────────────────────────────
