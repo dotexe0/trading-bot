@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 
 ## Current Position
 
-Phase: 42 — Dashboard Metric Fixes
+Phase: 43 — Trade Diagnostics
 Plan: 02 complete
 Status: In progress
-Last activity: 2026-03-16 — 42-02 complete: markPriceUpdate WS wiring (5s throttle) + per-panel lastUpdatedAt timestamps
+Last activity: 2026-03-16 — 43-02 complete: entry-signal Pino INFO logging in spot + perp paper engines
 
-Progress: [████████████████████░░░░░░░░░░] ~65% (41/~45 phases, 0/~8 plans est.)
+Progress: [█████████████████████░░░░░░░░░] ~68% (42/~45 phases, 2/~8 plans est.)
 
 ## Performance Metrics
 
@@ -27,6 +27,8 @@ Progress: [████████████████████░░░
 **v2.1 In-progress:**
 - 42-01: 5 files changed, +146/−0 lines, 849 tests passing, 3 min
 - 42-02: 7 files changed, +117/−29 lines, 849 tests passing, 3 min
+- 43-01: 1 file changed, +68/−0 lines, 849 tests passing, 3 min
+- 43-02: 3 files changed, +167/−15 lines, 851 tests passing, 4 min
 
 ## Accumulated Context
 
@@ -77,6 +79,15 @@ All v1.0–v2.0 decisions logged in PROJECT.md Key Decisions table.
 - [42-02]: App.tsx perpMarkPriceUpdate case merges partial update via prev.map() — only updates markPrice/unrealizedPnl fields, preserves all other position data.
 - [42-02]: lastUpdatedAt?: number pattern on all three perp panels — shows 'Updated: HH:MM:SS' or 'Awaiting data' based on undefined state.
 
+**v2.1 execution notes (43-01):**
+- [43-01]: DIAG-01 per-trade fee attribution: perp branch shows grossPnl (realizedPnl), fundingCost (cumulativeFundingCost), estimatedFees as "N/A (paper)", netPnl = gross+funding; spot branch shows grossPnl (pnl+fees), totalFees (entry+exit), netPnl (pnl)
+- [43-01]: Tables print by default (not behind --trades flag) per DIAG-01 requirement
+- [43-01]: Perp taker fees not stored in perp_trades for paper mode — shown as "N/A (paper)" to avoid fabricating data
+
+**v2.1 execution notes (43-02):**
+- [43-02]: DIAG-02 entry-signal log placed before isFlat() guard in spot engine (logs even when position blocks entry); inside long/short guard in perp engine (only actionable directions)
+- [43-02]: vi.hoisted + vi.mock pattern for createModuleLogger interception -- required because module-level `const log = createModuleLogger()` runs before test body
+
 **v2.1 roadmap notes (revised 2026-03-15):**
 - Constraint: No new `npm run` scripts. All strategy performance stats, paper performance summaries, and live readiness status go in the dashboard as auto-updating panels. Only `npm run report` may be extended (DIAG-01).
 - Phase 42 (DASH-01/02/03): Investigate why unrealizedPnl and fundingCost arrive as 0 in dashboard despite v2.0 fixes; the [41-bugfix] notes are starting context — trace the full WS event path from PaperPerpEngine emit through WsBroadcaster to React panel.
@@ -101,4 +112,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-16
-Stopped at: Completed 42-02-PLAN.md. markPriceUpdate WS wiring complete: 5s P&L chart path + perpMarkPriceUpdate positions table path + per-panel timestamps. 849 tests passing. Phase 42 complete.
+Stopped at: Completed 43-02-PLAN.md. Entry-signal Pino INFO logging added to spot paper-engine.ts (processEntrySignal) and perp paper-perp-engine.ts (onCandle). 2 tests added. 851 tests passing.
