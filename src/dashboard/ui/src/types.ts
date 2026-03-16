@@ -70,6 +70,7 @@ export interface TradeData {
   pnl?: string;
   pnlPct?: string;
   holdingPeriodMs?: number;
+  strategyName?: string;
 }
 
 export interface EquityPoint {

@@ -45,6 +45,46 @@ export function PerformancePanel({ trades }: PerformancePanelProps): React.React
     return { tradeCount, winRate, avgWinPct, avgLossPct, winLossRatio };
   }, [trades]);
 
+  const strategyStats = useMemo(() => {
+    const completed = trades.filter(t => t.pnl !== undefined && t.pnl !== null && t.strategyName);
+    if (completed.length === 0) return [];
+
+    // Group by strategyName
+    const groups = new Map<string, typeof completed>();
+    for (const t of completed) {
+      const name = t.strategyName!;
+      if (!groups.has(name)) groups.set(name, []);
+      groups.get(name)!.push(t);
+    }
+
+    return Array.from(groups.entries()).map(([name, groupTrades]) => {
+      const count = groupTrades.length;
+      const wins = groupTrades.filter(t => parseFloat(t.pnl!) > 0);
+      const winRate = wins.length / count;
+
+      // Gross P&L = pnl (net) + total fees
+      const avgGrossPnl = groupTrades.reduce((sum, t) => {
+        const fees = parseFloat(t.entryFee) + parseFloat(t.exitFee ?? '0');
+        const net = parseFloat(t.pnl!);
+        return sum + (net + fees);
+      }, 0) / count;
+
+      const avgFees = groupTrades.reduce((sum, t) => {
+        return sum + parseFloat(t.entryFee) + parseFloat(t.exitFee ?? '0');
+      }, 0) / count;
+
+      const avgNetPnl = groupTrades.reduce((sum, t) => sum + parseFloat(t.pnl!), 0) / count;
+
+      // Fee-drag ratio: avgFees / |avgGrossPnl| -- how much of gross is eaten by fees
+      // Cap at 9999% to avoid Infinity display when grossPnl is 0
+      const feeDragRatio = Math.abs(avgGrossPnl) > 0
+        ? Math.min(avgFees / Math.abs(avgGrossPnl) * 100, 9999)
+        : 0;
+
+      return { name, count, winRate, avgGrossPnl, avgFees, avgNetPnl, feeDragRatio };
+    });
+  }, [trades]);
+
   if (!metrics) {
     return (
       <div className="panel">
@@ -83,6 +123,43 @@ export function PerformancePanel({ trades }: PerformancePanelProps): React.React
           <div className="perf-stat-label">Trades</div>
         </div>
       </div>
+      {strategyStats.length > 0 && (
+        <>
+          <div className="panel-title" style={{ marginTop: '12px' }}>Strategy Performance</div>
+          <table style={{ width: '100%', fontSize: '12px', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ color: '#94a3b8', textAlign: 'right' }}>
+                <th style={{ textAlign: 'left', paddingBottom: '4px' }}>Strategy</th>
+                <th>Trades</th>
+                <th>Win%</th>
+                <th>Gross</th>
+                <th>Fees</th>
+                <th>Net</th>
+                <th>FeeDrag</th>
+              </tr>
+            </thead>
+            <tbody>
+              {strategyStats.map(s => (
+                <tr key={s.name} style={{ textAlign: 'right', borderTop: '1px solid #1e293b' }}>
+                  <td style={{ textAlign: 'left', paddingRight: '8px', color: '#cbd5e1' }}>{s.name}</td>
+                  <td>{s.count}</td>
+                  <td>{(s.winRate * 100).toFixed(1)}%</td>
+                  <td style={{ color: s.avgGrossPnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                    {s.avgGrossPnl >= 0 ? '+' : ''}{s.avgGrossPnl.toFixed(4)}
+                  </td>
+                  <td style={{ color: '#f59e0b' }}>{s.avgFees.toFixed(4)}</td>
+                  <td style={{ color: s.avgNetPnl >= 0 ? '#22c55e' : '#ef4444' }}>
+                    {s.avgNetPnl >= 0 ? '+' : ''}{s.avgNetPnl.toFixed(4)}
+                  </td>
+                  <td style={{ color: s.feeDragRatio > 50 ? '#ef4444' : '#94a3b8' }}>
+                    {s.feeDragRatio.toFixed(1)}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }
