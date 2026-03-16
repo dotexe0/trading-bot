@@ -4,6 +4,7 @@ import type { PerpFundingPayload } from '../types.js';
 interface PerpFundingPanelProps {
   /** Map from FCM product ID to latest funding payload. */
   fundingRates: Record<string, PerpFundingPayload>;
+  lastUpdatedAt?: number;
 }
 
 /** FCM product IDs as emitted by PerpPositionManager fundingUpdate events. */
@@ -15,7 +16,7 @@ const DISPLAY_NAME: Record<string, string> = {
   'ETP-20DEC30-CDE': 'ETH-PERP',
 };
 
-export function PerpFundingPanel({ fundingRates }: PerpFundingPanelProps): React.ReactElement {
+export function PerpFundingPanel({ fundingRates, lastUpdatedAt }: PerpFundingPanelProps): React.ReactElement {
   return (
     <div>
       <table className="data-table">
@@ -45,6 +46,11 @@ export function PerpFundingPanel({ fundingRates }: PerpFundingPanelProps): React
           })}
         </tbody>
       </table>
+      <div style={{ fontSize: '11px', color: '#6b7280', marginTop: '0.25rem', textAlign: 'right' }}>
+        {lastUpdatedAt
+          ? `Updated: ${new Date(lastUpdatedAt).toLocaleTimeString()}`
+          : 'Awaiting data'}
+      </div>
     </div>
   );
 }

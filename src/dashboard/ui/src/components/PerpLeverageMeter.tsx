@@ -4,9 +4,10 @@ import type { PerpExposurePayload } from '../types.js';
 
 interface PerpLeverageMeterProps {
   exposure: PerpExposurePayload;
+  lastUpdatedAt?: number;
 }
 
-export function PerpLeverageMeter({ exposure }: PerpLeverageMeterProps): React.ReactElement {
+export function PerpLeverageMeter({ exposure, lastUpdatedAt }: PerpLeverageMeterProps): React.ReactElement {
   const utilization = parseFloat(exposure.utilizationPct);
   const maxDisplay = 120;
 
@@ -48,6 +49,11 @@ export function PerpLeverageMeter({ exposure }: PerpLeverageMeterProps): React.R
         {exposure.totalNotionalUsd !== '0.00'
           ? `$${exposure.totalNotionalUsd} notional`
           : 'No open positions'}
+      </div>
+      <div style={{ textAlign: 'center', fontSize: '11px', color: '#6b7280', marginTop: '0.25rem' }}>
+        {lastUpdatedAt
+          ? `Updated: ${new Date(lastUpdatedAt).toLocaleTimeString()}`
+          : 'Awaiting data'}
       </div>
     </div>
   );

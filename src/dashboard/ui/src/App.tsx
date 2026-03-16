@@ -76,6 +76,9 @@ function App(): React.ReactElement {
   });
   const [fundingData, setFundingData] = useState<HistogramData[]>([]);
   const [pnlData, setPnlData] = useState<BaselineData[]>([]);
+  const [perpPositionUpdatedAt, setPerpPositionUpdatedAt] = useState<number | undefined>(undefined);
+  const [perpFundingUpdatedAt, setPerpFundingUpdatedAt] = useState<number | undefined>(undefined);
+  const [perpExposureUpdatedAt, setPerpExposureUpdatedAt] = useState<number | undefined>(undefined);
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
@@ -376,6 +379,7 @@ function App(): React.ReactElement {
             }
             return filtered;
           });
+          setPerpPositionUpdatedAt(Date.now());
           break;
         }
 
@@ -383,6 +387,7 @@ function App(): React.ReactElement {
           const funding = payload as PerpFundingPayload;
           // fundingRates map is keyed by FCM product ID (funding.instrument field)
           setPerpFunding((prev) => ({ ...prev, [funding.instrument]: funding }));
+          setPerpFundingUpdatedAt(Date.now());
           break;
         }
 
@@ -413,6 +418,7 @@ function App(): React.ReactElement {
         case 'perpExposureUpdate': {
           const exposure = payload as PerpExposurePayload;
           setPerpExposure(exposure);
+          setPerpExposureUpdatedAt(Date.now());
           // DASH-03: push to leverage history chart (client-side time series)
           const nowSec = Math.floor(Date.now() / 1000);
           const pointTime = nowSec > lastLeverageSecondRef.current
@@ -426,6 +432,19 @@ function App(): React.ReactElement {
             pnlPointsRef.current = [];
             setPnlData([]);
           }
+          break;
+        }
+
+        case 'perpMarkPriceUpdate': {
+          const update = payload as { id: string; markPrice: string; unrealizedPnl: string };
+          setPerpPositions((prev) =>
+            prev.map((p) =>
+              p.id === update.id
+                ? { ...p, markPrice: update.markPrice, unrealizedPnl: update.unrealizedPnl }
+                : p,
+            ),
+          );
+          setPerpPositionUpdatedAt(Date.now());
           break;
         }
 
@@ -523,17 +542,17 @@ function App(): React.ReactElement {
 
           <div className="panel">
             <div className="panel-title">Perp Positions</div>
-            <PerpPositionsPanel positions={perpPositions} />
+            <PerpPositionsPanel positions={perpPositions} lastUpdatedAt={perpPositionUpdatedAt} />
           </div>
 
           <div className="panel">
             <div className="panel-title">Perp Funding Rates</div>
-            <PerpFundingPanel fundingRates={perpFunding} />
+            <PerpFundingPanel fundingRates={perpFunding} lastUpdatedAt={perpFundingUpdatedAt} />
           </div>
 
           <div className="panel">
             <div className="panel-title">Perp Leverage Utilization</div>
-            <PerpLeverageMeter exposure={perpExposure} />
+            <PerpLeverageMeter exposure={perpExposure} lastUpdatedAt={perpExposureUpdatedAt} />
           </div>
 
           <div className="panel">
