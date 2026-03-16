@@ -16,6 +16,8 @@ import { parseTournamentConfig } from '../tournament/config.js';
 import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { ExitConfigStore, hashStrategyConfig } from '../optimizer/index.js';
+import { SpotSignalGate } from '../risk/spot-signal-gate.js';
+import { DEFAULT_FEE_TAKER } from '../backtest/types.js';
 
 const program = new Command();
 
@@ -54,11 +56,19 @@ program
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
 
+      // Spot fee-drag gate: blocks entries whose expected move <= round-trip fee * multiple
+      const spotSignalGate = new SpotSignalGate({
+        takerFeeRate: DEFAULT_FEE_TAKER,
+        feeDragMultiple: config.spotStrategyOverrides.feeDragMultiple,
+        atrPeriod: config.spotStrategyOverrides.feeDragAtrPeriod,
+      });
+
       const backtestEngine = new BacktestEngine({
         strategyRegistry: registry,
         indicatorEngine,
         riskManager,
         riskConfig,
+        spotSignalGate,
       });
       const metricsCalculator = new MetricsCalculator();
       const walkForwardRunner = new WalkForwardRunner({
@@ -97,6 +107,25 @@ program
         }
       } finally {
         exitStore.close();
+      }
+
+      // Apply spot strategy parameter overrides from env/config (SIG-02)
+      if (strategyConfigs) {
+        const overrides = config.spotStrategyOverrides;
+        strategyConfigs = strategyConfigs.map((cfg) => {
+          const s = cfg.strategy as string;
+          const merged = { ...cfg };
+          if (s === 'rsi-mean-reversion' && overrides.rsiPeriod !== undefined) {
+            merged.period = overrides.rsiPeriod;
+          }
+          if (s === 'bollinger-breakout' && overrides.bbPeriod !== undefined) {
+            merged.period = overrides.bbPeriod;
+          }
+          if (s === 'z-score-mean-reversion' && overrides.zScoreWindow !== undefined) {
+            merged.period = overrides.zScoreWindow;
+          }
+          return merged;
+        });
       }
 
       const tournamentConfig = parseTournamentConfig({

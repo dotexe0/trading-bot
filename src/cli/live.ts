@@ -85,7 +85,8 @@ program
       // Spot fee-drag gate: blocks entries whose expected move <= round-trip fee * multiple
       const spotSignalGate = new SpotSignalGate({
         takerFeeRate: DEFAULT_FEE_TAKER,
-        feeDragMultiple: 2.0,
+        feeDragMultiple: config.spotStrategyOverrides.feeDragMultiple,
+        atrPeriod: config.spotStrategyOverrides.feeDragAtrPeriod,
       });
 
       const liveConfig = parseLiveConfig({

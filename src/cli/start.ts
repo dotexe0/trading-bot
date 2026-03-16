@@ -256,7 +256,8 @@ program
       // Spot fee-drag gate: blocks entries whose expected move <= round-trip fee * multiple
       const spotSignalGate = new SpotSignalGate({
         takerFeeRate: DEFAULT_FEE_TAKER,
-        feeDragMultiple: 2.0,
+        feeDragMultiple: config.spotStrategyOverrides.feeDragMultiple,
+        atrPeriod: config.spotStrategyOverrides.feeDragAtrPeriod,
       });
 
       const backtestEngine = new BacktestEngine({
@@ -337,6 +338,25 @@ program
           } finally {
             exitStore.close();
           }
+        }
+
+        // Apply spot strategy parameter overrides from env/config (SIG-02)
+        if (strategyConfigs) {
+          const overrides = config.spotStrategyOverrides;
+          strategyConfigs = strategyConfigs.map((cfg) => {
+            const s = cfg.strategy as string;
+            const merged = { ...cfg };
+            if (s === 'rsi-mean-reversion' && overrides.rsiPeriod !== undefined) {
+              merged.period = overrides.rsiPeriod;
+            }
+            if (s === 'bollinger-breakout' && overrides.bbPeriod !== undefined) {
+              merged.period = overrides.bbPeriod;
+            }
+            if (s === 'z-score-mean-reversion' && overrides.zScoreWindow !== undefined) {
+              merged.period = overrides.zScoreWindow;
+            }
+            return merged;
+          });
         }
 
         const tournamentConfig = parseTournamentConfig({

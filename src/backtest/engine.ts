@@ -285,7 +285,7 @@ export class BacktestEngine {
           // Spot fee-drag gate: block entries where expected move <= round-trip fee
           if (this.spotSignalGate) {
             const atrOutput = this.indicatorEngine.compute(
-              { name: 'ATR', period: 14 },
+              { name: 'ATR', period: this.spotSignalGate.atrPeriod },
               candles.slice(0, i + 1),
             );
             const currentAtr = atrOutput.values.length > 0

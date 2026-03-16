@@ -515,7 +515,7 @@ export class LiveTradingEngine extends EventEmitter {
     if (this.spotSignalGate) {
       const key = `${candle.pair}:${candle.timeframe}`;
       const buf = this.candleBuffer.get(key) ?? [];
-      const atrOutput = this.indicatorEngine.compute({ name: 'ATR', period: 14 }, buf);
+      const atrOutput = this.indicatorEngine.compute({ name: 'ATR', period: this.spotSignalGate.atrPeriod }, buf);
       const currentAtr = atrOutput.values.length > 0
         ? d(atrOutput.values[atrOutput.values.length - 1] as number)
         : null;

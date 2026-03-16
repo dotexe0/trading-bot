@@ -25,6 +25,8 @@ export interface SpotSignalGateOptions {
   takerFeeRate: number;
   /** Fee drag multiple -- FIXED CONSTANT per FEES-04 rule. Never swept as optimizer param. */
   feeDragMultiple: number;
+  /** ATR period used for fee-drag expected-move estimation. Default 14. */
+  atrPeriod?: number;
 }
 
 /** Result of a SpotSignalGate check. */
@@ -37,10 +39,13 @@ export interface SpotGateResult {
 export class SpotSignalGate {
   private readonly _takerRate: number;
   private readonly _multiple: number;
+  /** ATR period for expected-move estimation. Engines read this when computing ATR. */
+  readonly atrPeriod: number;
 
   constructor(options: SpotSignalGateOptions) {
     this._takerRate = options.takerFeeRate;
     this._multiple = options.feeDragMultiple;
+    this.atrPeriod = options.atrPeriod ?? 14;
   }
 
   /**
