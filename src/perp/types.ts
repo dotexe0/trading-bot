@@ -147,6 +147,8 @@ export interface PerpPositionManagerEvents {
   strategySwitch: [{ newStrategy: string }];
   /** Emitted on each non-stale funding rate event — even when no position is open (sessionId is null). */
   fundingUpdate: [{ sessionId: string | null; instrument: string; currentFundingRate: string; cumulativeFundingCost: string; cumulativeFundingPct: string; unrealizedPnl?: string }];
+  /** Emitted on each non-stale markPrice event when a position is open, with current unrealized P&L. */
+  markPriceUpdate: [{ sessionId: string; instrument: string; markPrice: string; unrealizedPnl: string }];
   /** Emitted when cumulative funding cost exceeds the drain threshold. */
   fundingDrain: [PerpSession, { cumulativeFundingCost: string }];
   /** Emitted after positionOpened and positionClosed with current total notional vs cap. */

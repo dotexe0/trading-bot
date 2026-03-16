@@ -578,6 +578,20 @@ export class PaperPerpEngine extends EventEmitter {
       // Persist latest mark price
       this.stateStore.updateSession(session.id, { markPrice: evt.markPrice });
 
+      // Fix DASH-01: update in-memory session so _computeUnrealizedPnl uses current price
+      session.markPrice = evt.markPrice;
+      // Emit mark-price-driven P&L update for real-time dashboard chart
+      const unrealizedPnl = this._computeUnrealizedPnl(
+        session,
+        session.cumulativeFundingCost ?? '0.00000000',
+      );
+      this.emit('markPriceUpdate', {
+        sessionId: session.id,
+        instrument: session.instrument,
+        markPrice: evt.markPrice,
+        unrealizedPnl,
+      });
+
       // Emergency close if dangerously close to liquidation
       if (
         distancePct.lt(d(this.config.liquidationSafetyThresholdPct)) &&
