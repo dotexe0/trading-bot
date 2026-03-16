@@ -163,6 +163,9 @@ export async function createDashboardServer(
   let _lastPnlBroadcastMs = 0;
   let _lastPnlBroadcastSecond = 0;
   const PNL_THROTTLE_MS = 60_000;
+  const MARK_PRICE_PNL_THROTTLE_MS = 5_000; // 5s — separate from fundingUpdate 60s path
+  let _lastMarkPricePnlBroadcastMs = 0;
+  let _lastMarkPricePnlBroadcastSecond = 0;
 
   // Wire engine events to broadcaster
   for (const engine of deps.engines) {
@@ -219,6 +222,41 @@ export async function createDashboardServer(
         pnlRingBuffer.push(point);
         broadcaster.broadcast('perpPnlUpdate' as any, point);
       }
+    });
+  }
+
+  // markPriceUpdate → perpPnlUpdate (5s real-time path, separate from fundingUpdate 60s path)
+  // Also broadcasts perpMarkPriceUpdate so the positions table shows live unrealized P&L.
+  for (const engine of (deps.perpEngines ?? [])) {
+    engine.on('markPriceUpdate', (payload: {
+      sessionId: string;
+      instrument: string;
+      markPrice: string;
+      unrealizedPnl: string;
+    }) => {
+      const now = Date.now();
+
+      // Real-time P&L chart update (5s throttle, separate ring buffer push)
+      if (now - _lastMarkPricePnlBroadcastMs >= MARK_PRICE_PNL_THROTTLE_MS) {
+        _lastMarkPricePnlBroadcastMs = now;
+        let broadcastSecond = Math.floor(now / 1000);
+        if (broadcastSecond <= _lastMarkPricePnlBroadcastSecond) {
+          broadcastSecond = _lastMarkPricePnlBroadcastSecond + 1;
+        }
+        _lastMarkPricePnlBroadcastSecond = broadcastSecond;
+        const pnlValue = parseFloat(payload.unrealizedPnl);
+        const point = { time: broadcastSecond, value: pnlValue };
+        pnlRingBuffer.push(point);
+        broadcaster.broadcast('perpPnlUpdate', point);
+      }
+
+      // Live positions table update — broadcast partial update keyed by sessionId.
+      // App.tsx merges this into the existing positions map.
+      broadcaster.broadcast('perpMarkPriceUpdate', {
+        id: payload.sessionId,
+        markPrice: payload.markPrice,
+        unrealizedPnl: payload.unrealizedPnl,
+      });
     });
   }
 

@@ -26,7 +26,8 @@ export type WsMessageType =
   | 'perpFundingUpdate'
   | 'perpExposureUpdate'
   | 'perpFundingHistory'
-  | 'perpPnlUpdate';
+  | 'perpPnlUpdate'
+  | 'perpMarkPriceUpdate';
 
 export interface WsMessage {
   type: WsMessageType;
