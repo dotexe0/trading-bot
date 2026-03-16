@@ -341,6 +341,18 @@ export class PaperPerpEngine extends EventEmitter {
       );
       for (const signal of signals) {
         if (signal.direction === 'long' || signal.direction === 'short') {
+          log.info(
+            {
+              instrument: candle.pair,
+              strategyName: signal.strategyName,
+              direction: signal.direction,
+              reasoning: signal.reasoning,
+              confidence: signal.confidence,
+              timestamp: signal.timestamp,
+              event: 'entry-signal',
+            },
+            'Entry signal received',
+          );
           if (this.currentPosition === null) {
             const direction: PerpDirection = signal.direction;
             this.openPaperPosition(instrument, direction, '0.01', 5, candle.close).catch(

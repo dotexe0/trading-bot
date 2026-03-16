@@ -675,6 +675,21 @@ export class PaperTradingEngine extends EventEmitter {
   }
 
   private processEntrySignal(signal: Signal, candle: Candle): void {
+    if (signal.direction === 'long' || signal.direction === 'short') {
+      log.info(
+        {
+          instrument: candle.pair,
+          strategyName: signal.strategyName,
+          direction: signal.direction,
+          reasoning: signal.reasoning,
+          confidence: signal.confidence,
+          timestamp: signal.timestamp,
+          event: 'entry-signal',
+        },
+        'Entry signal received',
+      );
+    }
+
     // Don't enter if already in position
     if (!this.portfolio.isFlat()) return;
 

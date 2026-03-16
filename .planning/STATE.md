@@ -2,33 +2,37 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-14)
+See: .planning/PROJECT.md (updated 2026-03-15)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v2.0 Perp First-Class — Phase 41: Dashboard Time-Series Panels
+**Current focus:** v2.1 Pre-Live Reliability — dashboard fixes + strategy quality
 
 ## Current Position
 
-Phase: 41 of 41 (Dashboard Time-Series Panels)
-Plan: 3 of 3 (+ bug fixes)
-Status: Complete
-Last activity: 2026-03-15 — Phase 41 bug fixes: unrealizedPnl in PaperPerpEngine fundingUpdate emit; IntxClient emits fundingRate on any futures_balance_summary message
+Phase: 42 — Dashboard Metric Fixes
+Plan: 02 complete
+Status: In progress
+Last activity: 2026-03-16 — 42-02 complete: markPriceUpdate WS wiring (5s throttle) + per-panel lastUpdatedAt timestamps
 
-Progress: [██████████████████░░░░░░░░░░░░] ~58% (39/~63 total plans est.)
+Progress: [████████████████████░░░░░░░░░░] ~65% (41/~45 phases, 0/~8 plans est.)
 
 ## Performance Metrics
 
-**v1.5 Totals:**
-- 4 plans completed across 2 phases
-- 11 files changed, +446/−113 lines
-- 789 tests passing (64 test files)
-- Timeline: 1 day (2026-03-14)
+**v2.0 Totals:**
+- 16 plans completed across 6 phases
+- 41 files changed, +2,465/−88 lines
+- 845 tests passing (67 test files)
+- Timeline: 1 day (2026-03-15)
+
+**v2.1 In-progress:**
+- 42-01: 5 files changed, +146/−0 lines, 849 tests passing, 3 min
+- 42-02: 7 files changed, +117/−29 lines, 849 tests passing, 3 min
 
 ## Accumulated Context
 
 ### Decisions
 
-All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
+All v1.0–v2.0 decisions logged in PROJECT.md Key Decisions table.
 
 **v2.0 pre-execution notes (from research):**
 - INFRA-01: DONE (36-01) — Removed `if (!this.currentPosition) return` guard from `_onFundingRate` in paper-perp-engine.ts
@@ -62,10 +66,33 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - [41-bugfix]: PaperPerpEngine._onFundingRate() session-open branch missed unrealizedPnl in fundingUpdate emit — captured to local var, passed to both stateStore and emit. Server P&L chart was receiving undefined → 0.
 - [41-bugfix]: IntxClient guard `if (summary?.funding_hold)` skipped null/zero funding_hold → no fundingRate events in paper mode without real FCM position → histogram showed "awaiting data" forever. Fixed to emit on any non-null futures_balance_summary message.
 
+**v2.1 execution notes (42-01):**
+- [42-01]: DASH-01 root cause: session.markPrice never updated in memory — stateStore.updateSession persists to DB only, does not mutate in-memory session object. Fixed by adding `session.markPrice = evt.markPrice` before `_computeUnrealizedPnl` call in both engines.
+- [42-01]: PerpPositionManagerEvents now has markPriceUpdate: [{sessionId, instrument, markPrice, unrealizedPnl}] — emitted on every non-stale mark price tick when a position is open.
+- [42-01]: `session.cumulativeFundingCost ?? '0.00000000'` guard required before first funding event fires.
+
+**v2.1 execution notes (42-02):**
+- [42-02]: Two independent P&L throttle paths: MARK_PRICE_PNL_THROTTLE_MS=5s (markPriceUpdate) and PNL_THROTTLE_MS=60s (fundingUpdate) — same pnlRingBuffer, different rates.
+- [42-02]: perpMarkPriceUpdate added as proper WsMessageType member — no as any cast needed on broadcaster.broadcast().
+- [42-02]: App.tsx perpMarkPriceUpdate case merges partial update via prev.map() — only updates markPrice/unrealizedPnl fields, preserves all other position data.
+- [42-02]: lastUpdatedAt?: number pattern on all three perp panels — shows 'Updated: HH:MM:SS' or 'Awaiting data' based on undefined state.
+
+**v2.1 roadmap notes (revised 2026-03-15):**
+- Constraint: No new `npm run` scripts. All strategy performance stats, paper performance summaries, and live readiness status go in the dashboard as auto-updating panels. Only `npm run report` may be extended (DIAG-01).
+- Phase 42 (DASH-01/02/03): Investigate why unrealizedPnl and fundingCost arrive as 0 in dashboard despite v2.0 fixes; the [41-bugfix] notes are starting context — trace the full WS event path from PaperPerpEngine emit through WsBroadcaster to React panel.
+- Phase 43 (DIAG-01): Per-trade fee attribution extends existing `npm run report` output (gross P&L, fees, funding cost, net P&L per trade).
+- Phase 43 (DIAG-02): Signal logging uses existing Pino instance at INFO level — no new scripts or log levels.
+- Phase 43 (DIAG-03): "Strategy Performance" dashboard panel — per-strategy win rate, avg gross/net P&L, avg fees, fee-drag ratio; auto-updates via WebSocket as paper trades close. This is NOT a CLI command.
+- Phase 44 (SIG-01): Spot fee gate mirrors PerpRiskGate Check 4 — ATR-estimated expected move vs round-trip fee; uses existing FeeConfig from startup; configurable multiple via env/config.
+- Phase 44 (SIG-02): Strategy params currently hardcoded in strategy files; need config injection pattern via .env or config file; must be backward-compatible (defaults preserve existing behavior).
+- Phase 45 (GATE-01): Gate check runs inside `npm start` startup sequence — reads paper trade history from DB; configurable threshold (min trades + min net P&L); fails fast before any engine init.
+- Phase 45 (GATE-02): "Live Readiness" dashboard panel — go/no-go indicator, paper track record summary, risk config values, fee tier confirmation; auto-updates as new paper trades complete. This is NOT a CLI command.
+
 ### Open Issues / Tech Debt
 
 - fast-technical-indicators createRequire workaround (inherited, low priority)
 - `indexPrice` FCM field distinctness from `markPrice` confirmed equal (strategies return [] in practice, wired for future FCM fix)
+- Phase 42 DASH-01/02/03 fully resolved: engine emits markPriceUpdate → server broadcasts perpPnlUpdate (5s) + perpMarkPriceUpdate → panels update with timestamps
 
 ### Blockers
 
@@ -73,5 +100,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-15
-Stopped at: Phase 41 complete including two runtime bug fixes found during human UAT. 845 tests passing (67 files). Ready for /gsd:complete-milestone.
+Last session: 2026-03-16
+Stopped at: Completed 42-02-PLAN.md. markPriceUpdate WS wiring complete: 5s P&L chart path + perpMarkPriceUpdate positions table path + per-panel timestamps. 849 tests passing. Phase 42 complete.
