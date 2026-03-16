@@ -74,6 +74,7 @@ export interface ApiTrade {
   pnl?: string;
   pnlPct?: string;
   holdingPeriodMs?: number;
+  strategyName?: string;
 }
 
 export interface ApiOrder {
@@ -220,6 +221,7 @@ export function toApiTrade(trade: LiveTrade): ApiTrade {
 
 /** Convert a paper Trade (backtest type with Decimals) to a JSON-safe API trade. */
 export function toApiPaperTrade(sessionId: string, trade: Trade): ApiTrade {
+  const strategyName = trade.entryFill.signal.strategyName;
   return {
     sessionId,
     entryTimestamp: trade.entryFill.fillTimestamp,
@@ -235,6 +237,7 @@ export function toApiPaperTrade(sessionId: string, trade: Trade): ApiTrade {
     pnl: trade.pnl.toString(),
     pnlPct: trade.pnlPct.toString(),
     holdingPeriodMs: trade.holdingPeriodMs,
+    strategyName,
   };
 }
 
