@@ -264,6 +264,33 @@ describe('IntxClient WebSocket streaming', () => {
     await client.stop();
   });
 
+  it('Test 10b: futures_balance_summary with null funding_hold still emits fundingRate (Bug 2 regression)', async () => {
+    const client = makeClient();
+    await client.start();
+
+    const received: any[] = [];
+    client.on('fundingRate', (evt) => received.push(evt));
+
+    const ws = lastWsInstance();
+    // Simulate FCM message with null funding_hold (paper mode, no real position)
+    ws.emit('update', {
+      channel: 'futures_balance_summary',
+      events: [
+        {
+          fcm_balance_summary: {
+            funding_hold: null,
+          },
+        },
+      ],
+    });
+
+    expect(received).toHaveLength(1);
+    expect(received[0]!.fundingRate).toBe('0');
+    expect(received[0]!.instrument).toBe('FCM');
+
+    await client.stop();
+  });
+
   it('Test 11: close event sets _isStale=true and emits disconnected', async () => {
     vi.useFakeTimers();
 

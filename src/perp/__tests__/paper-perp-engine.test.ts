@@ -403,12 +403,36 @@ describe('PaperPerpEngine', () => {
       const payload = fundingUpdateFn.mock.calls[0][0];
       expect(payload.cumulativeFundingCost).toBe('-25.00000000');
       expect(payload.currentFundingRate).toBe('-25');
+      // unrealizedPnl included — no markPrice set so falls back to cumulativeFundingCost
+      expect(payload.unrealizedPnl).toBe('-25.00000000');
 
       // updateSession called with cumulativeFundingCost
       expect(stateStore.updateSession).toHaveBeenCalledWith(
         expect.any(String),
         expect.objectContaining({ cumulativeFundingCost: '-25.00000000' }),
       );
+
+      engine.stop();
+    });
+
+    it('fundingUpdate includes unrealizedPnl in payload with open position (Bug 1 regression)', async () => {
+      const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+      engine.start();
+
+      // Open long: entry=100000, size=0.1 — session.markPrice starts as entryPrice
+      await engine.openPaperPosition('BTC-PERP', 'long', '0.1', 5, '100000');
+
+      const fundingUpdateFn = vi.fn();
+      engine.on('fundingUpdate', fundingUpdateFn);
+
+      // Emit funding event: cumFundingCost='-5.00000000'
+      intxClient.emit('fundingRate', makeFundingRateEvt('-5'));
+
+      expect(fundingUpdateFn).toHaveBeenCalledOnce();
+      const payload = fundingUpdateFn.mock.calls[0][0];
+      // unrealizedPnl present — mark=entry so pricePnl=0, total = cumulativeFundingCost
+      expect(payload.unrealizedPnl).toBeDefined();
+      expect(payload.unrealizedPnl).toBe('-5.00000000');
 
       engine.stop();
     });

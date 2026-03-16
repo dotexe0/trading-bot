@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-14)
 ## Current Position
 
 Phase: 41 of 41 (Dashboard Time-Series Panels)
-Plan: 2 of TBD
-Status: In Progress
-Last activity: 2026-03-15 — Phase 41 Plan 2 complete (FundingHistoryChart, PnlCurveChart, LeverageHistoryChart components with imperative handles)
+Plan: 3 of 3 (+ bug fixes)
+Status: Complete
+Last activity: 2026-03-15 — Phase 41 bug fixes: unrealizedPnl in PaperPerpEngine fundingUpdate emit; IntxClient emits fundingRate on any futures_balance_summary message
 
 Progress: [██████████████████░░░░░░░░░░░░] ~58% (39/~63 total plans est.)
 
@@ -56,12 +56,16 @@ All v1.0–v1.5 decisions logged in PROJECT.md Key Decisions table.
 - [Phase 41]: FundingHistoryChart props use HistogramData[] directly (not PerpFundingBarPayload[]) — App.tsx converts at call site
 - [Phase 41]: PnlCurveChart BaselineSeries baseValue: { type: 'price', price: 0 } — type discriminant required by BaseValuePrice
 - [Phase 41]: LeverageHistoryChart is client-side only — no ring buffer hydration per DASH-03; chart shows empty on reconnect
+- [41-03]: P&L ring buffer cleared on perpExposureUpdate utilizationPct === '0.00' (position close) — prevents cross-position P&L accumulation; also triggers setPnlData([])
+- [41-03]: Monotonic timestamp guard for AreaSeries: nowSec > lastLeverageSecondRef ? nowSec : lastLeverageSecondRef + 1 — prevents duplicate chart timestamps
+- [41-03]: App.tsx chart data flows two ways — snapshot/initial via state prop (triggers setData), real-time via ref.current?.addPoint() (zero re-renders)
+- [41-bugfix]: PaperPerpEngine._onFundingRate() session-open branch missed unrealizedPnl in fundingUpdate emit — captured to local var, passed to both stateStore and emit. Server P&L chart was receiving undefined → 0.
+- [41-bugfix]: IntxClient guard `if (summary?.funding_hold)` skipped null/zero funding_hold → no fundingRate events in paper mode without real FCM position → histogram showed "awaiting data" forever. Fixed to emit on any non-null futures_balance_summary message.
 
 ### Open Issues / Tech Debt
 
 - fast-technical-indicators createRequire workaround (inherited, low priority)
 - `indexPrice` FCM field distinctness from `markPrice` confirmed equal (strategies return [] in practice, wired for future FCM fix)
-- `IntxFundingRateEvent.isFinal` reliable population in practice unconfirmed — verify in 8h paper mode before finalizing Phase 41 chart
 
 ### Blockers
 
@@ -70,4 +74,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-15
-Stopped at: Completed 41-02-PLAN.md. FundingHistoryChart (HistogramSeries), PnlCurveChart (BaselineSeries, zero baseline), LeverageHistoryChart (AreaSeries) — all with imperative handles and ResizeObserver cleanup.
+Stopped at: Phase 41 complete including two runtime bug fixes found during human UAT. 845 tests passing (67 files). Ready for /gsd:complete-milestone.

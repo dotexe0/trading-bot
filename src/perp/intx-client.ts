@@ -170,10 +170,11 @@ export class IntxClient extends EventEmitter {
       } else if (data?.channel === 'futures_balance_summary') {
         // Funding rate from balance summary
         const summary = data?.events?.[0]?.fcm_balance_summary ?? data;
-        if (summary?.funding_hold) {
+        if (summary !== undefined && summary !== null) {
           // FCM limitation: futures_balance_summary yields an account-level funding_hold aggregate,
           // not per-instrument 8h funding rates. No per-instrument funding rate WebSocket channel exists in FCM.
-          const fundingRate = summary.funding_hold;
+          // Emit on every summary message (even funding_hold=0) so the histogram stays live in paper mode.
+          const fundingRate = String(summary.funding_hold ?? '0');
           this._lastFundingRate = Number(fundingRate);
           this.emit('fundingRate', {
             instrument: 'FCM',

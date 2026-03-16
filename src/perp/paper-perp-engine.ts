@@ -220,9 +220,10 @@ export class PaperPerpEngine extends EventEmitter {
       const session = this.currentPosition.session;
       // NOTE: evt.instrument is always 'FCM' (account-level channel) — do NOT filter by instrument
       const update = this._fundingRateTracker.onFundingEvent(evt, session);
+      const unrealizedPnl = this._computeUnrealizedPnl(session, update.cumulativeFundingCost);
       this.stateStore.updateSession(session.id, {
         cumulativeFundingCost: update.cumulativeFundingCost,
-        unrealizedPnl: this._computeUnrealizedPnl(session, update.cumulativeFundingCost),
+        unrealizedPnl,
       });
       this.emit('fundingUpdate', {
         sessionId: session.id,
@@ -230,6 +231,7 @@ export class PaperPerpEngine extends EventEmitter {
         currentFundingRate: update.currentFundingRate,
         cumulativeFundingCost: update.cumulativeFundingCost,
         cumulativeFundingPct: update.cumulativeFundingPct,
+        unrealizedPnl,
       });
       if (update.drainTriggered && !this._fundingDrainInProgress && !this._emergencyCloseInProgress) {
         this._fundingDrainInProgress = true;
