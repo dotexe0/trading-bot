@@ -21,6 +21,21 @@ import { RegimeClassifier } from '../../regime/classifier.js';
 import { MarketRegime } from '../../regime/types.js';
 import type { RegimeLeaderboards, RegimeLeaderboardEntry } from '../../tournament/types.js';
 
+// ── Logger mock for entry-signal tests ────────────────────────────────
+const { mockLogInfo } = vi.hoisted(() => {
+  const mockLogInfo = vi.fn();
+  return { mockLogInfo };
+});
+vi.mock('../../core/logger.js', () => ({
+  createModuleLogger: () => ({
+    info: mockLogInfo,
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    child: vi.fn(),
+  }),
+}));
+
 // ── Mock LiveDataFeed ─────────────────────────────────────────────────
 
 class MockLiveDataFeed extends EventEmitter {
@@ -908,5 +923,88 @@ describe('auto-switch', () => {
     const exitFills = fills.filter((f) => f.purpose === 'EXIT');
     expect(entryFills).toHaveLength(1);
     expect(exitFills).toHaveLength(1);
+  });
+});
+
+// ── Entry-signal logging tests ─────────────────────────────────────────
+
+describe('entry-signal logging', () => {
+  let liveFeed: MockLiveDataFeed;
+  let sessionStore: ReturnType<typeof createMockSessionStore>;
+  let strategy: ConfigurableStrategy;
+  let registry: MockStrategyRegistry;
+  let indicatorEngine: IndicatorEngine;
+  let config: PaperTradingConfig;
+
+  beforeEach(() => {
+    mockLogInfo.mockClear();
+    liveFeed = new MockLiveDataFeed();
+    sessionStore = createMockSessionStore();
+    strategy = new ConfigurableStrategy();
+    registry = new MockStrategyRegistry(strategy);
+    indicatorEngine = new IndicatorEngine();
+    config = makeConfig();
+  });
+
+  function createEngine(overrides: any = {}) {
+    return new PaperTradingEngine({
+      config: overrides.config ?? config,
+      liveFeed: liveFeed as any,
+      sessionStore: sessionStore as any,
+      strategyRegistry: registry,
+      indicatorEngine,
+      ...overrides,
+    });
+  }
+
+  it('logs INFO entry-signal on long signal', async () => {
+    const engine = createEngine();
+    await engine.start();
+
+    // Queue a long signal on the 3rd candle
+    strategy.queueSignals([makeLongSignal(2)]);
+
+    for (let i = 0; i < 3; i++) {
+      liveFeed.emitCandle(makeCandle('50000', i));
+    }
+
+    // Find the entry-signal log call
+    const entrySignalCall = mockLogInfo.mock.calls.find(
+      (call) => call[0]?.event === 'entry-signal',
+    );
+    expect(entrySignalCall).toBeDefined();
+    expect(entrySignalCall![0]).toMatchObject({
+      event: 'entry-signal',
+      direction: 'long',
+      strategyName: 'test-strategy',
+      instrument: 'BTC-USD',
+    });
+    expect(entrySignalCall![0].confidence).toBeTruthy();
+    expect(entrySignalCall![0].timestamp).toBeTruthy();
+    expect(entrySignalCall![1]).toBe('Entry signal received');
+  });
+
+  it('does not log entry-signal on close signal', async () => {
+    const engine = createEngine();
+    await engine.start();
+
+    // Enter a position first
+    strategy.queueSignals([makeLongSignal(2)]);
+    for (let i = 0; i < 3; i++) {
+      liveFeed.emitCandle(makeCandle('50000', i));
+    }
+
+    // Clear the mock to isolate close signal behavior
+    mockLogInfo.mockClear();
+
+    // Now queue a close signal
+    strategy.queueSignals([makeCloseSignal(3)]);
+    liveFeed.emitCandle(makeCandle('51000', 3));
+
+    // Verify no entry-signal log was produced for the close signal
+    const entrySignalCall = mockLogInfo.mock.calls.find(
+      (call) => call[0]?.event === 'entry-signal',
+    );
+    expect(entrySignalCall).toBeUndefined();
   });
 });
