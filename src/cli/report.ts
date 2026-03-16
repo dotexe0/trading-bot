@@ -21,6 +21,7 @@ import { BacktestStore } from '../backtest/backtest-store.js';
 import { SessionStore } from '../paper/session-store.js';
 import { LiveStateStore } from '../live/state-store.js';
 import { PerpStateStore } from '../perp/perp-state-store.js';
+import type { PerpTradeRecord } from '../perp/perp-state-store.js';
 import { d, ZERO } from '../core/decimal.js';
 import type { Trade } from '../backtest/types.js';
 
@@ -190,6 +191,9 @@ program
           out.table('Net Funding Cost', netFundingCost.toFixed(8));
           out.table('Net Perp P&L', netPerpPnl.toFixed(8));
 
+          // Per-trade fee attribution table (DIAG-01)
+          printPerpTradeAttributionTable(trades);
+
           out.success('Report complete');
         } finally {
           perpStore.close();
@@ -214,6 +218,9 @@ program
       out.table('Avg Loss', `${report.avgLoss.mul(100).toFixed(2)}%`);
       out.table('Win/Loss Ratio', report.winLossRatio.toFixed(2));
       out.table('Profit Factor', report.profitFactor.toFixed(2));
+
+      // Per-trade fee attribution table (DIAG-01)
+      printSpotTradeAttributionTable(trades);
 
       if (opts.trades && report.tradeCount > 0) {
         const fmtTs = (ts: number) =>
@@ -258,5 +265,66 @@ program
       dbConn.sqlite.close();
     }
   });
+
+// ── Per-trade fee attribution helpers (DIAG-01) ──────────────────────
+
+/**
+ * Print a per-trade attribution table for perp trades.
+ * Shows gross P&L, funding cost, and net P&L for each closed trade.
+ */
+function printPerpTradeAttributionTable(trades: PerpTradeRecord[]): void {
+  if (trades.length === 0) return;
+
+  out.banner('Per-Trade Fee Attribution');
+  const header = `  ${'#'.padStart(3)}  ${'Direction'.padEnd(10)} ${'Gross P&L'.padStart(14)} ${'Funding Cost'.padStart(14)} ${'Est. Fees'.padStart(14)} ${'Net P&L'.padStart(14)}`;
+  console.log(pc.dim(header));
+
+  for (let i = 0; i < trades.length; i++) {
+    const t = trades[i];
+    const grossPnl = d(t.realizedPnl);
+    const fundingCost = d(t.cumulativeFundingCost);
+    const netPnl = grossPnl.plus(fundingCost);
+
+    const fmtGross = (grossPnl.gte(ZERO) ? '+' : '') + grossPnl.toFixed(8);
+    const fmtFunding = (fundingCost.gte(ZERO) ? '+' : '') + fundingCost.toFixed(8);
+    const fmtNet = (netPnl.gte(ZERO) ? '+' : '') + netPnl.toFixed(8);
+    const coloredNet = netPnl.gte(ZERO) ? pc.green(fmtNet) : pc.red(fmtNet);
+
+    console.log(
+      `  ${String(i + 1).padStart(3)}  ${t.direction.toUpperCase().padEnd(10)} ${fmtGross.padStart(14)} ${fmtFunding.padStart(14)} ${'N/A (paper)'.padStart(14)} ${coloredNet.padStart(14)}`,
+    );
+  }
+  console.log('');
+}
+
+/**
+ * Print a per-trade attribution table for spot/paper/live/backtest trades.
+ * Shows gross P&L (net + fees), total fees, and net P&L for each trade.
+ */
+function printSpotTradeAttributionTable(trades: Trade[]): void {
+  if (trades.length === 0) return;
+
+  out.banner('Per-Trade Fee Attribution');
+  const header = `  ${'#'.padStart(3)}  ${'Pair'.padEnd(9)} ${'Gross P&L'.padStart(14)} ${'Total Fees'.padStart(14)} ${'Net P&L'.padStart(14)}`;
+  console.log(pc.dim(header));
+
+  for (let i = 0; i < trades.length; i++) {
+    const t = trades[i];
+    const totalFees = t.entryFill.fee.plus(t.exitFill.fee);
+    const grossPnl = t.pnl.plus(totalFees);
+    const netPnl = t.pnl;
+
+    const fmtGross = (grossPnl.gte(ZERO) ? '+' : '') + grossPnl.toFixed(8);
+    const fmtFees = totalFees.toFixed(8);
+    const fmtNet = (netPnl.gte(ZERO) ? '+' : '') + netPnl.toFixed(8);
+    const coloredNet = netPnl.gte(ZERO) ? pc.green(fmtNet) : pc.red(fmtNet);
+    const pair = t.entryFill.signal.pair;
+
+    console.log(
+      `  ${String(i + 1).padStart(3)}  ${pair.padEnd(9)} ${fmtGross.padStart(14)} ${fmtFees.padStart(14)} ${coloredNet.padStart(14)}`,
+    );
+  }
+  console.log('');
+}
 
 await program.parseAsync(process.argv);
