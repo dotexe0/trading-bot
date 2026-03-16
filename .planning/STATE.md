@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 
 ## Current Position
 
-Phase: 43 — Trade Diagnostics
-Plan: 02 complete
-Status: In progress
-Last activity: 2026-03-16 — 43-02 complete: entry-signal Pino INFO logging in spot + perp paper engines
+Phase: 44 — Signal Quality Gates
+Plan: 01 complete
+Status: In Progress
+Last activity: 2026-03-16 — SpotSignalGate class with fee-drag rejection for spot entries (44-01): synchronous check() method, injected into backtest/paper/live engines, wired in CLI start.ts and live.ts
 
-Progress: [█████████████████████░░░░░░░░░] ~68% (42/~45 phases, 2/~8 plans est.)
+Progress: [███████████████████████░░░░░░░] ~73% (44/~45 phases, 1/~2 plans)
 
 ## Performance Metrics
 
@@ -29,6 +29,8 @@ Progress: [█████████████████████░░
 - 42-02: 7 files changed, +117/−29 lines, 849 tests passing, 3 min
 - 43-01: 1 file changed, +68/−0 lines, 849 tests passing, 3 min
 - 43-02: 3 files changed, +167/−15 lines, 851 tests passing, 4 min
+- 43-03: 3 files changed, +81/−0 lines, 834 tests passing, 5 min
+- 44-01: 7 files changed, +278/−5 lines, 859 tests passing, 6 min
 
 ## Accumulated Context
 
@@ -88,6 +90,19 @@ All v1.0–v2.0 decisions logged in PROJECT.md Key Decisions table.
 - [43-02]: DIAG-02 entry-signal log placed before isFlat() guard in spot engine (logs even when position blocks entry); inside long/short guard in perp engine (only actionable directions)
 - [43-02]: vi.hoisted + vi.mock pattern for createModuleLogger interception -- required because module-level `const log = createModuleLogger()` runs before test body
 
+**v2.1 execution notes (43-03):**
+- [43-03]: DIAG-03 strategyName wired from trade.entryFill.signal.strategyName through ApiTrade (server) to TradeData (UI) -- optional field, backward compat with live trades
+- [43-03]: PerformancePanel strategyStats useMemo groups completed trades by strategyName; fee-drag ratio = avgFees / |avgGrossPnl| * 100, capped at 9999%
+- [43-03]: Strategy Performance table renders only when strategyStats.length > 0; strategies with zero trades or missing strategyName excluded
+- [43-03]: Auto-updates via existing orderFilled WS -> REST fetch -> setTrades() -> useMemo recomputation (no new WS events)
+
+**v2.1 execution notes (44-01):**
+- [44-01]: SIG-01 SpotSignalGate mirrors PerpRiskGate Check 4: lte() rejection semantics, synchronous check(), spot taker rate 0.0075 (not FCM 0.0003)
+- [44-01]: feeDragMultiple=2.0 is FIXED CONSTANT per FEES-04 — hardcoded in CLI, never swept as optimizer param. Will be configurable in 44-02.
+- [44-01]: Permissive default on null/zero ATR — approves entry during buffer warmup. log.debug() for permissive, log.info() for rejection.
+- [44-01]: Gate placed after equity computation, before position sizing in all three engines. Uses ATR(14) from existing indicatorEngine.
+- [44-01]: Optional spotSignalGate? on all engine options interfaces — zero breaking changes for existing callers without gate.
+
 **v2.1 roadmap notes (revised 2026-03-15):**
 - Constraint: No new `npm run` scripts. All strategy performance stats, paper performance summaries, and live readiness status go in the dashboard as auto-updating panels. Only `npm run report` may be extended (DIAG-01).
 - Phase 42 (DASH-01/02/03): Investigate why unrealizedPnl and fundingCost arrive as 0 in dashboard despite v2.0 fixes; the [41-bugfix] notes are starting context — trace the full WS event path from PaperPerpEngine emit through WsBroadcaster to React panel.
@@ -112,4 +127,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-16
-Stopped at: Completed 43-02-PLAN.md. Entry-signal Pino INFO logging added to spot paper-engine.ts (processEntrySignal) and perp paper-perp-engine.ts (onCandle). 2 tests added. 851 tests passing.
+Stopped at: Completed 44-01-PLAN.md. SpotSignalGate with fee-drag rejection injected into backtest/paper/live engines and wired in CLI. 8 new tests. 859 tests passing.

@@ -36,6 +36,13 @@ const configSchema = z.object({
       .default('info'),
   }),
   intx: intxConfigSchema,
+  spotStrategyOverrides: z.object({
+    rsiPeriod: z.number().int().positive().optional(),
+    bbPeriod: z.number().int().positive().optional(),
+    zScoreWindow: z.number().int().positive().optional(),
+    feeDragMultiple: z.number().positive().default(2.0),
+    feeDragAtrPeriod: z.number().int().positive().default(14),
+  }).default({ feeDragMultiple: 2.0, feeDragAtrPeriod: 14 }),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -56,6 +63,13 @@ export type Config = z.infer<typeof configSchema>;
  * - PERP_MODE -> intx.perpMode (default 'none', options: 'none'|'paper'|'live')
  * - PERP_DB_PATH -> perpDatabase.path (default './data/perp.db')
  * (FCM reuses COINBASE_API_KEY_NAME / COINBASE_API_KEY_SECRET — no separate FCM keys needed)
+ *
+ * Spot strategy overrides (all optional — omit to use built-in Zod defaults):
+ * - SPOT_RSI_PERIOD -> spotStrategyOverrides.rsiPeriod
+ * - SPOT_BB_PERIOD -> spotStrategyOverrides.bbPeriod
+ * - SPOT_ZSCORE_WINDOW -> spotStrategyOverrides.zScoreWindow
+ * - SPOT_FEE_DRAG_MULTIPLE -> spotStrategyOverrides.feeDragMultiple (default 2.0)
+ * - SPOT_FEE_DRAG_ATR_PERIOD -> spotStrategyOverrides.feeDragAtrPeriod (default 14)
  *
  * @throws ConfigError on validation failure
  */
@@ -91,6 +105,13 @@ export function loadConfig(): Config {
       apiSecret: env.COINBASE_API_KEY_SECRET,
       testnet: env.FCM_TESTNET === 'true',
       perpMode: env.PERP_MODE ?? 'none',
+    },
+    spotStrategyOverrides: {
+      rsiPeriod: env.SPOT_RSI_PERIOD ? parseInt(env.SPOT_RSI_PERIOD, 10) : undefined,
+      bbPeriod: env.SPOT_BB_PERIOD ? parseInt(env.SPOT_BB_PERIOD, 10) : undefined,
+      zScoreWindow: env.SPOT_ZSCORE_WINDOW ? parseInt(env.SPOT_ZSCORE_WINDOW, 10) : undefined,
+      feeDragMultiple: env.SPOT_FEE_DRAG_MULTIPLE ? parseFloat(env.SPOT_FEE_DRAG_MULTIPLE) : undefined,
+      feeDragAtrPeriod: env.SPOT_FEE_DRAG_ATR_PERIOD ? parseInt(env.SPOT_FEE_DRAG_ATR_PERIOD, 10) : undefined,
     },
   };
 
