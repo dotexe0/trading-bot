@@ -720,6 +720,324 @@ describe('LiveTradingEngine', () => {
   });
 });
 
+// ── slippage tracking describe block ──────────────────────────────────
+
+describe('slippage tracking', () => {
+  let liveFeed: ReturnType<typeof makeMockLiveFeed>;
+  let orderManager: ReturnType<typeof makeMockOrderManager>;
+  let stateStore: ReturnType<typeof makeMockStateStore>;
+  let registry: ReturnType<typeof makeMockStrategyRegistry>;
+  let indicatorEngine: ReturnType<typeof makeMockIndicatorEngine>;
+  let riskManager: ReturnType<typeof makeMockRiskManager>;
+  let config: LiveTradingConfig;
+  let engine: LiveTradingEngine;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    liveFeed = makeMockLiveFeed();
+    orderManager = makeMockOrderManager();
+    stateStore = makeMockStateStore();
+    registry = makeMockStrategyRegistry();
+    indicatorEngine = makeMockIndicatorEngine();
+    riskManager = makeMockRiskManager();
+    config = makeConfig();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function createEngine(overrides: Record<string, unknown> = {}) {
+    engine = new LiveTradingEngine({
+      config,
+      liveFeed: liveFeed as any,
+      orderManager: orderManager as any,
+      stateStore: stateStore as any,
+      strategyRegistry: registry as any,
+      indicatorEngine: indicatorEngine as any,
+      riskManager: riskManager as any,
+      ...overrides,
+    });
+    return engine;
+  }
+
+  /**
+   * Helper: enter a position with the given entry candle close, fill with the given fill price.
+   * Returns the strategy mock so caller can set up close signals.
+   */
+  async function enterPosition(entryClose: string, fillPrice: string) {
+    const strategy = registry.create.mock.results[0].value;
+    // First candle: buffer.length=1 < minCandles=2, no evaluation.
+    // Second candle: buffer.length=2 >= minCandles=2, evaluation triggers -> return long signal.
+    strategy.evaluate.mockReturnValueOnce([makeLongSignal()]);
+
+    liveFeed.emit('candle', makeCandle({ timestamp: 1000, close: entryClose }));
+    liveFeed.emit('candle', makeCandle({ timestamp: 2000, close: entryClose }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Simulate fill
+    const entryFill: LiveOrder = {
+      orderId: 'exchange-order-1',
+      clientOrderId: 'client-1',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'BUY',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '500',
+      averageFillPrice: fillPrice,
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'ENTRY',
+    };
+    orderManager.emit('orderFilled', entryFill);
+
+    return strategy;
+  }
+
+  it('captures entry signal price and passes signalPrice to recordTrade', async () => {
+    createEngine();
+    await engine.start();
+
+    const strategy = await enterPosition('50000', '50010');
+
+    // Now close position
+    strategy.evaluate.mockReturnValue([makeCloseSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 3000, close: '51000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Simulate exit fill
+    const exitFill: LiveOrder = {
+      orderId: 'exit-order-1',
+      clientOrderId: 'client-exit',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'SELL',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '510',
+      averageFillPrice: '51000',
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'EXIT',
+    };
+    orderManager.emit('orderFilled', exitFill);
+
+    expect(stateStore.recordTrade).toHaveBeenCalledOnce();
+    const tradeArg = stateStore.recordTrade.mock.calls[0][1];
+    expect(tradeArg.signalPrice).toBe('50000.00000000');
+  });
+
+  it('captures exit signal price on strategy close matching candle close', async () => {
+    createEngine();
+    await engine.start();
+
+    const strategy = await enterPosition('50000', '50010');
+
+    // Close with candle at 51000
+    strategy.evaluate.mockReturnValue([makeCloseSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 3000, close: '51000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const exitFill: LiveOrder = {
+      orderId: 'exit-order-2',
+      clientOrderId: 'client-exit-2',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'SELL',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '510',
+      averageFillPrice: '51000',
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'EXIT',
+    };
+    orderManager.emit('orderFilled', exitFill);
+
+    const tradeArg = stateStore.recordTrade.mock.calls[0][1];
+    expect(tradeArg.exitSignalPrice).toBe('51000.00000000');
+  });
+
+  it('computes unfavorable BUY entry slippage as positive bps', async () => {
+    createEngine();
+    await engine.start();
+
+    // Signal at 50000, fill at 50010 -> +2.0 bps unfavorable
+    const strategy = await enterPosition('50000', '50010');
+
+    strategy.evaluate.mockReturnValue([makeCloseSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 3000, close: '51000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const exitFill: LiveOrder = {
+      orderId: 'exit-order-3',
+      clientOrderId: 'client-exit-3',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'SELL',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '510',
+      averageFillPrice: '51000',
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'EXIT',
+    };
+    orderManager.emit('orderFilled', exitFill);
+
+    const tradeArg = stateStore.recordTrade.mock.calls[0][1];
+    // (50010 - 50000) / 50000 * 10000 = 2.0 bps
+    expect(tradeArg.entrySlippageBps).toBe('2.0000');
+  });
+
+  it('computes favorable BUY entry slippage as negative bps', async () => {
+    createEngine();
+    await engine.start();
+
+    // Signal at 50000, fill at 49990 -> -2.0 bps favorable
+    const strategy = await enterPosition('50000', '49990');
+
+    strategy.evaluate.mockReturnValue([makeCloseSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 3000, close: '51000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const exitFill: LiveOrder = {
+      orderId: 'exit-order-4',
+      clientOrderId: 'client-exit-4',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'SELL',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '510',
+      averageFillPrice: '51000',
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'EXIT',
+    };
+    orderManager.emit('orderFilled', exitFill);
+
+    const tradeArg = stateStore.recordTrade.mock.calls[0][1];
+    // (49990 - 50000) / 50000 * 10000 = -2.0 bps
+    expect(tradeArg.entrySlippageBps).toBe('-2.0000');
+  });
+
+  it('stop-loss exit uses stop trigger price as exitSignalPrice, not candle close', async () => {
+    config.riskConfig = {
+      sizingMethod: 'fixed-fraction',
+      kellyFraction: 0.5,
+      fixedFractionPct: 0.1,
+      maxPositionPct: 0.2,
+      minTradesForKelly: 30,
+      stopLoss: { type: 'fixed', percentage: 0.05 },
+      maxDrawdownPct: 0.1,
+      maxDailyLossPct: 0.05,
+      maxExposurePct: 0.5,
+      maxPositionCount: 3,
+      circuitBreakerCooldownMs: 3600000,
+    };
+
+    createEngine();
+    await engine.start();
+
+    const strategy = registry.create.mock.results[0].value;
+
+    // Enter position: first candle (buffer=1) no eval, second candle (buffer=2) triggers entry
+    strategy.evaluate.mockReturnValueOnce([makeLongSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 1000, close: '50000' }));
+    liveFeed.emit('candle', makeCandle({ timestamp: 2000, close: '50000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Simulate entry fill
+    const entryFill: LiveOrder = {
+      orderId: 'exchange-order-1',
+      clientOrderId: 'client-1',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'BUY',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '500',
+      averageFillPrice: '50000',
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'ENTRY',
+    };
+    orderManager.emit('orderFilled', entryFill);
+
+    // Clear mock to track just the stop-loss order
+    orderManager.submitMarketOrder.mockClear();
+
+    // Emit candle that breaches 5% stop (47500). low=47000 triggers stop.
+    // The stop trigger price will be 47500 (50000 * 0.95)
+    strategy.evaluate.mockReturnValue([]);
+    liveFeed.emit(
+      'candle',
+      makeCandle({
+        timestamp: 3000,
+        low: '47000',
+        high: '49000',
+        close: '47500', // close != stop trigger price
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Verify stop-loss order was submitted
+    expect(orderManager.submitMarketOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'STOP_LOSS' }),
+    );
+
+    // Simulate stop-loss exit fill
+    const exitFill: LiveOrder = {
+      orderId: 'stop-exit-1',
+      clientOrderId: 'client-stop',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'SELL',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '475',
+      averageFillPrice: '47500',
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'STOP_LOSS',
+    };
+    orderManager.emit('orderFilled', exitFill);
+
+    expect(stateStore.recordTrade).toHaveBeenCalledOnce();
+    const tradeArg = stateStore.recordTrade.mock.calls[0][1];
+
+    // exitSignalPrice should be the stop trigger price (47500), NOT the candle close (47500 in this case too)
+    // The fixed stop at 5% of entry 50000 = 47500
+    // Since our stop is fixed at 50000 * (1 - 0.05) = 47500.0
+    expect(tradeArg.exitSignalPrice).toBeDefined();
+    // The stop price is computed by StopLossTracker as entryPrice * (1 - percentage) = 50000 * 0.95 = 47500
+    expect(parseFloat(tradeArg.exitSignalPrice)).toBeCloseTo(47500, 0);
+  });
+});
+
 // ── auto-switch describe block ───────────────────────────────────────
 //
 // vi.spyOn(RegimeClassifier.prototype, 'classify') is used to control

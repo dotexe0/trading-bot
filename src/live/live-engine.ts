@@ -125,6 +125,8 @@ export class LiveTradingEngine extends EventEmitter {
   private currentRegime: import('../regime/types.js').MarketRegime | undefined = undefined;
   private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
   private cooldownCandlesRemaining: number = 0;
+  private entrySignalPrice: Decimal | null = null;
+  private exitSignalPrice: Decimal | null = null;
 
   constructor(options: LiveTradingEngineOptions) {
     super();
@@ -346,6 +348,7 @@ export class LiveTradingEngine extends EventEmitter {
           );
 
           const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
+          this.exitSignalPrice = d(candle.close);
           this.orderManager
             .submitMarketOrder({
               pair: candle.pair,
@@ -408,6 +411,7 @@ export class LiveTradingEngine extends EventEmitter {
 
           // Submit close order via OrderManager
           const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
+          this.exitSignalPrice = check.stopPrice;
           this.orderManager
             .submitMarketOrder({
               pair: candle.pair,
@@ -642,6 +646,7 @@ export class LiveTradingEngine extends EventEmitter {
       partialExitFired: false,
     };
     this.positionDirection = signal.direction as 'long' | 'short';
+    this.entrySignalPrice = currentPrice;
 
     // Submit market order
     this.orderManager
@@ -708,6 +713,7 @@ export class LiveTradingEngine extends EventEmitter {
     if (!this.currentPosition || this.currentPosition.pending) return;
 
     const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
+    this.exitSignalPrice = d(candle.close);
 
     this.orderManager
       .submitMarketOrder({
@@ -838,6 +844,14 @@ export class LiveTradingEngine extends EventEmitter {
           pnl = entryPrice.minus(exitPrice).mul(exitQty).minus(fees);
         }
 
+        // Compute slippage in basis points
+        const entrySlippageBps = this.entrySignalPrice
+          ? this.computeSlippageBps(this.entrySignalPrice, entryPrice, this.currentPosition.side)
+          : null;
+        const exitSlippageBps = this.exitSignalPrice
+          ? this.computeSlippageBps(this.exitSignalPrice, exitPrice, order.side as 'BUY' | 'SELL')
+          : null;
+
         // Record completed trade
         this.stateStore.recordTrade(this.session.id, {
           sessionId: this.session.id,
@@ -858,6 +872,10 @@ export class LiveTradingEngine extends EventEmitter {
             ? '0.0000'
             : pnl.div(entryPrice.mul(entryQty)).mul(100).toFixed(4),
           holdingPeriodMs: order.updatedAt - order.createdAt,
+          signalPrice: this.entrySignalPrice?.toFixed(8),
+          exitSignalPrice: this.exitSignalPrice?.toFixed(8),
+          entrySlippageBps: entrySlippageBps?.toFixed(4),
+          exitSlippageBps: exitSlippageBps?.toFixed(4),
         });
 
         log.info(
@@ -875,6 +893,8 @@ export class LiveTradingEngine extends EventEmitter {
       this.positionDirection = null;
       this.stopLossTracker = null;
       this.exitManager = null;
+      this.entrySignalPrice = null;
+      this.exitSignalPrice = null;
       this.checkAndExecutePendingSwitch(); // fire any deferred switch now position is gone
     }
 
@@ -898,6 +918,7 @@ export class LiveTradingEngine extends EventEmitter {
       // Clear pending position state
       this.currentPosition = null;
       this.positionDirection = null;
+      this.entrySignalPrice = null;
     } else if (order.purpose === 'EXIT' || order.purpose === 'STOP_LOSS' || order.purpose === 'PARTIAL_EXIT') {
       // CRITICAL: Position may be stuck -- trigger reconciliation
       log.error(
@@ -1209,6 +1230,11 @@ export class LiveTradingEngine extends EventEmitter {
       return;
     }
 
+    // Signal prices cannot be recovered from before a crash -- slippage will be null
+    // for the first trade after recovery (correct behavior)
+    this.entrySignalPrice = null;
+    this.exitSignalPrice = null;
+
     // Recovery successful
     log.info(
       {
@@ -1221,6 +1247,25 @@ export class LiveTradingEngine extends EventEmitter {
       },
       'Restart recovery complete',
     );
+  }
+
+  // ── Slippage computation ──────────────────────────────────────────
+
+  /**
+   * Compute slippage in basis points. Positive = unfavorable execution.
+   * BUY: (fillPrice - signalPrice) / signalPrice * 10000
+   * SELL: (signalPrice - fillPrice) / signalPrice * 10000
+   */
+  private computeSlippageBps(
+    signalPrice: Decimal,
+    fillPrice: Decimal,
+    side: 'BUY' | 'SELL',
+  ): Decimal {
+    if (signalPrice.isZero()) return ZERO;
+    if (side === 'BUY') {
+      return fillPrice.minus(signalPrice).div(signalPrice).mul(d(10000));
+    }
+    return signalPrice.minus(fillPrice).div(signalPrice).mul(d(10000));
   }
 
   // ── Helpers ───────────────────────────────────────────────────────
