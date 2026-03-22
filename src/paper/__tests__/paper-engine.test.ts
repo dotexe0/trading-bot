@@ -20,6 +20,7 @@ import type { RiskConfig } from '../../risk/types.js';
 import { RegimeClassifier } from '../../regime/classifier.js';
 import { MarketRegime } from '../../regime/types.js';
 import type { RegimeLeaderboards, RegimeLeaderboardEntry } from '../../tournament/types.js';
+import type { FeedHealthMonitor } from '../../core/feed-health.js';
 
 // ── Logger mock for entry-signal tests ────────────────────────────────
 const { mockLogInfo } = vi.hoisted(() => {
@@ -1006,5 +1007,98 @@ describe('entry-signal logging', () => {
       (call) => call[0]?.event === 'entry-signal',
     );
     expect(entrySignalCall).toBeUndefined();
+  });
+});
+
+// ── Feed Health Guard Tests ─────────────────────────────────────────
+
+describe('feed health guard', () => {
+  let liveFeed: MockLiveDataFeed;
+  let sessionStore: ReturnType<typeof createMockSessionStore>;
+  let strategy: ConfigurableStrategy;
+  let registry: MockStrategyRegistry;
+  let config: PaperTradingConfig;
+  const indicatorEngine = new IndicatorEngine();
+
+  beforeEach(() => {
+    liveFeed = new MockLiveDataFeed();
+    sessionStore = createMockSessionStore();
+    strategy = new ConfigurableStrategy();
+    registry = new MockStrategyRegistry(strategy);
+    config = makeConfig();
+  });
+
+  function createEngine(overrides: any = {}) {
+    return new PaperTradingEngine({
+      config: overrides.config ?? config,
+      liveFeed: liveFeed as any,
+      sessionStore: sessionStore as any,
+      strategyRegistry: registry,
+      indicatorEngine,
+      ...overrides,
+    });
+  }
+
+  it('skips signal evaluation when feed is stale', async () => {
+    const mockFeedHealth = {
+      isStale: vi.fn().mockReturnValue(true),
+    } as unknown as FeedHealthMonitor;
+
+    const engine = createEngine({ feedHealthMonitor: mockFeedHealth });
+    await engine.start();
+
+    // Queue a long signal -- should NOT fire because feed is stale
+    strategy.queueSignals([makeLongSignal(2)]);
+
+    for (let i = 0; i < 4; i++) {
+      liveFeed.emitCandle(makeCandle('50000', i));
+    }
+
+    // Strategy should never be evaluated (signal queue still has the signal)
+    expect(strategy.evaluateCallCount).toBe(0);
+
+    // But candles should still be buffered
+    const bufferSize = engine.getBufferSize('BTC-USD:1m');
+    expect(bufferSize).toBe(4);
+
+    // No trades should have been recorded
+    const orderFilledEvents: unknown[] = [];
+    engine.on('orderFilled', (evt: unknown) => orderFilledEvents.push(evt));
+    expect(orderFilledEvents).toHaveLength(0);
+  });
+
+  it('evaluates normally when feed is live', async () => {
+    const mockFeedHealth = {
+      isStale: vi.fn().mockReturnValue(false),
+    } as unknown as FeedHealthMonitor;
+
+    const engine = createEngine({ feedHealthMonitor: mockFeedHealth });
+    await engine.start();
+
+    // Queue a long signal on the 3rd candle
+    strategy.queueSignals([makeLongSignal(2)]);
+
+    for (let i = 0; i < 3; i++) {
+      liveFeed.emitCandle(makeCandle('50000', i));
+    }
+
+    // Strategy should be evaluated (feed is live)
+    expect(strategy.evaluateCallCount).toBeGreaterThan(0);
+  });
+
+  it('evaluates normally when feedHealthMonitor is undefined (backward compat)', async () => {
+    // Create engine without feedHealthMonitor (the default)
+    const engine = createEngine();
+    await engine.start();
+
+    // Queue a long signal on the 3rd candle
+    strategy.queueSignals([makeLongSignal(2)]);
+
+    for (let i = 0; i < 3; i++) {
+      liveFeed.emitCandle(makeCandle('50000', i));
+    }
+
+    // Strategy should be evaluated (no guard)
+    expect(strategy.evaluateCallCount).toBeGreaterThan(0);
   });
 });

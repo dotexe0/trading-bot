@@ -27,6 +27,7 @@ import type { IntxMarkPriceEvent, IntxFundingRateEvent } from '../types.js';
 import type { RegimeLeaderboards, RegimeLeaderboardEntry, LeaderboardEntry } from '../../tournament/types.js';
 import type { IStrategy } from '../../strategies/types.js';
 import type { Candle } from '../../core/types.js';
+import type { FeedHealthMonitor } from '../../core/feed-health.js';
 
 // ── Auto-switch helpers ────────────────────────────────────────────────────
 
@@ -760,5 +761,105 @@ describe('auto-switch', () => {
     engine.onCandle(makeCandle('50000', 1));
     expect(switchEvents).toHaveLength(1);
     expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+  });
+});
+
+// ── Feed Health Guard Tests ─────────────────────────────────────────────────
+
+describe('feed health guard', () => {
+  let intxClient: ReturnType<typeof makeIntxClient>;
+  let stateStore: ReturnType<typeof makeStateStore>;
+  let config: IntxConfig;
+
+  beforeEach(() => {
+    intxClient = makeIntxClient();
+    stateStore = makeStateStore();
+    config = makeConfig();
+  });
+
+  it('skips strategy evaluation when feed is stale', () => {
+    const mockFeedHealth = {
+      isStale: vi.fn().mockReturnValue(true),
+    } as unknown as FeedHealthMonitor;
+
+    const holdSignal: IStrategy = {
+      name: 'hold-strategy',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([{
+        strategyName: 'hold-strategy',
+        pair: 'BTC-USD',
+        timeframe: '1h',
+        timestamp: Date.now(),
+        direction: 'long',
+        confidence: 0.9,
+        reasoning: 'test',
+      }]),
+    };
+
+    const engine = new PaperPerpEngine({
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      initialStrategy: holdSignal,
+      feedHealthMonitor: mockFeedHealth,
+    });
+    engine.start();
+
+    // Send multiple candles -- all should be buffered but no strategy evaluation
+    for (let i = 0; i < 5; i++) {
+      engine.onCandle(makeCandle('50000', i));
+    }
+
+    // Strategy.evaluate should NOT have been called
+    expect(holdSignal.evaluate).not.toHaveBeenCalled();
+
+    // No position should have been opened
+    expect(engine.isPositionOpen()).toBe(false);
+
+    engine.stop();
+  });
+
+  it('re-hydrates state from DB on IntxClient reconnected event', async () => {
+    const engine = new PaperPerpEngine({
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+    });
+    engine.start();
+
+    // Open a paper position
+    await engine.openPaperPosition('BTC-PERP', 'long', '0.01', 5, '50000');
+    expect(engine.isPositionOpen()).toBe(true);
+
+    // Mock getOpenSession to return a session with updated markPrice
+    const mockDbSession = {
+      id: engine.getCurrentSession()!.id,
+      instrument: 'BTC-PERP',
+      direction: 'long',
+      entryPrice: '50000',
+      size: '0.01',
+      leverage: 5,
+      liquidationPrice: '41665.00000000',
+      maintenanceMarginRate: '0.0333',
+      status: 'open',
+      openedAt: Date.now(),
+      markPrice: '52000',
+      cumulativeFundingCost: '-0.00050000',
+    };
+    stateStore.getOpenSession.mockReturnValue(mockDbSession);
+
+    // Emit reconnected event
+    intxClient.emit('reconnected');
+
+    // Verify in-memory session was updated with DB values
+    const session = engine.getCurrentSession()!;
+    expect(session.markPrice).toBe('52000');
+    expect(session.cumulativeFundingCost).toBe('-0.00050000');
+
+    // Verify getOpenSession was called with the correct instrument
+    expect(stateStore.getOpenSession).toHaveBeenCalledWith('BTC-PERP');
+
+    engine.stop();
   });
 });
