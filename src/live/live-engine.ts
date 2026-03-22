@@ -38,6 +38,7 @@ import { ExitLogicManager, parseExitConfig } from '../risk/exit-logic/index.js';
 import type { ExitConfig } from '../risk/exit-logic/types.js';
 import type { RegimeLeaderboards } from '../tournament/types.js';
 import type { SpotSignalGate } from '../risk/spot-signal-gate.js';
+import type { FeedHealthMonitor } from '../core/feed-health.js';
 
 const log = createModuleLogger('live-engine');
 
@@ -73,6 +74,8 @@ export interface LiveTradingEngineOptions {
   regimeLeaderboards?: RegimeLeaderboards;
   /** When provided, blocks spot entry signals where expected move does not exceed fee drag. */
   spotSignalGate?: SpotSignalGate;
+  /** When provided, skips signal evaluation when feed is stale. */
+  feedHealthMonitor?: FeedHealthMonitor;
 }
 
 interface CurrentPosition {
@@ -118,6 +121,7 @@ export class LiveTradingEngine extends EventEmitter {
   private correlationStore?: CorrelationStore;
   private readonly regimeLeaderboards?: RegimeLeaderboards;
   private readonly spotSignalGate?: SpotSignalGate;
+  private readonly feedHealthMonitor?: FeedHealthMonitor;
   private currentRegime: import('../regime/types.js').MarketRegime | undefined = undefined;
   private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
   private cooldownCandlesRemaining: number = 0;
@@ -135,6 +139,7 @@ export class LiveTradingEngine extends EventEmitter {
     this.resumeSessionId = options.resumeSessionId;
     this.regimeLeaderboards = options.regimeLeaderboards;
     this.spotSignalGate = options.spotSignalGate;
+    this.feedHealthMonitor = options.feedHealthMonitor;
 
     if (options.correlationConfig?.enabled) {
       this.correlationCalculator = new CorrelationCalculator(
@@ -293,6 +298,15 @@ export class LiveTradingEngine extends EventEmitter {
     // Enforce sliding window
     while (buffer.length > this.config.bufferSize) {
       buffer.shift();
+    }
+
+    // Feed health guard: skip signal evaluation on stale data (hold existing positions)
+    if (this.feedHealthMonitor?.isStale(candle.pair)) {
+      log.warn(
+        { pair: candle.pair, timestamp: candle.timestamp },
+        'Feed stale — skipping signal evaluation (holding existing positions)',
+      );
+      return;
     }
 
     // Wait for enough data

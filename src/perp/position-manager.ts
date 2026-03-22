@@ -49,6 +49,7 @@ import type {
   IntxFundingRateEvent,
 } from './types.js';
 import type { IntxMarkPriceEvent } from './types.js';
+import type { FeedHealthMonitor } from '../core/feed-health.js';
 
 const log = createModuleLogger('perp-position-manager');
 
@@ -100,6 +101,8 @@ export interface PerpPositionManagerOptions {
    * controlled drain trigger behavior.
    */
   fundingTracker?: FundingRateTracker;
+  /** When provided, skips signal evaluation when feed is stale. */
+  feedHealthMonitor?: FeedHealthMonitor;
 }
 
 export class PerpPositionManager extends EventEmitter {
@@ -135,6 +138,7 @@ export class PerpPositionManager extends EventEmitter {
   private readonly classifier = new RegimeClassifier();
   /** Rolling candle buffer — max 100 candles. */
   private candleBuffer: Candle[] = [];
+  private readonly feedHealthMonitor?: FeedHealthMonitor;
 
   /** Typed emit override. */
   override emit<K extends keyof PerpPositionManagerEvents>(
@@ -171,6 +175,7 @@ export class PerpPositionManager extends EventEmitter {
     } else {
       this.strategyRegistry = options.strategyRegistry ?? null;
     }
+    this.feedHealthMonitor = options.feedHealthMonitor;
   }
 
   /**
@@ -304,6 +309,15 @@ export class PerpPositionManager extends EventEmitter {
     this.candleBuffer.push(candle);
     if (this.candleBuffer.length > 100) {
       this.candleBuffer.shift();
+    }
+
+    // Feed health guard: skip signal evaluation on stale data (hold existing positions)
+    if (this.feedHealthMonitor?.isStale(candle.pair)) {
+      log.warn(
+        { pair: candle.pair, timestamp: candle.timestamp },
+        'Feed stale — skipping signal evaluation (holding existing positions)',
+      );
+      return;
     }
 
     // Classify regime from candle history (only here — never in mark-price handler)
