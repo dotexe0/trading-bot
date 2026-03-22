@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 
 ## Current Position
 
-Phase: 44 — Signal Quality Gates
-Plan: 02 complete (phase complete)
+Phase: 45 — Pre-Live Gate
+Plan: 01 complete
 Status: In Progress
-Last activity: 2026-03-16 — Spot strategy config overrides via .env (44-02): feeDragMultiple, feeDragAtrPeriod, RSI/BB/Z-score period overrides wired in all CLI entry points
+Last activity: 2026-03-22 — Plan 45-01 complete: PreLiveGate safety check with configurable thresholds blocking live trading without paper profitability
 
-Progress: [████████████████████████░░░░░░] ~76% (44/~45 phases, 2/2 plans)
+Progress: [█████████████████████████████░] ~80% (45/~46 phases, 1/2 plans)
 
 ## Performance Metrics
 
@@ -32,6 +32,7 @@ Progress: [███████████████████████
 - 43-03: 3 files changed, +81/−0 lines, 834 tests passing, 5 min
 - 44-01: 7 files changed, +278/−5 lines, 859 tests passing, 6 min
 - 44-02: 9 files changed, +122/−11 lines, 859 tests passing, 5 min
+- 45-01: 4 files changed, +609/−3 lines, 870 tests passing, 5 min
 
 ## Accumulated Context
 
@@ -111,6 +112,14 @@ All v1.0–v2.0 decisions logged in PROJECT.md Key Decisions table.
 - [44-02]: Strategy param overrides only apply when strategyConfigs array exists (has exit-optimized configs); undefined means use registry defaults
 - [44-02]: tournament.ts now wires SpotSignalGate with config-backed params — was missing gate in standalone tournament CLI
 
+**v2.1 execution notes (45-01):**
+- [45-01]: GATE-01 PreLiveGate follows SpotSignalGate pattern: options interface, result interface, class with synchronous check() method
+- [45-01]: Gate is synchronous and read-only -- no async needed, no SQLite BUSY risk
+- [45-01]: perpStateStore created early when isPerpLive for gate check, reused by FCM block via `if (!perpStateStore)` null guard
+- [45-01]: Spot trades sorted by entryFill.fillTimestamp descending for lookback (most recent N); perp trades sliced from end of chronological array
+- [45-01]: Gate only runs when isSpotLive || isPerpLive -- paper mode is never gated
+- [45-01]: preLiveGate config schema: minTrades default 20, minNetPnl default 0, lookbackTrades optional -- all via GATE_* env vars
+
 **v2.1 roadmap notes (revised 2026-03-15):**
 - Constraint: No new `npm run` scripts. All strategy performance stats, paper performance summaries, and live readiness status go in the dashboard as auto-updating panels. Only `npm run report` may be extended (DIAG-01).
 - Phase 42 (DASH-01/02/03): Investigate why unrealizedPnl and fundingCost arrive as 0 in dashboard despite v2.0 fixes; the [41-bugfix] notes are starting context — trace the full WS event path from PaperPerpEngine emit through WsBroadcaster to React panel.
@@ -134,5 +143,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-16
-Stopped at: Completed 44-02-PLAN.md (phase 44 complete). Spot strategy config overrides via .env for fee-drag gate params and strategy periods. 9 files changed. 859 tests passing.
+Last session: 2026-03-22
+Stopped at: Completed 45-01-PLAN.md. PreLiveGate safety check with configurable thresholds (GATE_MIN_TRADES, GATE_MIN_NET_PNL, GATE_LOOKBACK_TRADES) blocking live trading without paper profitability. 4 files changed. 870 tests passing.

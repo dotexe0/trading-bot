@@ -43,6 +43,7 @@ import { registerPortfolioRoutes } from './routes/portfolio.js';
 import { registerCandleRoutes } from './routes/candles.js';
 import { registerEquitySummaryRoute } from './routes/equity-summary.js';
 import { registerPerpRoutes } from './routes/perp.js';
+import { registerGateRoutes } from './routes/gate.js';
 
 const log = createModuleLogger('dashboard-server');
 
@@ -77,6 +78,8 @@ export interface DashboardDeps {
   /** Optional perp engine event emitters (PerpPositionManager instances) for real-time perp broadcasting. */
   perpEngines?: EventEmitter[];
   perpStateStore?: PerpStateStore;
+  gateConfig?: { minTrades: number; minNetPnl: number; lookbackTrades?: number };
+  feeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
 }
 
 export interface RouteDeps {
@@ -91,6 +94,8 @@ export interface RouteDeps {
   /** Live reference to all active paper engines — used by positions endpoint. */
   paperEngines?: PaperTradingEngine[];
   perpStateStore?: PerpStateStore;
+  gateConfig?: { minTrades: number; minNetPnl: number; lookbackTrades?: number };
+  feeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
 }
 
 export interface DashboardServer {
@@ -272,6 +277,8 @@ export async function createDashboardServer(
     repo: deps.repo,
     paperEngines: deps.paperEngines,
     perpStateStore: deps.perpStateStore,
+    gateConfig: deps.gateConfig,
+    feeConfig: deps.feeConfig,
   };
 
   // Register WebSocket handler
@@ -294,6 +301,7 @@ export async function createDashboardServer(
   await registerCandleRoutes(app, routeDeps);
   await registerEquitySummaryRoute(app, routeDeps);
   await registerPerpRoutes(app, routeDeps);
+  await registerGateRoutes(app, routeDeps);
 
   // Health check
   app.get('/api/health', async () => {

@@ -498,6 +498,9 @@ program
       // Perp engine wiring (populated when FCM is enabled — Phase 26/27 integration)
       const perpEngineEmitters: EventEmitter[] = [];
 
+      // GATE-02: Hoist feeConfig for dashboard — assigned inside FCM block if enabled
+      let dashboardFeeConfig: { takerFeeRate: number; makerFeeRate: number; source: string } | undefined;
+
       // Instantiate stores for dashboard routes
       correlationStore = new CorrelationStore({ dbPath: config.database.path });
       backtestStore = new BacktestStore({ dbPath: config.database.path });
@@ -563,6 +566,13 @@ program
           `FCM taker fee loaded: ${(feeConfig.takerFeeRate * 100).toFixed(4)}% taker` +
           ` (source: ${feeConfig.source})`,
         );
+
+        // GATE-02: expose FCM fee config to dashboard
+        dashboardFeeConfig = {
+          takerFeeRate: feeConfig.takerFeeRate,
+          makerFeeRate: feeConfig.makerFeeRate,
+          source: feeConfig.source,
+        };
 
         // PIPE-01: Run perp tournament to get regime leaderboards
         let perpRegimeLeaderboards: RegimeLeaderboards | undefined;
@@ -705,6 +715,8 @@ program
         paperEngines,
         perpEngines: perpEngineEmitters,
         perpStateStore,
+        gateConfig: config.preLiveGate,
+        feeConfig: dashboardFeeConfig,
       });
 
       await server.start();
