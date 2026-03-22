@@ -49,6 +49,7 @@ import type { OptimizerConfig } from '../optimizer/index.js';
 import { parseBacktestConfig, DEFAULT_FEE_TAKER } from '../backtest/types.js';
 import type { RegimeLeaderboards } from '../tournament/types.js';
 import { SpotSignalGate } from '../risk/spot-signal-gate.js';
+import { PreLiveGate } from '../risk/pre-live-gate.js';
 
 // ── Resource tracking ──────────────────────────────────────────────
 
@@ -119,7 +120,7 @@ program
   .option('--skip-sync', 'Skip data sync step (for quick restarts)')
   .option('--skip-optimize', 'Skip exit config optimization step (uses cached configs if available)')
   .option('--skip-perp-tournament', 'Skip perp tournament step (uses no regime leaderboards)')
-  .option('--mode <mode>', 'Activation mode: paper or none', 'paper')
+  .option('--mode <mode>', 'Activation mode: paper, live, or none', 'paper')
   .action(async (opts) => {
     // ── Step 0: Bootstrap ──────────────────────────────────────────
 
@@ -143,7 +144,7 @@ program
     const skipSync = opts.skipSync === true;
     const skipOptimize = opts.skipOptimize === true;
     const skipPerpTournament = opts.skipPerpTournament === true;
-    const mode = opts.mode as 'paper' | 'none';
+    const mode = opts.mode as 'paper' | 'none' | 'live';
 
     // Determine which pairs to trade: --pair overrides, otherwise all configured pairs
     const tradingPairs: ('BTC-USD' | 'ETH-USD')[] = opts.pair
@@ -298,6 +299,42 @@ program
       const recovered = sessionStore.recoverRunningSessions();
       if (recovered > 0) {
         out.warn(`Recovered ${recovered} orphaned session(s) from previous run`);
+      }
+
+      // ── Pre-Live Gate Check ──────────────────────────────────────────
+      const isSpotLive = mode === 'live';
+      const isPerpLive = config.intx.enabled && config.intx.perpMode === 'live';
+
+      if (isSpotLive || isPerpLive) {
+        // Create perpStateStore early when needed for perp gate check (reused later by perp engine block)
+        if (isPerpLive && !perpStateStore) {
+          perpStateStore = new PerpStateStore({ dbPath: config.perpDatabase.path });
+        }
+
+        const gateMode = (isSpotLive && isPerpLive) ? 'both' : isSpotLive ? 'spot' : 'perp';
+        const gate = new PreLiveGate({
+          sessionStore,
+          perpStateStore: isPerpLive ? perpStateStore : undefined,
+          minTrades: config.preLiveGate.minTrades,
+          minNetPnl: config.preLiveGate.minNetPnl,
+          lookbackTrades: config.preLiveGate.lookbackTrades,
+        });
+
+        const gateResult = gate.check(gateMode);
+
+        if (!gateResult.passed) {
+          out.error('');
+          out.error('PRE-LIVE GATE FAILED:');
+          for (const reason of gateResult.failReasons) {
+            out.error(`  - ${reason}`);
+          }
+          out.error('');
+          out.error('Run paper mode first to build a track record before activating live trading.');
+          dbConn.sqlite.close();
+          process.exit(1);
+        }
+
+        out.success(`Pre-live gate passed (${gateResult.totalTradeCount} trades, net P&L: $${gateResult.totalNetPnl})`);
       }
 
       let anyCandles = false;
@@ -513,7 +550,9 @@ program
           out.warn(`IntxClient error — perp subsystem affected, spot continues: ${err.message}`);
         });
 
-        perpStateStore = new PerpStateStore({ dbPath: config.perpDatabase.path });
+        if (!perpStateStore) {
+          perpStateStore = new PerpStateStore({ dbPath: config.perpDatabase.path });
+        }
 
         await perpClient.start();
 
