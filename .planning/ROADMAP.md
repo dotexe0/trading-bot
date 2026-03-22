@@ -8,6 +8,8 @@
 - ✅ **v1.3 Adaptive Intelligence** — Phases 19-25 (shipped 2026-03-08) — [Archive](milestones/v1.3-ROADMAP.md)
 - ✅ **v1.4 Perpetual Futures Trading** — Phases 26-33 (shipped 2026-03-10) — [Archive](milestones/v1.4-ROADMAP.md)
 - ✅ **v1.5 Perp End-to-End Integration** — Phases 34-35 (shipped 2026-03-14) — [Archive](milestones/v1.5-ROADMAP.md)
+- ✅ **v2.0 Perp First-Class** — Phases 36-41 (shipped 2026-03-15) — [Archive](milestones/v2.0-ROADMAP.md)
+- ✅ **v2.1 Pre-Live Reliability** — Phases 42-45 (shipped 2026-03-22) — [Archive](milestones/v2.1-ROADMAP.md)
 
 ## Phases
 
@@ -74,7 +76,6 @@
 
 </details>
 
-
 <details>
 <summary>✅ v1.5 Perp End-to-End Integration (Phases 34-35) — SHIPPED 2026-03-14</summary>
 
@@ -83,7 +84,27 @@
 
 </details>
 
----
+<details>
+<summary>✅ v2.0 Perp First-Class (Phases 36-41) — SHIPPED 2026-03-15</summary>
+
+- [x] **Phase 36: Perp Infrastructure Loose Ends** (2/2 plans) — completed 2026-03-14
+- [x] **Phase 37: FeeConfig Foundation** (3/3 plans) — completed 2026-03-15
+- [x] **Phase 38: Fee-Aware Backtest** (2/2 plans) — completed 2026-03-15
+- [x] **Phase 39: Fee Gate and New Strategies** (3/3 plans) — completed 2026-03-15
+- [x] **Phase 40: Regime-Aware Perp Pipeline** (3/3 plans) — completed 2026-03-15
+- [x] **Phase 41: Dashboard Time-Series Panels** (3/3 plans) — completed 2026-03-15
+
+</details>
+
+<details>
+<summary>✅ v2.1 Pre-Live Reliability (Phases 42-45) — SHIPPED 2026-03-22</summary>
+
+- [x] **Phase 42: Dashboard Metric Fixes** (2/2 plans) — completed 2026-03-16
+- [x] **Phase 43: Trade Diagnostics** (3/3 plans) — completed 2026-03-16
+- [x] **Phase 44: Signal Quality Gates** (2/2 plans) — completed 2026-03-16
+- [x] **Phase 45: Pre-Live Gate** (2/2 plans) — completed 2026-03-22
+
+</details>
 
 ## Progress
 
@@ -124,3 +145,13 @@
 | 33. Dashboard Perp Panels | v1.4 | 2/2 | Complete | 2026-03-10 |
 | 34. Perp Infrastructure Foundation | v1.5 | 2/2 | Complete | 2026-03-14 |
 | 35. Pipeline Wiring and Activation | v1.5 | 2/2 | Complete | 2026-03-14 |
+| 36. Perp Infrastructure Loose Ends | v2.0 | 2/2 | Complete | 2026-03-14 |
+| 37. FeeConfig Foundation | v2.0 | 3/3 | Complete | 2026-03-15 |
+| 38. Fee-Aware Backtest | v2.0 | 2/2 | Complete | 2026-03-15 |
+| 39. Fee Gate and New Strategies | v2.0 | 3/3 | Complete | 2026-03-15 |
+| 40. Regime-Aware Perp Pipeline | v2.0 | 3/3 | Complete | 2026-03-15 |
+| 41. Dashboard Time-Series Panels | v2.0 | 3/3 | Complete | 2026-03-15 |
+| 42. Dashboard Metric Fixes | v2.1 | 2/2 | Complete | 2026-03-16 |
+| 43. Trade Diagnostics | v2.1 | 3/3 | Complete | 2026-03-16 |
+| 44. Signal Quality Gates | v2.1 | 2/2 | Complete | 2026-03-16 |
+| 45. Pre-Live Gate | v2.1 | 2/2 | Complete | 2026-03-22 |

@@ -2,19 +2,19 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-15)
+See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v2.1 Pre-Live Reliability — dashboard fixes + strategy quality
+**Current focus:** v2.1 archived — planning next milestone via /gsd:new-milestone
 
 ## Current Position
 
 Phase: 45 — Pre-Live Gate
-Plan: 01 complete
-Status: In Progress
-Last activity: 2026-03-22 — Plan 45-01 complete: PreLiveGate safety check with configurable thresholds blocking live trading without paper profitability
+Plan: 02 complete (phase complete)
+Status: Complete
+Last activity: 2026-03-22 — Plan 45-02 complete: Live Readiness dashboard panel with GO/NO-GO indicator, paper track record, risk config, fee tier via REST + WS refresh
 
-Progress: [█████████████████████████████░] ~80% (45/~46 phases, 1/2 plans)
+Progress: [██████████████████████████████] ~100% (45/~46 phases, 2/2 plans)
 
 ## Performance Metrics
 
@@ -33,6 +33,7 @@ Progress: [███████████████████████
 - 44-01: 7 files changed, +278/−5 lines, 859 tests passing, 6 min
 - 44-02: 9 files changed, +122/−11 lines, 859 tests passing, 5 min
 - 45-01: 4 files changed, +609/−3 lines, 870 tests passing, 5 min
+- 45-02: 6 files changed, +249/−0 lines, 870 tests passing, 5 min
 
 ## Accumulated Context
 
@@ -120,6 +121,12 @@ All v1.0–v2.0 decisions logged in PROJECT.md Key Decisions table.
 - [45-01]: Gate only runs when isSpotLive || isPerpLive -- paper mode is never gated
 - [45-01]: preLiveGate config schema: minTrades default 20, minNetPnl default 0, lookbackTrades optional -- all via GATE_* env vars
 
+**v2.1 execution notes (45-02):**
+- [45-02]: GATE-02 No new WS event types -- auto-update reuses existing orderFilled flow triggering REST re-fetch of /api/gate/status
+- [45-02]: Server-computed gateStatus is authoritative (all sessions + perp); client-side useMemo provides live session-only updates
+- [45-02]: dashboardFeeConfig hoisted before perp block in start.ts, assigned inside FCM fetch -- available to dashboard even when perpMode is paper
+- [45-02]: LiveReadinessPanel placed before RiskPanel in right column for visibility; shows GO/NO-GO badge, track record table, thresholds, risk config, fee tier, fail reasons
+
 **v2.1 roadmap notes (revised 2026-03-15):**
 - Constraint: No new `npm run` scripts. All strategy performance stats, paper performance summaries, and live readiness status go in the dashboard as auto-updating panels. Only `npm run report` may be extended (DIAG-01).
 - Phase 42 (DASH-01/02/03): Investigate why unrealizedPnl and fundingCost arrive as 0 in dashboard despite v2.0 fixes; the [41-bugfix] notes are starting context — trace the full WS event path from PaperPerpEngine emit through WsBroadcaster to React panel.
@@ -144,4 +151,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed 45-01-PLAN.md. PreLiveGate safety check with configurable thresholds (GATE_MIN_TRADES, GATE_MIN_NET_PNL, GATE_LOOKBACK_TRADES) blocking live trading without paper profitability. 4 files changed. 870 tests passing.
+Stopped at: Completed 45-02-PLAN.md. Live Readiness dashboard panel with GO/NO-GO indicator, paper track record, risk config, fee tier. Phase 45 complete. 6 files changed. 870 tests passing.

@@ -2,7 +2,7 @@
 
 ## What This Is
 
-A quant-grade cryptocurrency trading bot targeting Coinbase Advanced Trade API, built with TypeScript/Node.js. It runs automated trading strategies on BTC-USD, ETH-USD, BTC-PERP, and ETH-PERP, selected through empirical backtesting tournaments with walk-forward validation. The system covers the full lifecycle: historical data ingestion, technical indicator computation, strategy evaluation, backtesting, Monte Carlo robustness testing, risk management with correlation-aware sizing, paper trading, live trading, regime-aware tournament-based strategy selection, live strategy auto-switching, exit parameter optimization, perpetual futures trading with leverage/margin management and funding rate tracking, separate analytics, and a real-time web dashboard with perp panels. Running `npm start` executes the full adaptive pipeline end-to-end.
+A quant-grade cryptocurrency trading bot targeting Coinbase Advanced Trade API, built with TypeScript/Node.js. It runs automated trading strategies on BTC-USD, ETH-USD, BTC-PERP, and ETH-PERP, selected through empirical backtesting tournaments with walk-forward validation. The system covers the full lifecycle: historical data ingestion, technical indicator computation, strategy evaluation, fee-aware backtesting, Monte Carlo robustness testing, risk management with correlation-aware sizing, paper trading, live trading, regime-aware strategy selection, live auto-switching, exit optimization, fee-aware perpetual futures trading with leverage/margin management, funding rate tracking, four perp strategies optimized per regime, a real-time dashboard with funding rate history, P&L curve, and leverage utilization charts, per-trade fee attribution in `npm run report`, entry-signal structured logging, per-strategy performance dashboard panel, spot fee-drag gate, configurable strategy params via `.env`, and a pre-live gate that prevents live activation without demonstrated paper profitability. Running `npm start` executes the full adaptive pipeline end-to-end.
 
 ## Core Value
 
@@ -60,7 +60,6 @@ The bot must reliably execute trades with correct position sizing, risk limits, 
 - ✓ FundingRateTracker: cumulative cost per position, FUNDING_DRAIN_EXIT trigger — v1.4
 - ✓ perpTrades SQLite table; `npm run report --type perp` with directional win rate, leverage, funding stats — v1.4
 - ✓ Dashboard perp panels: PerpPositionsPanel, PerpFundingPanel, PerpLeverageMeter via WebSocket — v1.4
-
 - ✓ `perpMode` (paper|live|none) in FCM config schema with cross-field refine — PERP_MODE=live without FCM_ENABLED fails at startup — v1.5
 - ✓ PerpStateStore isolated to `data/perp.db` (separate from `data/trading.db`) — prevents SQLITE_BUSY — v1.5
 - ✓ IntxClient error listener registered before `.start()` — transient FCM errors no longer crash the process — v1.5
@@ -70,10 +69,32 @@ The bot must reliably execute trades with correct position sizing, risk limits, 
 - ✓ `npm start` launches PerpPositionManager with recoverFromRestart() when PERP_MODE=live — v1.5
 - ✓ `--skip-perp-tournament` flag skips tournament step, activates engine without leaderboards — v1.5
 - ✓ Zero-trade guard: engine does not activate when perp tournament produces no OOS trades — v1.5
+- ✓ Funding panel emits live funding rate data continuously, even with no position open — v2.0
+- ✓ Live `fundingRateProvider` wired in `start.ts` for PerpPositionManager — v2.0
+- ✓ ETH-PERP candle feed routed to perp engines alongside BTC-USD — v2.0
+- ✓ Dynamic FCM fee fetch at startup via `fetchFeeConfig()`; FeeConfig singleton available to all subsystems — v2.0
+- ✓ Backtest P&L deducts taker fee at entry and exit; rate sourced from FeeConfig — v2.0
+- ✓ `PerformanceMetrics` tracks `totalFees` and `fundingCost` as separate, never-merged fields — v2.0
+- ✓ PerpRiskGate Check 4 (`FEE_DRAG_EXCESSIVE`): rejects entries where expected gain < round-trip fee — v2.0
+- ✓ `FundingRateArbitrageStrategy`: implied funding carry signal, regime-gated RANGING/VOLATILE — v2.0
+- ✓ `BasisTradeStrategy`: Z-score of rolling basis from `markPrice/indexPrice` — v2.0
+- ✓ Perp tournament runs in regime-aware mode; `regimeLeaderboards` wired to `PaperPerpEngine` and `PerpPositionManager` — v2.0
+- ✓ Funding rate history histogram (`HistogramSeries`) in dashboard — v2.0
+- ✓ Per-position P&L curve (`BaselineSeries`) with 1/min server-side downsampling — v2.0
+- ✓ Leverage utilization history (`AreaSeries`) from `perpExposureUpdate` events — v2.0
+- ✓ Dashboard P&L and funding cost update live during active perp positions — mark price events throttled at 5s — v2.1
+- ✓ All three perp panels show "last updated" timestamp; stale panels immediately visible — v2.1
+- ✓ `npm run report` (spot + perp) prints per-trade gross P&L, total fees, funding cost, net P&L — v2.1
+- ✓ Entry-signal Pino INFO record with instrument, strategy, direction, and key indicator values — v2.1
+- ✓ Dashboard "Strategy Performance" panel: per-strategy win rate, avg gross/net P&L, avg fees, fee-drag ratio — v2.1
+- ✓ SpotSignalGate: ATR-estimated expected move must exceed configurable multiple of round-trip fee — v2.1
+- ✓ Key spot strategy params (RSI, BB period, Z-score window, fee-drag multiple, ATR period) configurable via `.env` — v2.1
+- ✓ PreLiveGate: `npm start` with live mode fails fast (before engine init) when paper net P&L is below threshold — v2.1
+- ✓ Dashboard "Live Readiness" panel: GO/NO-GO badge, paper track record, risk config, fee tier; auto-updates via WS — v2.1
 
 ### Active
 
-<!-- v1.6 and beyond — to be defined with /gsd:new-milestone -->
+<!-- Next milestone requirements defined via /gsd:new-milestone -->
 
 ### Out of Scope
 
@@ -84,26 +105,27 @@ The bot must reliably execute trades with correct position sizing, risk limits, 
 - Cloud deployment — runs locally, cloud is a future consideration
 - AI/ML price prediction — overfitting trap for personal use
 - Multi-exchange support — Coinbase only reduces complexity
-- Options (calls/puts) — different pricing model (Black-Scholes, Greeks); deferred to v2.0+
-- Advanced analytics (Sortino, Calmar, Omega) — deferred to v2.0+
+- Options (calls/puts) — different pricing model (Black-Scholes, Greeks); deferred to v3.0+
+- Advanced analytics (Sortino, Calmar, Omega) — deferred to v3.0+
 
 ## Context
 
-Shipped v1.4 with ~65,166 LOC TypeScript across 78 test files, 1,122 tests.
+Shipped v2.1 with ~83,873 LOC TypeScript across 69 test files, 870 tests.
 
 **v1.0 baseline:** 55,764 LOC, 149 files, 773 tests
 **v1.1 additions:** +5,520 net lines, 68 files changed, 444 tests passing
 **v1.2 additions:** +3,340 net lines, 30 files changed, 527 tests passing
 **v1.3 additions:** +4,225 net lines, 49 files changed, 638 tests passing
 **v1.4 additions:** +11,542 net lines, 66 files changed, 1,122 tests passing
+**v1.5 additions:** +446/−113 lines, 11 files changed, 789 tests passing
+**v2.0 additions:** +2,465/−88 lines, 41 files changed, 845 tests passing (6 phases, 16 plans)
+**v2.1 additions:** +1,939/−48 lines, 30 files changed, 870 tests passing (4 phases, 9 plans)
 
 **Tech stack:** TypeScript/Node.js (ESM), better-sqlite3 + Drizzle ORM, Fastify + React 19 + Vite 6, Lightweight Charts v5, decimal.js, simple-statistics, fast-technical-indicators, coinbase-api (tiagosiebler), Zod v4, Pino, Vitest.
 
-**Architecture:** Event-driven with interface abstraction — strategy code runs identically in backtest, paper, and live modes. EventEmitter pipeline connects trading engines to dashboard via WebSocket. All subsystems in a single Node.js process (avoids SQLite BUSY). ExitLogicManager is stateful per-position, instantiated at entry, providing priority-ordered exits (partial > trailing > atrStop > time) across all engines. Auto-switching state machine in spot and perp engines consults regimeLeaderboards on every candle, defers swaps while positions are open, and enforces a 10-candle cooldown. Perp system runs alongside spot: PerpPositionManager handles live FCM orders, PaperPerpEngine handles simulation (zero REST calls), PerpRiskGate gates every entry, and FundingRateTracker monitors drain exit triggers. `npm start` runs the full adaptive pipeline: sync → optimize exits → spot tournament → perp tournament → activate engines → dashboard.
+**Architecture:** Event-driven with interface abstraction — strategy code runs identically in backtest, paper, and live modes. EventEmitter pipeline connects trading engines to dashboard via WebSocket. All subsystems in a single Node.js process (avoids SQLite BUSY). ExitLogicManager is stateful per-position, instantiated at entry, providing priority-ordered exits (partial > trailing > atrStop > time) across all engines. Auto-switching state machine in spot and perp engines consults regimeLeaderboards on every candle, defers swaps while positions are open, and enforces a 10-candle cooldown. Perp system runs alongside spot: PerpPositionManager handles live FCM orders, PaperPerpEngine handles simulation (zero REST calls), PerpRiskGate gates every entry, and FundingRateTracker monitors drain exit triggers. SpotSignalGate gates spot entries by ATR-estimated fee drag. PreLiveGate runs at startup to enforce minimum paper track record before live mode is allowed. `npm start` runs the full adaptive pipeline: sync → optimize exits → spot tournament → perp tournament → pre-live gate check → activate engines → dashboard.
 
-**v1.5 additions:** +446/−113 lines, 11 files changed, 789 tests passing (11 new structural tests).
-
-**Test coverage:** 789 tests across 64 test files (all passing).
+**Test coverage:** 870 tests across 69 test files (all passing).
 
 ## Constraints
 
@@ -112,6 +134,7 @@ Shipped v1.4 with ~65,166 LOC TypeScript across 78 test files, 1,122 tests.
 - **Latency**: Not optimized for sub-second execution; intraday to swing timeframes
 - **Budget**: Minimal infrastructure cost — local deployment, free data tiers
 - **Security**: API keys in .env, never in source control
+- **No new npm scripts**: All monitoring and diagnostics surface in dashboard panels; only `npm run report` may be extended
 
 ## Key Decisions
 
@@ -159,6 +182,24 @@ Shipped v1.4 with ~65,166 LOC TypeScript across 78 test files, 1,122 tests.
 | perpActivationReady boolean sentinel (v1.5) | Avoids double resources.push and sentinel-undefined confusion in zero-trade and error paths | ✓ Good — clear activation gate |
 | fundingRateProvider = () => null in npm start (v1.5) | FCM funding rate not yet integrated into start.ts; FundingRateTracker handles drain internally via events | ✓ Good — correct for paper mode; live can wire later |
 | Separate data/perp.db for PerpStateStore (v1.5) | Prevents SQLITE_BUSY with concurrent spot tournament writes | ✓ Good — zero contention confirmed |
+| FeeConfig from `fetchFeeConfig()` at startup (v2.0) | Dynamic fee vs hardcoded constant — fee changes per tier | ✓ Good — `FCM_FALLBACK_TAKER_RATE` as safe startup default |
+| Fee threshold FIXED CONSTANT not swept param (v2.0) | Swept fee thresholds cause catastrophic OOS Sharpe collapse (anti-overfitting) | ✓ Good — enforced in PerpRiskGate Check 4 |
+| `fundingCost` and `totalFees` NEVER merged (v2.0) | Fee double-counting corrupts P&L accuracy fundamentally | ✓ Good — separate fields in `BacktestResult` and `PerformanceMetrics` |
+| `FundingRateArbitrageStrategy` always returns [] in tournamentMode (v2.0) | Tournament has no real FCM funding flow → spurious signals | ✓ Good — live-only strategy, tournament-safe guard |
+| `BasisTradeStrategy` SD=0 guard for constant basis (v2.0) | FCM `indexPrice === markPrice` in practice → Z-score undefined | ✓ Good — returns [] gracefully, wired for future FCM fix |
+| `executeStrategySwitch` regime? param optional (v2.0) | Backward-compat with all existing callers not yet regime-aware | ✓ Good — zero breaking changes |
+| Dual-listener on `fundingUpdate` (v2.0) | `PERP_EVENT_MAP` handles `perpFundingUpdate`; separate handles histogram + P&L | ✓ Good — no event name collisions |
+| P&L ring buffer 1440 pts at 1/min throttle (v2.0) | Exactly 24h coverage; monotonic second guard prevents duplicate chart timestamps | ✓ Good — no data loss, no Lightweight Charts errors |
+| `IntxClient` emits `fundingRate` on any `futures_balance_summary` message (v2.0) | `funding_hold` is null/0 in paper mode without real FCM position — histogram would show "awaiting data" forever | ✓ Good — histogram stays live with zero bars when no position |
+| `session.markPrice` mutated in-memory before `_computeUnrealizedPnl` (v2.1) | `stateStore.updateSession` persists to DB only — in-memory object was stale, P&L always computed as 0 | ✓ Good — root cause of DASH-01; one-line fix unlocked all P&L chart updates |
+| Two independent P&L throttle paths (v2.1) | `markPriceUpdate` at 5s for chart responsiveness; `fundingUpdate` at 60s for ring buffer accuracy | ✓ Good — chart feels live without ring buffer thrashing |
+| `lastUpdatedAt?: number` pattern on all perp panels (v2.1) | `undefined` = "Awaiting data"; number = formatted HH:MM:SS timestamp | ✓ Good — stale panels immediately distinguishable |
+| Entry-signal log before `isFlat()` guard in spot engine (v2.1) | Logs even when position blocks entry — surfaces what would have been entered if flat | ✓ Good — DIAG-02 captures both blocked and executed signals |
+| `strategyName` optional field through full pipeline (v2.1) | Backward compat with live trades lacking `entryFill.signal.strategyName` | ✓ Good — Strategy Performance panel excludes nameless strategies |
+| SpotSignalGate mirrors PerpRiskGate Check 4 with `lte()` semantics (v2.1) | Spot taker 0.0075 (not FCM 0.0003); equal-to-fee also rejected | ✓ Good — consistent gate semantics across spot and perp |
+| `spotStrategyOverrides` in config with Zod defaults (v2.1) | `.default({ feeDragMultiple: 2.0, feeDragAtrPeriod: 14 })` not `.default({})` — TS requires explicit inner values | ✓ Good — backward-compat; undefined overrides use registry defaults |
+| PreLiveGate reads SessionStore (spot) + PerpStateStore (perp) separately (v2.1) | Unified P&L across markets; each market checked independently with decimal.js aggregation | ✓ Good — gate fails fast if EITHER market has negative track record |
+| LiveReadinessPanel auto-updates via `orderFilled` WS → `setTrades()` → `useMemo` (v2.1) | No new WS events; re-uses existing pipeline to recompute gate status on trade close | ✓ Good — zero infrastructure cost; panel stays live |
 
 ---
-*Last updated: 2026-03-14 after v1.5 milestone — Perp End-to-End Integration shipped*
+*Last updated: 2026-03-22 after v2.1 Pre-Live Reliability milestone complete*
