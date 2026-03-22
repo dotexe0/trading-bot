@@ -43,6 +43,11 @@ const configSchema = z.object({
     feeDragMultiple: z.number().positive().default(2.0),
     feeDragAtrPeriod: z.number().int().positive().default(14),
   }).default({ feeDragMultiple: 2.0, feeDragAtrPeriod: 14 }),
+  preLiveGate: z.object({
+    minTrades: z.number().int().min(0).default(20),
+    minNetPnl: z.number().default(0),
+    lookbackTrades: z.number().int().positive().optional(),
+  }).default({ minTrades: 20, minNetPnl: 0 }),
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -70,6 +75,11 @@ export type Config = z.infer<typeof configSchema>;
  * - SPOT_ZSCORE_WINDOW -> spotStrategyOverrides.zScoreWindow
  * - SPOT_FEE_DRAG_MULTIPLE -> spotStrategyOverrides.feeDragMultiple (default 2.0)
  * - SPOT_FEE_DRAG_ATR_PERIOD -> spotStrategyOverrides.feeDragAtrPeriod (default 14)
+ *
+ * Pre-live gate thresholds (all optional — omit to use built-in Zod defaults):
+ * - GATE_MIN_TRADES -> preLiveGate.minTrades (default 20)
+ * - GATE_MIN_NET_PNL -> preLiveGate.minNetPnl (default 0)
+ * - GATE_LOOKBACK_TRADES -> preLiveGate.lookbackTrades (optional, limit to last N trades)
  *
  * @throws ConfigError on validation failure
  */
@@ -112,6 +122,11 @@ export function loadConfig(): Config {
       zScoreWindow: env.SPOT_ZSCORE_WINDOW ? parseInt(env.SPOT_ZSCORE_WINDOW, 10) : undefined,
       feeDragMultiple: env.SPOT_FEE_DRAG_MULTIPLE ? parseFloat(env.SPOT_FEE_DRAG_MULTIPLE) : undefined,
       feeDragAtrPeriod: env.SPOT_FEE_DRAG_ATR_PERIOD ? parseInt(env.SPOT_FEE_DRAG_ATR_PERIOD, 10) : undefined,
+    },
+    preLiveGate: {
+      minTrades: env.GATE_MIN_TRADES ? parseInt(env.GATE_MIN_TRADES, 10) : undefined,
+      minNetPnl: env.GATE_MIN_NET_PNL ? parseFloat(env.GATE_MIN_NET_PNL) : undefined,
+      lookbackTrades: env.GATE_LOOKBACK_TRADES ? parseInt(env.GATE_LOOKBACK_TRADES, 10) : undefined,
     },
   };
 

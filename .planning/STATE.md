@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-15)
 ## Current Position
 
 Phase: 44 — Signal Quality Gates
-Plan: 01 complete
+Plan: 02 complete (phase complete)
 Status: In Progress
-Last activity: 2026-03-16 — SpotSignalGate class with fee-drag rejection for spot entries (44-01): synchronous check() method, injected into backtest/paper/live engines, wired in CLI start.ts and live.ts
+Last activity: 2026-03-16 — Spot strategy config overrides via .env (44-02): feeDragMultiple, feeDragAtrPeriod, RSI/BB/Z-score period overrides wired in all CLI entry points
 
-Progress: [███████████████████████░░░░░░░] ~73% (44/~45 phases, 1/~2 plans)
+Progress: [████████████████████████░░░░░░] ~76% (44/~45 phases, 2/2 plans)
 
 ## Performance Metrics
 
@@ -31,6 +31,7 @@ Progress: [███████████████████████
 - 43-02: 3 files changed, +167/−15 lines, 851 tests passing, 4 min
 - 43-03: 3 files changed, +81/−0 lines, 834 tests passing, 5 min
 - 44-01: 7 files changed, +278/−5 lines, 859 tests passing, 6 min
+- 44-02: 9 files changed, +122/−11 lines, 859 tests passing, 5 min
 
 ## Accumulated Context
 
@@ -103,6 +104,13 @@ All v1.0–v2.0 decisions logged in PROJECT.md Key Decisions table.
 - [44-01]: Gate placed after equity computation, before position sizing in all three engines. Uses ATR(14) from existing indicatorEngine.
 - [44-01]: Optional spotSignalGate? on all engine options interfaces — zero breaking changes for existing callers without gate.
 
+**v2.1 execution notes (44-02):**
+- [44-02]: SIG-02 spotStrategyOverrides in config schema: rsiPeriod, bbPeriod, zScoreWindow (optional), feeDragMultiple (default 2.0), feeDragAtrPeriod (default 14)
+- [44-02]: Zod .default() requires explicit inner values for TS compat — .default({ feeDragMultiple: 2.0, feeDragAtrPeriod: 14 }) not .default({})
+- [44-02]: SpotSignalGate.atrPeriod is public readonly — engines read it directly instead of hardcoded 14
+- [44-02]: Strategy param overrides only apply when strategyConfigs array exists (has exit-optimized configs); undefined means use registry defaults
+- [44-02]: tournament.ts now wires SpotSignalGate with config-backed params — was missing gate in standalone tournament CLI
+
 **v2.1 roadmap notes (revised 2026-03-15):**
 - Constraint: No new `npm run` scripts. All strategy performance stats, paper performance summaries, and live readiness status go in the dashboard as auto-updating panels. Only `npm run report` may be extended (DIAG-01).
 - Phase 42 (DASH-01/02/03): Investigate why unrealizedPnl and fundingCost arrive as 0 in dashboard despite v2.0 fixes; the [41-bugfix] notes are starting context — trace the full WS event path from PaperPerpEngine emit through WsBroadcaster to React panel.
@@ -127,4 +135,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-16
-Stopped at: Completed 44-01-PLAN.md. SpotSignalGate with fee-drag rejection injected into backtest/paper/live engines and wired in CLI. 8 new tests. 859 tests passing.
+Stopped at: Completed 44-02-PLAN.md (phase 44 complete). Spot strategy config overrides via .env for fee-drag gate params and strategy periods. 9 files changed. 859 tests passing.
