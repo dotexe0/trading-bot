@@ -27,7 +27,8 @@ export type WsMessageType =
   | 'perpExposureUpdate'
   | 'perpFundingHistory'
   | 'perpPnlUpdate'
-  | 'perpMarkPriceUpdate';
+  | 'perpMarkPriceUpdate'
+  | 'feedHealth';
 
 export interface WsMessage {
   type: WsMessageType;
@@ -149,6 +150,7 @@ export interface SnapshotPayload {
   risk?: RiskStatus;
   perpFundingHistory?: PerpFundingBarPayload[];
   perpPnlHistory?: PerpPnlPointPayload[];
+  feedHealth?: FeedHealthPayload[];
 }
 
 // ── Perp Payloads ─────────────────────────────────────────────────────
@@ -196,6 +198,15 @@ export interface PerpPnlPointPayload {
   time: number;
   /** Unrealized P&L as float (positive = profit, negative = loss) */
   value: number;
+}
+
+// ── Feed Health ─────────────────────────────────────────────────────
+
+export interface FeedHealthPayload {
+  instrument: string;
+  status: 'LIVE' | 'STALE' | 'DEAD';
+  lastCandleAt: number | null;
+  lastMarkPriceAt: number | null;
 }
 
 // ── Gate Status ──────────────────────────────────────────────────────

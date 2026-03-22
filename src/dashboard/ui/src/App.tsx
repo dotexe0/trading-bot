@@ -16,6 +16,7 @@ import { PerpLeverageMeter } from './components/PerpLeverageMeter.js';
 import { FundingHistoryChart } from './components/FundingHistoryChart.js';
 import { PnlCurveChart } from './components/PnlCurveChart.js';
 import { LeverageHistoryChart } from './components/LeverageHistoryChart.js';
+import { FeedHealthPanel } from './components/FeedHealthPanel.js';
 import { LiveReadinessPanel } from './components/LiveReadinessPanel.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { BacktestViewer } from './components/BacktestViewer.js';
@@ -24,6 +25,7 @@ import type {
   CircuitBreakerEvent,
   EquityPoint,
   EquityUpdatePayload,
+  FeedHealthPayload,
   GateStatusData,
   PerpExposurePayload,
   PerpFundingPayload,
@@ -82,6 +84,8 @@ function App(): React.ReactElement {
   const [perpFundingUpdatedAt, setPerpFundingUpdatedAt] = useState<number | undefined>(undefined);
   const [perpExposureUpdatedAt, setPerpExposureUpdatedAt] = useState<number | undefined>(undefined);
   const [gateStatus, setGateStatus] = useState<GateStatusData | null>(null);
+  const [feedHealthData, setFeedHealthData] = useState<FeedHealthPayload[]>([]);
+  const [feedHealthUpdatedAt, setFeedHealthUpdatedAt] = useState<number | undefined>(undefined);
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
@@ -305,6 +309,11 @@ function App(): React.ReactElement {
             // setData handled by chart's data prop — trigger re-render via state
             setFundingData([...fundingBarsRef.current]);
           }
+          // Feed health: hydrate from snapshot
+          if (snap.feedHealth && snap.feedHealth.length > 0) {
+            setFeedHealthData(snap.feedHealth);
+            setFeedHealthUpdatedAt(Date.now());
+          }
           // DASH-02: hydrate P&L history from ring buffer snapshot
           if (snap.perpPnlHistory && snap.perpPnlHistory.length > 0) {
             pnlPointsRef.current = snap.perpPnlHistory.map((p) => ({
@@ -465,6 +474,17 @@ function App(): React.ReactElement {
           break;
         }
 
+        case 'feedHealth': {
+          const feed = payload as FeedHealthPayload;
+          setFeedHealthData((prev) => {
+            // Upsert: replace existing entry for this instrument, or add new
+            const filtered = prev.filter((f) => f.instrument !== feed.instrument);
+            return [...filtered, feed].sort((a, b) => a.instrument.localeCompare(b.instrument));
+          });
+          setFeedHealthUpdatedAt(Date.now());
+          break;
+        }
+
         default:
           break;
       }
@@ -547,6 +567,10 @@ function App(): React.ReactElement {
           <div className="panel">
             <div className="panel-title">Open Positions</div>
             <PositionsTable positions={positions} />
+          </div>
+
+          <div className="panel">
+            <FeedHealthPanel feeds={feedHealthData} lastUpdatedAt={feedHealthUpdatedAt} />
           </div>
 
           <div className="panel">
