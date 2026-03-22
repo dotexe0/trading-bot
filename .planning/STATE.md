@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-22)
 ## Current Position
 
 Phase: 46 of 49 (Feed Resilience)
-Plan: 1 of 3 complete
+Plan: 2 of 3 complete
 Status: Executing
-Last activity: 2026-03-22 -- Completed 46-01 FeedHealthMonitor (LIVE/STALE/DEAD per-instrument tracking)
+Last activity: 2026-03-22 -- Completed 46-03 Dashboard Feed Health Panel (FeedHealthPanel with green/red status badges)
 
 Progress: [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0% (0/4 phases)
 
@@ -37,6 +37,7 @@ Progress: [░░░░░░░░░░░░░░░░░░░░░░░
 
 **v2.2 Plan Details:**
 - 46-01: 2 files, +466 lines, 882 tests, 3 min
+- 46-03: 4 files, +113 lines, 882 tests, 3 min
 
 ## Accumulated Context
 
@@ -44,6 +45,7 @@ Progress: [░░░░░░░░░░░░░░░░░░░░░░░
 
 All v1.0-v2.1 decisions logged in PROJECT.md Key Decisions table.
 - 46-01: 2.5x stale multiplier (not 2.0x) for grace buffer against timer drift; 5x dead multiplier for DEAD severity; Date.now() receipt time not candle.timestamp
+- 46-03: Two-color scheme (green LIVE, red STALE/DEAD -- no yellow); upsert-and-sort for feedHealth WS state; panel above LiveReadinessPanel for visibility
 
 ### Open Issues / Tech Debt
 
@@ -57,4 +59,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed 46-01-PLAN.md (FeedHealthMonitor). Ready for 46-02 (engine stale-data guards).
+Stopped at: Completed 46-03-PLAN.md (Dashboard Feed Health Panel). Ready for 46-02 (engine stale-data guards + broadcaster wiring).

@@ -50,6 +50,7 @@ import { parseBacktestConfig, DEFAULT_FEE_TAKER } from '../backtest/types.js';
 import type { RegimeLeaderboards } from '../tournament/types.js';
 import { SpotSignalGate } from '../risk/spot-signal-gate.js';
 import { PreLiveGate } from '../risk/pre-live-gate.js';
+import { FeedHealthMonitor } from '../core/feed-health.js';
 
 // ── Resource tracking ──────────────────────────────────────────────
 
@@ -254,6 +255,11 @@ program
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
 
+      // Feed health monitoring for all instruments (spot pairs use 1m candles = 60_000ms interval)
+      const feedHealthMonitor = new FeedHealthMonitor();
+      feedHealthMonitor.register('BTC-USD', 60_000);
+      feedHealthMonitor.register('ETH-USD', 60_000);
+
       // Spot fee-drag gate: blocks entries whose expected move <= round-trip fee * multiple
       const spotSignalGate = new SpotSignalGate({
         takerFeeRate: DEFAULT_FEE_TAKER,
@@ -426,6 +432,11 @@ program
               apiSecret: config.coinbase.apiKeySecret,
             });
 
+            // Wire candle events to feed health monitor
+            liveFeed.on('candle', (candle: Candle) => {
+              feedHealthMonitor.onCandle(candle.pair);
+            });
+
             const paperConfig = parsePaperConfig({
               pair: tradePair,
               timeframe,
@@ -443,6 +454,7 @@ program
               candleRepo: repo,
               regimeLeaderboards: result.regimeLeaderboards,
               spotSignalGate,
+              feedHealthMonitor,
             });
 
             const session = await engine.start();
@@ -518,6 +530,12 @@ program
           apiKey: config.coinbase.apiKeyName,
           apiSecret: config.coinbase.apiKeySecret,
         });
+
+        // Wire candle events to feed health monitor
+        liveFeed.on('candle', (candle: Candle) => {
+          feedHealthMonitor.onCandle(candle.pair);
+        });
+
         const paperConfig = parsePaperConfig({
           pair: tradingPairs[0], // default to first configured pair for ad-hoc starts
           timeframe,
@@ -533,6 +551,7 @@ program
           riskManager,
           candleRepo: repo,
           spotSignalGate,
+          feedHealthMonitor,
         });
         const session = await engine.start();
         paperEngines.push(engine);
@@ -558,6 +577,15 @@ program
         }
 
         await perpClient.start();
+
+        // Wire IntxClient markPrice events to feed health monitor
+        perpClient.on('markPrice', (evt: { instrument: string }) => {
+          feedHealthMonitor.onMarkPrice(evt.instrument);
+        });
+
+        // Register perp instruments for feed health monitoring
+        feedHealthMonitor.register(config.intx.btcProductId, 60_000);
+        feedHealthMonitor.register(config.intx.ethProductId, 60_000);
 
         // FEES-01: Fetch actual FCM taker fee rate before tournament or engine construction.
         // fetchFeeConfig() never throws — returns DEFAULT_FEE_CONFIG on any API failure.
@@ -627,6 +655,11 @@ program
             apiSecret: config.coinbase.apiKeySecret,
           });
 
+          // Wire perp LiveDataFeed candle events to feed health monitor
+          perpLiveFeed.on('candle', (candle: Candle) => {
+            feedHealthMonitor.onCandle(candle.pair);
+          });
+
           if (config.intx.perpMode === 'paper') {
             // PIPE-02: PaperPerpEngine
             const paperPerpEngine = new PaperPerpEngine({
@@ -635,6 +668,7 @@ program
               config: config.intx,
               regimeLeaderboards: perpRegimeLeaderboards,
               fundingRateProvider,
+              feedHealthMonitor,
             });
 
             paperPerpEngine.start();
@@ -663,6 +697,7 @@ program
               config: config.intx,
               regimeLeaderboards: perpRegimeLeaderboards,
               fundingRateProvider,
+              feedHealthMonitor,
             });
 
             // PIPE-03: recoverFromRestart() BEFORE start()
@@ -702,6 +737,10 @@ program
         });
       }
 
+      // Start feed health monitor and register for shutdown
+      feedHealthMonitor.start();
+      resources.push({ name: 'FeedHealthMonitor', stop: async () => feedHealthMonitor.stop() });
+
       const server = await createDashboardServer(dashboardConfig, {
         liveStateStore,
         sessionStore,
@@ -717,6 +756,7 @@ program
         perpStateStore,
         gateConfig: config.preLiveGate,
         feeConfig: dashboardFeeConfig,
+        feedHealthMonitor,
       });
 
       await server.start();

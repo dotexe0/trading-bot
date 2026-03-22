@@ -227,6 +227,9 @@ export class PerpPositionManager extends EventEmitter {
 
     this.intxClient.on('markPrice', this._onMarkPrice);
 
+    // Re-hydrate in-memory state from DB on IntxClient reconnection
+    this.intxClient.on('reconnected', () => this._handleReconnection());
+
     this._onFundingRate = (evt: IntxFundingRateEvent) => {
       if (evt.isStale) return;  // preserve stale guard (must be first check)
       if (!this.currentSession) {
@@ -757,6 +760,43 @@ export class PerpPositionManager extends EventEmitter {
     );
 
     return { restored, closedExternally };
+  }
+
+  // ── Reconnection re-hydration ────────────────────────────────────────────
+
+  /**
+   * Re-hydrate in-memory state from DB after IntxClient reconnection.
+   * Prevents stale cached markPrice/fundingCost from producing bad signals.
+   * Called when IntxClient emits 'reconnected'.
+   */
+  private _handleReconnection(): void {
+    if (!this.currentSession) {
+      log.info('IntxClient reconnected — no open position, nothing to re-hydrate');
+      return;
+    }
+
+    const dbSession = this.stateStore.getOpenSession(this.currentSession.instrument);
+    if (dbSession) {
+      if (dbSession.markPrice) {
+        this.currentSession.markPrice = dbSession.markPrice;
+      }
+      if (dbSession.cumulativeFundingCost) {
+        this.currentSession.cumulativeFundingCost = dbSession.cumulativeFundingCost;
+      }
+      log.info(
+        {
+          sessionId: this.currentSession.id,
+          markPrice: dbSession.markPrice,
+          cumulativeFundingCost: dbSession.cumulativeFundingCost,
+        },
+        'IntxClient reconnected — session state re-hydrated from DB',
+      );
+    } else {
+      log.warn(
+        { sessionId: this.currentSession.id },
+        'IntxClient reconnected — no matching open session in DB for re-hydration',
+      );
+    }
   }
 
   // ── Funding helpers ───────────────────────────────────────────────────────

@@ -22,6 +22,7 @@ import type { CorrelationStore } from '../../correlation/correlation-store.js';
 import type { CandleRepository } from '../../data/storage/candle-repo.js';
 import type { PaperTradingEngine } from '../../paper/paper-engine.js';
 import type { PerpStateStore } from '../../perp/perp-state-store.js';
+import type { FeedHealthMonitor, FeedHealthState } from '../../core/feed-health.js';
 import {
   toApiSession,
   toApiPaperSession,
@@ -80,6 +81,8 @@ export interface DashboardDeps {
   perpStateStore?: PerpStateStore;
   gateConfig?: { minTrades: number; minNetPnl: number; lookbackTrades?: number };
   feeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
+  /** When provided, enables feed health broadcasting and snapshot inclusion. */
+  feedHealthMonitor?: FeedHealthMonitor;
 }
 
 export interface RouteDeps {
@@ -265,6 +268,18 @@ export async function createDashboardServer(
     });
   }
 
+  // Wire feed health monitor to broadcaster
+  if (deps.feedHealthMonitor) {
+    deps.feedHealthMonitor.on('healthChange', (state: FeedHealthState) => {
+      broadcaster.broadcast('feedHealth' as any, {
+        instrument: state.instrument,
+        status: state.status,
+        lastCandleAt: state.lastCandleAt,
+        lastMarkPriceAt: state.lastMarkPriceAt,
+      });
+    });
+  }
+
   // Build route dependencies
   const routeDeps: RouteDeps = {
     liveStateStore: deps.liveStateStore,
@@ -284,7 +299,7 @@ export async function createDashboardServer(
   // Register WebSocket handler
   await wsHandler(app, {
     broadcaster,
-    getSnapshot: () => buildSnapshot(routeDeps, fundingRingBuffer, pnlRingBuffer),
+    getSnapshot: () => buildSnapshot(routeDeps, fundingRingBuffer, pnlRingBuffer, deps.feedHealthMonitor),
     onCommand: (cmd, ws) => handleCommand(cmd, routeDeps, broadcaster),
   });
 
@@ -334,6 +349,7 @@ function buildSnapshot(
   deps: RouteDeps,
   fundingRingBuffer?: RingBuffer<{ instrument: string; time: number; value: number; color: string }>,
   pnlRingBuffer?: RingBuffer<{ time: number; value: number }>,
+  feedHealthMonitor?: FeedHealthMonitor,
 ) {
   const liveSessions = deps.liveStateStore.listSessions('running').map(toApiSession);
   const paperSessions = deps.sessionStore.listSessions('running').map(toApiPaperSession);
@@ -386,6 +402,12 @@ function buildSnapshot(
     sessions, trades, equity, strategies, risk,
     perpFundingHistory: fundingRingBuffer?.toArray() ?? [],
     perpPnlHistory: pnlRingBuffer?.toArray() ?? [],
+    feedHealth: feedHealthMonitor?.getAllStatuses().map(s => ({
+      instrument: s.instrument,
+      status: s.status,
+      lastCandleAt: s.lastCandleAt,
+      lastMarkPriceAt: s.lastMarkPriceAt,
+    })) ?? [],
   };
 }
 
