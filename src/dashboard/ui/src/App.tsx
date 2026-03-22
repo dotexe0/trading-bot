@@ -16,6 +16,7 @@ import { PerpLeverageMeter } from './components/PerpLeverageMeter.js';
 import { FundingHistoryChart } from './components/FundingHistoryChart.js';
 import { PnlCurveChart } from './components/PnlCurveChart.js';
 import { LeverageHistoryChart } from './components/LeverageHistoryChart.js';
+import { LiveReadinessPanel } from './components/LiveReadinessPanel.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { BacktestViewer } from './components/BacktestViewer.js';
 import { PortfolioStats } from './components/PortfolioStats.js';
@@ -23,6 +24,7 @@ import type {
   CircuitBreakerEvent,
   EquityPoint,
   EquityUpdatePayload,
+  GateStatusData,
   PerpExposurePayload,
   PerpFundingPayload,
   PerpFundingBarPayload,
@@ -79,6 +81,7 @@ function App(): React.ReactElement {
   const [perpPositionUpdatedAt, setPerpPositionUpdatedAt] = useState<number | undefined>(undefined);
   const [perpFundingUpdatedAt, setPerpFundingUpdatedAt] = useState<number | undefined>(undefined);
   const [perpExposureUpdatedAt, setPerpExposureUpdatedAt] = useState<number | undefined>(undefined);
+  const [gateStatus, setGateStatus] = useState<GateStatusData | null>(null);
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
@@ -188,6 +191,15 @@ function App(): React.ReactElement {
           const eventsData = (await eventsRes.json()) as CircuitBreakerEvent[];
           setCircuitBreakerEvents(eventsData);
         }
+
+        // Fetch gate status for Live Readiness panel
+        try {
+          const gateRes = await fetch('/api/gate/status');
+          if (gateRes.ok) {
+            const gateData = (await gateRes.json()) as GateStatusData;
+            setGateStatus(gateData);
+          }
+        } catch { /* API not ready */ }
       } catch {
         // API not available yet — dashboard shows empty state
       }
@@ -267,6 +279,11 @@ function App(): React.ReactElement {
             })
             .then((r) => (r ? r.json() : null))
             .then((data) => { if (data) setTrades(data as TradeData[]); })
+            .catch(() => undefined);
+          // Also refresh gate status when trades update
+          void fetch('/api/gate/status')
+            .then(r => r.json())
+            .then(data => setGateStatus(data as GateStatusData))
             .catch(() => undefined);
           break;
         }
@@ -530,6 +547,11 @@ function App(): React.ReactElement {
           <div className="panel">
             <div className="panel-title">Open Positions</div>
             <PositionsTable positions={positions} />
+          </div>
+
+          <div className="panel">
+            <div className="panel-title">Live Readiness</div>
+            <LiveReadinessPanel gateStatus={gateStatus} trades={trades} />
           </div>
 
           <RiskPanel

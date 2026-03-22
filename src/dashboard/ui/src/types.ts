@@ -197,3 +197,34 @@ export interface PerpPnlPointPayload {
   /** Unrealized P&L as float (positive = profit, negative = loss) */
   value: number;
 }
+
+// ── Gate Status ──────────────────────────────────────────────────────
+
+export interface GateStatusData {
+  passed: boolean;
+  spotTradeCount: number;
+  perpTradeCount: number;
+  totalTradeCount: number;
+  spotNetPnl: string;
+  perpNetPnl: string;
+  totalNetPnl: string;
+  spotWinRate: number;
+  perpWinRate: number;
+  failReasons: string[];
+  config: {
+    minTrades: number;
+    minNetPnl: number;
+    lookbackTrades?: number;
+  };
+  riskConfig: {
+    maxDrawdownPct?: number;
+    maxExposurePct?: number;
+    maxDailyLossPct?: number;
+    maxPositionCount?: number;
+  };
+  feeConfig: {
+    spotTakerRate: number;
+    perpTakerRate?: number;
+    perpFeeSource?: string;
+  };
+}
