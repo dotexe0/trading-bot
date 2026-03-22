@@ -135,6 +135,14 @@ export interface LiveTrade {
   pnlPct?: string;
   /** Holding period in milliseconds */
   holdingPeriodMs?: number;
+  /** Candle close price at entry signal time (string for precision) */
+  signalPrice?: string;
+  /** Candle close price at exit signal time, or stop trigger price for stop-loss exits */
+  exitSignalPrice?: string;
+  /** Entry slippage in basis points (positive = unfavorable) */
+  entrySlippageBps?: string;
+  /** Exit slippage in basis points (positive = unfavorable) */
+  exitSlippageBps?: string;
 }
 
 // ── Reconciliation Report ───────────────────────────────────────────

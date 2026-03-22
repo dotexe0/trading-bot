@@ -158,6 +158,10 @@ export const liveTrades = sqliteTable(
     pnl: text('pnl'),
     pnlPct: text('pnl_pct'),
     holdingPeriodMs: integer('holding_period_ms'),
+    signalPrice: text('signal_price'),
+    exitSignalPrice: text('exit_signal_price'),
+    entrySlippageBps: text('entry_slippage_bps'),
+    exitSlippageBps: text('exit_slippage_bps'),
   },
   (table) => [index('idx_live_trades_session').on(table.sessionId)],
 );

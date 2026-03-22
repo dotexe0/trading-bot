@@ -197,6 +197,75 @@ describe('LiveStateStore', () => {
     expect(trades[0].pnl).toBe('3.94');
   });
 
+  describe('slippage fields', () => {
+    it('round-trips all 4 slippage fields through recordTrade and getSessionTrades', () => {
+      const session = store.createSession(makeConfig(), 'strat');
+      const trade: LiveTrade = {
+        sessionId: session.id,
+        entryOrderId: 'EX-SLIP-E1',
+        exitOrderId: 'EX-SLIP-X1',
+        entryTimestamp: 1000000,
+        entryPrice: '50000',
+        entryFee: '3.00',
+        entrySide: 'BUY',
+        entryQuantity: '0.01',
+        exitTimestamp: 2000000,
+        exitPrice: '50100',
+        exitFee: '3.01',
+        exitSide: 'SELL',
+        exitQuantity: '0.01',
+        pnl: '3.99',
+        pnlPct: '0.80',
+        holdingPeriodMs: 1000000,
+        signalPrice: '50000',
+        exitSignalPrice: '50100',
+        entrySlippageBps: '5.00',
+        exitSlippageBps: '-2.00',
+      };
+
+      store.recordTrade(session.id, trade);
+      const trades = store.getSessionTrades(session.id);
+
+      expect(trades).toHaveLength(1);
+      expect(trades[0].signalPrice).toBe('50000');
+      expect(trades[0].exitSignalPrice).toBe('50100');
+      expect(trades[0].entrySlippageBps).toBe('5.00');
+      expect(trades[0].exitSlippageBps).toBe('-2.00');
+    });
+
+    it('returns undefined for old trades with null slippage fields', () => {
+      const session = store.createSession(makeConfig(), 'strat');
+      const trade: LiveTrade = {
+        sessionId: session.id,
+        entryOrderId: 'EX-OLD-E1',
+        exitOrderId: 'EX-OLD-X1',
+        entryTimestamp: 1000000,
+        entryPrice: '50000',
+        entryFee: '3.00',
+        entrySide: 'BUY',
+        entryQuantity: '0.01',
+        exitTimestamp: 2000000,
+        exitPrice: '51000',
+        exitFee: '3.06',
+        exitSide: 'SELL',
+        exitQuantity: '0.01',
+        pnl: '3.94',
+        pnlPct: '0.79',
+        holdingPeriodMs: 1000000,
+        // No slippage fields -- simulating old trade
+      };
+
+      store.recordTrade(session.id, trade);
+      const trades = store.getSessionTrades(session.id);
+
+      expect(trades).toHaveLength(1);
+      expect(trades[0].signalPrice).toBeUndefined();
+      expect(trades[0].exitSignalPrice).toBeUndefined();
+      expect(trades[0].entrySlippageBps).toBeUndefined();
+      expect(trades[0].exitSlippageBps).toBeUndefined();
+    });
+  });
+
   it('records and retrieves equity points', () => {
     const session = store.createSession(makeConfig(), 'strat');
 

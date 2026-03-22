@@ -285,6 +285,10 @@ export class LiveStateStore {
       pnl: trade.pnl ?? null,
       pnlPct: trade.pnlPct ?? null,
       holdingPeriodMs: trade.holdingPeriodMs ?? null,
+      signalPrice: trade.signalPrice ?? null,
+      exitSignalPrice: trade.exitSignalPrice ?? null,
+      entrySlippageBps: trade.entrySlippageBps ?? null,
+      exitSlippageBps: trade.exitSlippageBps ?? null,
     }).run();
   }
 
@@ -403,6 +407,10 @@ export class LiveStateStore {
       pnl: row.pnl ?? undefined,
       pnlPct: row.pnlPct ?? undefined,
       holdingPeriodMs: row.holdingPeriodMs ?? undefined,
+      signalPrice: row.signalPrice ?? undefined,
+      exitSignalPrice: row.exitSignalPrice ?? undefined,
+      entrySlippageBps: row.entrySlippageBps ?? undefined,
+      exitSlippageBps: row.exitSlippageBps ?? undefined,
     };
   }
 }

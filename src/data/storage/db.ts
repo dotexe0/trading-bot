@@ -415,5 +415,16 @@ export function initializeSchema(sqlite: Database.Database): void {
     sqlite.exec('ALTER TABLE perp_orders ADD COLUMN stop_price TEXT');
   }
 
+  // Migrate existing live_trades tables: add slippage tracking columns if absent.
+  const liveTradesSlippage = sqlite
+    .prepare("SELECT COUNT(*) as cnt FROM pragma_table_info('live_trades') WHERE name='signal_price'")
+    .get() as { cnt: number };
+  if (liveTradesSlippage.cnt === 0) {
+    sqlite.exec('ALTER TABLE live_trades ADD COLUMN signal_price TEXT');
+    sqlite.exec('ALTER TABLE live_trades ADD COLUMN exit_signal_price TEXT');
+    sqlite.exec('ALTER TABLE live_trades ADD COLUMN entry_slippage_bps TEXT');
+    sqlite.exec('ALTER TABLE live_trades ADD COLUMN exit_slippage_bps TEXT');
+  }
+
   log.info('Database schema initialized');
 }
