@@ -140,11 +140,13 @@ export class PerpOrderEngine extends EventEmitter {
     let attempt = 0;
     let exchangeOrderId: string | undefined;
 
-    const { maxRepriceAttempts, entryOrderTimeoutMs, repriceTimeoutMs } = this.config;
+    const { maxRepriceAttempts, repriceTimeoutMs } = this.config;
+    // entryOrderTimeoutMs retained in schema for backward-compat but superseded by orderMaxWaitSeconds
+    const entryTimeoutMs = this.config.orderMaxWaitSeconds * 1000;
 
     while (true) {
       const elapsed = Date.now() - startTime;
-      if (elapsed >= entryOrderTimeoutMs) {
+      if (elapsed >= entryTimeoutMs) {
         order.status = 'FAILED';
         order.updatedAt = Date.now();
         this.stateStore.persistOrder(order);

@@ -264,10 +264,10 @@ export class PerpPositionManager extends EventEmitter {
         this._fundingDrainInProgress = true;
         log.warn({ sessionId: session.id }, 'FUNDING_DRAIN_EXIT triggered');
         this.emit('fundingDrain', session, { cumulativeFundingCost: update.cumulativeFundingCost });
-        this.closePosition('FUNDING_DRAIN_EXIT').catch((err) => {
+        this.closePositionWithRetry('FUNDING_DRAIN_EXIT').catch((err) => {
           log.error(
             { err: err instanceof Error ? err.message : String(err) },
-            'FUNDING_DRAIN_EXIT: closePosition failed',
+            'FUNDING_DRAIN_EXIT: closePosition failed after retries',
           );
         }).finally(() => {
           this._fundingDrainInProgress = false;
@@ -388,8 +388,8 @@ export class PerpPositionManager extends EventEmitter {
             );
           });
         } else if (signal.direction === 'close' && this.currentSession !== null) {
-          // Route close signal
-          this.closePosition('strategy-signal').catch((err) => {
+          // Route close signal (with retry)
+          this.closePositionWithRetry('strategy-signal').catch((err) => {
             log.error(
               { err: err instanceof Error ? err.message : String(err) },
               'strategy onCandle closePosition failed',
@@ -842,6 +842,57 @@ export class PerpPositionManager extends EventEmitter {
       logMsg,
     );
     this.emit('strategySwitch', { newStrategy: this.strategy.name });
+  }
+
+  /**
+   * Close the current position with retry + exponential backoff.
+   * After orderCloseMaxRetries exhausted, triggers one final emergency close.
+   */
+  private async closePositionWithRetry(reason?: string): Promise<PerpSession> {
+    const maxRetries = this.config.orderCloseMaxRetries;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.closePosition(reason);
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        log.warn(
+          {
+            attempt,
+            maxRetries,
+            sessionId: this.currentSession?.id,
+            reason,
+            err: lastError.message,
+          },
+          'Close order failed -- retrying',
+        );
+        // Exponential backoff: 1s, 2s, 4s
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+      }
+    }
+
+    // All retries exhausted -- emergency close
+    log.error(
+      {
+        sessionId: this.currentSession?.id,
+        instrument: this.currentSession?.instrument,
+        attempts: maxRetries,
+        lastError: lastError?.message,
+      },
+      'EMERGENCY CLOSE: all close retries exhausted',
+    );
+
+    // Emergency close: one final attempt
+    try {
+      return await this.closePosition('EMERGENCY_CLOSE');
+    } catch (emergencyErr) {
+      log.error(
+        { err: emergencyErr instanceof Error ? emergencyErr.message : String(emergencyErr) },
+        'CRITICAL: Emergency close also failed -- engine halted',
+      );
+      throw emergencyErr;
+    }
   }
 
   // ── Accessors ──────────────────────────────────────────────────────

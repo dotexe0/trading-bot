@@ -195,11 +195,11 @@ describe('PerpOrderEngine', () => {
       expect(intxClient.placeOrder).toHaveBeenCalledTimes(1);
     });
 
-    it('entry timeout fires when entryOrderTimeoutMs exceeded', async () => {
-      // Set entryOrderTimeoutMs to 600ms — the reprice loop has a 500ms sleep,
+    it('entry timeout fires when orderMaxWaitSeconds exceeded', async () => {
+      // Set orderMaxWaitSeconds to 1s — the reprice loop has a 500ms sleep,
       // so after the first rejection + sleep the second iteration's elapsed check
-      // will exceed the 600ms budget.
-      config = makeMockConfig({ entryOrderTimeoutMs: 600 });
+      // will exceed the 1s budget. (entryOrderTimeoutMs is no longer consulted)
+      config = makeMockConfig({ orderMaxWaitSeconds: 1 });
       engine = new PerpOrderEngine({
         intxClient: intxClient as unknown as IntxClient,
         stateStore: stateStore as unknown as PerpStateStore,
@@ -226,6 +226,47 @@ describe('PerpOrderEngine', () => {
         expect(orderErr.isRetryable).toBe(false);
       }
     }, 10000);
+  });
+
+  // ── ORDER-01: orderMaxWaitSeconds wiring ─────────────────────────
+
+  describe('ORDER-01: orderMaxWaitSeconds wiring', () => {
+    it('uses orderMaxWaitSeconds for entry timeout instead of entryOrderTimeoutMs', async () => {
+      // Set orderMaxWaitSeconds to 1 second (1000ms) while entryOrderTimeoutMs stays at 300000ms
+      // If the engine correctly uses orderMaxWaitSeconds, it will time out after ~1s
+      config = makeMockConfig({ orderMaxWaitSeconds: 1, entryOrderTimeoutMs: 300000 });
+      engine = new PerpOrderEngine({
+        intxClient: intxClient as unknown as IntxClient,
+        stateStore: stateStore as unknown as PerpStateStore,
+        config,
+      });
+
+      // Always reject with transient error to keep the loop cycling
+      intxClient.placeOrder.mockRejectedValue(new Error('post_only_rejected'));
+
+      const startTime = Date.now();
+
+      try {
+        await engine.submitEntryOrder({
+          instrument: 'BIP-20DEC30-CDE',
+          direction: 'long',
+          size: '0.01',
+          midPrice: '50000',
+          atr: '500',
+          getMidPrice: vi.fn().mockResolvedValue('50000'),
+        });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(OrderError);
+        const orderErr = err as OrderError;
+        expect(orderErr.message).toMatch(/timed out/i);
+      }
+
+      const elapsed = Date.now() - startTime;
+      // Should time out around 1s (orderMaxWaitSeconds=1), not 300s (entryOrderTimeoutMs)
+      // Allow generous margin for test environment, but it must be much less than 300s
+      expect(elapsed).toBeLessThan(10000);
+    }, 15000);
   });
 
   // ── Config fields ─────────────────────────────────────────────────

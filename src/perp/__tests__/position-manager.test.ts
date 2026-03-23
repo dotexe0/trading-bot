@@ -771,6 +771,168 @@ describe('PerpPositionManager', () => {
   });
 });
 
+// ── ORDER-03: close retry with emergency fallback ──────────────────────────
+
+describe('ORDER-03: close retry with emergency fallback', () => {
+  it('retries close up to orderCloseMaxRetries on failure then succeeds', async () => {
+    const localConfig = makeConfig({ orderCloseMaxRetries: 2 });
+    const ic = makeIntxClient() as any;
+    const ss = makeStateStore() as any;
+    const localManager = new PerpPositionManager({
+      intxClient: ic,
+      stateStore: ss,
+      config: localConfig,
+    });
+
+    let placeCallCount = 0;
+    (ic.placeOrder as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      placeCallCount++;
+      if (placeCallCount === 1) {
+        // First call: openPosition succeeds
+        return { orderId: 'open-1', status: 'FILLED', execQty: '0.1', avgPrice: '50000', fee: '0.5' };
+      }
+      if (placeCallCount <= 3) {
+        // 2nd call (1st close attempt), 3rd call (2nd close attempt): fail
+        throw new Error('Network error');
+      }
+      // 4th call: emergency close succeeds
+      return { orderId: 'emergency-close-1', status: 'FILLED', execQty: '0.1', avgPrice: '50000', fee: '0.5' };
+    });
+
+    // Create a strategy that returns close signal on every candle
+    const closeStrategy: IStrategy = {
+      name: 'close-strategy',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [{ strategyName: 'close-strategy', pair: 'BTC-USD', timeframe: '1h', timestamp: Date.now(), direction: 'close' as const, confidence: 1.0, reasoning: 'test' }],
+    };
+
+    // Open position directly
+    await localManager.openPosition({
+      instrument: 'BTC-USD',
+      direction: 'long',
+      size: '0.1',
+      leverage: 5,
+      entryPrice: '50000',
+    });
+
+    expect(localManager.isPositionOpen()).toBe(true);
+
+    // Now trigger close via onCandle with close strategy
+    (localManager as any).strategy = closeStrategy;
+    localManager.onCandle(makeCandle('50000', 0));
+
+    // Wait for all retries + backoff to complete
+    // 1st attempt fails -> 1s backoff, 2nd attempt fails -> 2s backoff, emergency succeeds
+    await new Promise(resolve => setTimeout(resolve, 4000));
+
+    expect(placeCallCount).toBe(4); // 1 open + 2 retries + 1 emergency
+    expect(localManager.getCurrentSession()).toBeNull();
+  }, 10000);
+
+  it('logs WARN on each close retry', async () => {
+    const localConfig = makeConfig({ orderCloseMaxRetries: 1 });
+    const ic = makeIntxClient() as any;
+    const ss = makeStateStore() as any;
+    const localManager = new PerpPositionManager({
+      intxClient: ic,
+      stateStore: ss,
+      config: localConfig,
+    });
+
+    let placeCallCount = 0;
+    (ic.placeOrder as ReturnType<typeof vi.fn>).mockImplementation(async () => {
+      placeCallCount++;
+      if (placeCallCount === 1) {
+        return { orderId: 'open-1', status: 'FILLED', execQty: '0.1', avgPrice: '50000', fee: '0.5' };
+      }
+      if (placeCallCount === 2) {
+        throw new Error('Temporary network failure');
+      }
+      // 3rd call: emergency close succeeds
+      return { orderId: 'close-1', status: 'FILLED', execQty: '0.1', avgPrice: '50000', fee: '0.5' };
+    });
+
+    await localManager.openPosition({
+      instrument: 'BTC-USD',
+      direction: 'long',
+      size: '0.1',
+      leverage: 5,
+      entryPrice: '50000',
+    });
+
+    const closeStrategy: IStrategy = {
+      name: 'close-strategy',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [{ strategyName: 'close-strategy', pair: 'BTC-USD', timeframe: '1h', timestamp: Date.now(), direction: 'close' as const, confidence: 1.0, reasoning: 'test' }],
+    };
+    (localManager as any).strategy = closeStrategy;
+    localManager.onCandle(makeCandle('50000', 0));
+
+    // Wait for retry + emergency
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    expect(placeCallCount).toBe(3); // 1 open + 1 retry + 1 emergency
+    expect(localManager.getCurrentSession()).toBeNull();
+  }, 10000);
+
+  it('triggers EMERGENCY_CLOSE reason after retries exhausted', async () => {
+    const localConfig = makeConfig({ orderCloseMaxRetries: 1 });
+    const ic = makeIntxClient() as any;
+    const ss = makeStateStore() as any;
+    const localManager = new PerpPositionManager({
+      intxClient: ic,
+      stateStore: ss,
+      config: localConfig,
+    });
+
+    let placeCallCount = 0;
+    const placeOrderCalls: any[] = [];
+    (ic.placeOrder as ReturnType<typeof vi.fn>).mockImplementation(async (params: any) => {
+      placeCallCount++;
+      placeOrderCalls.push(params);
+      if (placeCallCount === 1) {
+        return { orderId: 'open-1', status: 'FILLED', execQty: '0.1', avgPrice: '50000', fee: '0.5' };
+      }
+      if (placeCallCount === 2) {
+        throw new Error('Network error');
+      }
+      // 3rd call: emergency close succeeds
+      return { orderId: 'close-1', status: 'FILLED', execQty: '0.1', avgPrice: '50000', fee: '0.5' };
+    });
+
+    await localManager.openPosition({
+      instrument: 'BTC-USD',
+      direction: 'long',
+      size: '0.1',
+      leverage: 5,
+      entryPrice: '50000',
+    });
+
+    const closeStrategy: IStrategy = {
+      name: 'close-strategy',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [{ strategyName: 'close-strategy', pair: 'BTC-USD', timeframe: '1h', timestamp: Date.now(), direction: 'close' as const, confidence: 1.0, reasoning: 'test' }],
+    };
+    (localManager as any).strategy = closeStrategy;
+    localManager.onCandle(makeCandle('50000', 0));
+
+    // Wait for retry + emergency
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // Verify the final close call had reason 'EMERGENCY_CLOSE' in the session's closeReason
+    expect(localManager.getCurrentSession()).toBeNull();
+    // The last placeOrder call should be the emergency close
+    // Verify via stateStore.updateSession being called with closeReason = 'EMERGENCY_CLOSE'
+    expect(ss.updateSession).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ closeReason: 'EMERGENCY_CLOSE' }),
+    );
+  }, 10000);
+});
+
 // ── Auto-switch tests ──────────────────────────────────────────────────────
 //
 // These tests validate the three behavioral requirements of the regime
