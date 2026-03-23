@@ -186,6 +186,7 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
                 onSort={handleSort}
               />
               <th>Fees</th>
+              <th>Slip</th>
               <SortableHeader
                 label="Hold"
                 field="holdingPeriodMs"
@@ -221,6 +222,18 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
                     {trade.pnlPct !== undefined ? `${trade.pnlPct}%` : '—'}
                   </td>
                   <td className="mono text-muted">{totalFees}</td>
+                  <td className="mono" style={{
+                    color: trade.entrySlippageBps === undefined && trade.exitSlippageBps === undefined
+                      ? '#94a3b8'
+                      : (() => {
+                          const slip = parseFloat(trade.entrySlippageBps ?? '0') + parseFloat(trade.exitSlippageBps ?? '0');
+                          return slip > 0 ? '#ef4444' : slip < 0 ? '#22c55e' : '#94a3b8';
+                        })(),
+                  }}>
+                    {trade.entrySlippageBps === undefined && trade.exitSlippageBps === undefined
+                      ? '\u2014'
+                      : `${(parseFloat(trade.entrySlippageBps ?? '0') + parseFloat(trade.exitSlippageBps ?? '0')).toFixed(1)} bps`}
+                  </td>
                   <td className="text-muted">
                     {formatHoldingPeriod(trade.holdingPeriodMs)}
                   </td>

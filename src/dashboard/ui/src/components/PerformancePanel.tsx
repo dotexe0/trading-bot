@@ -42,7 +42,17 @@ export function PerformancePanel({ trades }: PerformancePanelProps): React.React
       ? Math.abs(avgWinPct) / Math.abs(avgLossPct)
       : (avgWinPct > 0 ? 999 : 0);
 
-    return { tradeCount, winRate, avgWinPct, avgLossPct, winLossRatio };
+    // Avg round-trip slippage (only for trades with slippage data)
+    const withSlippage = completed.filter(
+      t => t.entrySlippageBps !== undefined || t.exitSlippageBps !== undefined,
+    );
+    const avgSlippageBps = withSlippage.length > 0
+      ? withSlippage.reduce((sum, t) => {
+          return sum + parseFloat(t.entrySlippageBps ?? '0') + parseFloat(t.exitSlippageBps ?? '0');
+        }, 0) / withSlippage.length
+      : null;
+
+    return { tradeCount, winRate, avgWinPct, avgLossPct, winLossRatio, avgSlippageBps };
   }, [trades]);
 
   const strategyStats = useMemo(() => {
@@ -122,6 +132,14 @@ export function PerformancePanel({ trades }: PerformancePanelProps): React.React
           <div className="perf-stat-value">{metrics.tradeCount}</div>
           <div className="perf-stat-label">Trades</div>
         </div>
+        {metrics.avgSlippageBps !== null && (
+          <div className="perf-stat">
+            <div className="perf-stat-value" style={{ color: metrics.avgSlippageBps > 0 ? '#ef4444' : '#22c55e' }}>
+              {metrics.avgSlippageBps > 0 ? '+' : ''}{metrics.avgSlippageBps.toFixed(1)} bps
+            </div>
+            <div className="perf-stat-label">Avg Slippage</div>
+          </div>
+        )}
       </div>
       {strategyStats.length > 0 && (
         <>

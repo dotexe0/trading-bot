@@ -24,6 +24,7 @@ import { PerpStateStore } from '../perp/perp-state-store.js';
 import type { PerpTradeRecord } from '../perp/perp-state-store.js';
 import { d, ZERO } from '../core/decimal.js';
 import type { Trade } from '../backtest/types.js';
+import type { LiveTrade } from '../live/types.js';
 
 const program = new Command();
 
@@ -46,6 +47,7 @@ program
       const sessionType = (opts.type as string).toLowerCase();
 
       let trades: Trade[] = [];
+      let liveTrades: LiveTrade[] = [];
       let pair = 'BTC-USD';
       let strategyName = 'unknown';
       let sessionId: string | undefined;
@@ -130,7 +132,7 @@ program
         sessionId = session.id;
         pair = session.pair;
         strategyName = session.strategyName;
-        const liveTrades = stateStore.getSessionTrades(sessionId);
+        liveTrades = stateStore.getSessionTrades(sessionId);
         trades = liveTrades
           .map(normalizeLiveTrade)
           .filter((t): t is Trade => t !== null);
@@ -221,6 +223,11 @@ program
 
       // Per-trade fee attribution table (DIAG-01)
       printSpotTradeAttributionTable(trades);
+
+      // Per-trade slippage table (SLIP-02) -- only for live sessions with slippage data
+      if (sessionType === 'live') {
+        printLiveSlippageTable(liveTrades);
+      }
 
       if (opts.trades && report.tradeCount > 0) {
         const fmtTs = (ts: number) =>
@@ -324,6 +331,57 @@ function printSpotTradeAttributionTable(trades: Trade[]): void {
       `  ${String(i + 1).padStart(3)}  ${pair.padEnd(9)} ${fmtGross.padStart(14)} ${fmtFees.padStart(14)} ${coloredNet.padStart(14)}`,
     );
   }
+  console.log('');
+}
+
+/**
+ * Print a per-trade slippage table for live trades.
+ * Shows entry slippage, exit slippage, and round-trip slippage in basis points.
+ * Silently returns if no trades have slippage data (backward compat with old sessions).
+ */
+function printLiveSlippageTable(trades: LiveTrade[]): void {
+  const withSlippage = trades.filter(
+    (t) => t.entrySlippageBps !== undefined || t.exitSlippageBps !== undefined,
+  );
+  if (withSlippage.length === 0) return;
+
+  out.banner('Per-Trade Slippage (Live)');
+  const header = `  ${'#'.padStart(3)}  ${'Pair'.padEnd(9)} ${'Entry Slip(bps)'.padStart(16)} ${'Exit Slip(bps)'.padStart(15)} ${'Round-trip(bps)'.padStart(16)}`;
+  console.log(pc.dim(header));
+
+  let totalEntry = 0;
+  let totalExit = 0;
+
+  for (let i = 0; i < withSlippage.length; i++) {
+    const t = withSlippage[i];
+    const entryBps = parseFloat(t.entrySlippageBps ?? '0');
+    const exitBps = parseFloat(t.exitSlippageBps ?? '0');
+    const roundTrip = entryBps + exitBps;
+
+    totalEntry += entryBps;
+    totalExit += exitBps;
+
+    const fmtEntry = entryBps.toFixed(2);
+    const fmtExit = exitBps.toFixed(2);
+    const fmtRoundTrip = roundTrip.toFixed(2);
+
+    const colorEntry = entryBps > 0 ? pc.red(fmtEntry) : pc.green(fmtEntry);
+    const colorExit = exitBps > 0 ? pc.red(fmtExit) : pc.green(fmtExit);
+    const colorRoundTrip = roundTrip > 0 ? pc.red(fmtRoundTrip) : pc.green(fmtRoundTrip);
+
+    console.log(
+      `  ${String(i + 1).padStart(3)}  ${'BTC-USD'.padEnd(9)} ${colorEntry.padStart(16)} ${colorExit.padStart(15)} ${colorRoundTrip.padStart(16)}`,
+    );
+  }
+
+  const count = withSlippage.length;
+  const avgEntry = (totalEntry / count).toFixed(2);
+  const avgExit = (totalExit / count).toFixed(2);
+  const avgRoundTrip = ((totalEntry + totalExit) / count).toFixed(2);
+  console.log('');
+  console.log(
+    `  Avg Entry Slip: ${avgEntry} bps | Avg Exit Slip: ${avgExit} bps | Avg Round-trip: ${avgRoundTrip} bps`,
+  );
   console.log('');
 }
 
