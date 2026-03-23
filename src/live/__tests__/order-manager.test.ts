@@ -564,4 +564,132 @@ describe('OrderManager', () => {
     // getOrders should have been called (reconcile was triggered)
     expect(restClient.getOrders).toHaveBeenCalled();
   });
+
+  // ── ORDER-02: rejection reason allowlist ─────────────────────────────
+
+  describe('ORDER-02: rejection reason allowlist', () => {
+    it('treats unrecognized rejection reason as non-retryable', async () => {
+      restClient.submitOrder.mockResolvedValue({
+        success: false,
+        error_response: {
+          new_order_failure_reason: 'SOME_NEW_COINBASE_REASON',
+          message: 'rejected',
+        },
+      });
+
+      try {
+        await manager.submitMarketOrder({
+          pair: 'BTC-USD',
+          side: 'BUY',
+          baseSize: '0.01',
+        });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(OrderError);
+        expect((err as OrderError).isRetryable).toBe(false);
+        expect((err as OrderError).failureReason).toBe('SOME_NEW_COINBASE_REASON');
+      }
+
+      // Order persisted as FAILED
+      const failedCalls = stateStore.persistOrder.mock.calls.filter(
+        (call: any[]) => call[0].status === 'FAILED',
+      );
+      expect(failedCalls.length).toBeGreaterThan(0);
+    });
+
+    it('treats UNKNOWN_FAILURE_REASON as retryable', async () => {
+      restClient.submitOrder.mockResolvedValue({
+        success: false,
+        error_response: {
+          new_order_failure_reason: 'UNKNOWN_FAILURE_REASON',
+          message: 'unknown',
+        },
+      });
+
+      try {
+        await manager.submitMarketOrder({
+          pair: 'BTC-USD',
+          side: 'BUY',
+          baseSize: '0.01',
+        });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(OrderError);
+        expect((err as OrderError).isRetryable).toBe(true);
+        expect((err as OrderError).failureReason).toBe('UNKNOWN_FAILURE_REASON');
+      }
+    });
+
+    it('includes failureReason in OrderError on non-retryable rejection', async () => {
+      restClient.submitOrder.mockResolvedValue({
+        success: false,
+        error_response: {
+          new_order_failure_reason: 'BRAND_NEW_ERROR_CODE',
+          message: 'some new error',
+        },
+      });
+
+      try {
+        await manager.submitMarketOrder({
+          pair: 'BTC-USD',
+          side: 'BUY',
+          baseSize: '0.01',
+        });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(OrderError);
+        const orderErr = err as OrderError;
+        expect(orderErr.failureReason).toBe('BRAND_NEW_ERROR_CODE');
+        expect(orderErr.isRetryable).toBe(false);
+        expect(orderErr.message).toBe('some new error');
+      }
+    });
+
+    it('INSUFFICIENT_FUND is still non-retryable under allowlist', async () => {
+      restClient.submitOrder.mockResolvedValue({
+        success: false,
+        error_response: {
+          new_order_failure_reason: 'INSUFFICIENT_FUND',
+          message: 'Insufficient funds',
+        },
+      });
+
+      try {
+        await manager.submitMarketOrder({
+          pair: 'BTC-USD',
+          side: 'BUY',
+          baseSize: '100',
+        });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(OrderError);
+        expect((err as OrderError).isRetryable).toBe(false);
+        expect((err as OrderError).failureReason).toBe('INSUFFICIENT_FUND');
+      }
+    });
+
+    it('stop-limit order treats unrecognized reason as non-retryable', async () => {
+      restClient.submitOrder.mockResolvedValue({
+        success: false,
+        error_response: {
+          new_order_failure_reason: 'EXOTIC_NEW_REASON',
+          message: 'rejected',
+        },
+      });
+
+      try {
+        await manager.submitStopLimitOrder({
+          pair: 'BTC-USD',
+          side: 'SELL',
+          baseSize: '0.01',
+          stopPrice: '49000',
+          limitPrice: '48900',
+        });
+        expect.unreachable('Should have thrown');
+      } catch (err) {
+        expect(err).toBeInstanceOf(OrderError);
+        expect((err as OrderError).isRetryable).toBe(false);
+      }
+    });
+  });
 });
