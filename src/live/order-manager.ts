@@ -48,14 +48,12 @@ export class OrderError extends Error {
   }
 }
 
-// ── Non-retryable failure reasons from Coinbase ──────────────────────
+// ── Retryable failure reasons (allowlist) ────────────────────────────
+// Only these failure reasons are safe to retry. Any unrecognized reason
+// is treated as non-retryable (fail-safe default).
 
-const NON_RETRYABLE_REASONS = new Set([
-  'INSUFFICIENT_FUND',
-  'INVALID_SIZE',
-  'INVALID_PRICE',
-  'INVALID_PRODUCT',
-  'UNKNOWN_ORDER_TYPE',
+const RETRYABLE_FAILURE_REASONS = new Set([
+  'UNKNOWN_FAILURE_REASON',
 ]);
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -256,13 +254,25 @@ export class OrderManager extends EventEmitter {
 
       const errorMsg =
         response.error_response?.message ?? 'Unknown order submission error';
+      const failureReason = response.error_response?.new_order_failure_reason ?? '';
+      const isRetryable = RETRYABLE_FAILURE_REASONS.has(failureReason);
+
+      if (!isRetryable) {
+        log.error({
+          orderId: order.orderId,
+          productId: params.pair,
+          side: params.side,
+          baseSize: params.baseSize,
+          failureReason,
+          errorMessage: errorMsg,
+        }, 'Non-retryable order rejection -- trade abandoned');
+      }
+
       throw new OrderError({
         message: errorMsg,
         orderId: order.orderId,
-        failureReason: response.error_response?.new_order_failure_reason,
-        isRetryable: !NON_RETRYABLE_REASONS.has(
-          response.error_response?.new_order_failure_reason ?? '',
-        ),
+        failureReason,
+        isRetryable,
       });
     } catch (err) {
       if (err instanceof OrderError) throw err;
@@ -371,13 +381,25 @@ export class OrderManager extends EventEmitter {
 
       const errorMsg =
         response.error_response?.message ?? 'Unknown order submission error';
+      const failureReason = response.error_response?.new_order_failure_reason ?? '';
+      const isRetryable = RETRYABLE_FAILURE_REASONS.has(failureReason);
+
+      if (!isRetryable) {
+        log.error({
+          orderId: order.orderId,
+          productId: params.pair,
+          side: params.side,
+          baseSize: params.baseSize,
+          failureReason,
+          errorMessage: errorMsg,
+        }, 'Non-retryable order rejection -- trade abandoned');
+      }
+
       throw new OrderError({
         message: errorMsg,
         orderId: order.orderId,
-        failureReason: response.error_response?.new_order_failure_reason,
-        isRetryable: !NON_RETRYABLE_REASONS.has(
-          response.error_response?.new_order_failure_reason ?? '',
-        ),
+        failureReason,
+        isRetryable,
       });
     } catch (err) {
       if (err instanceof OrderError) throw err;

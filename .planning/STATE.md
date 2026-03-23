@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v2.2 Live Trading Hardening -- Phase 46 Feed Resilience
+**Current focus:** v2.2 Live Trading Hardening -- Phase 47 Slippage Tracking
 
 ## Current Position
 
-Phase: 46 of 49 (Feed Resilience)
-Plan: 3 of 3 complete
+Phase: 47 of 49 (Slippage Tracking) -- COMPLETE
+Plan: 2 of 2
 Status: Phase Complete
-Last activity: 2026-03-22 -- Completed 46-02 Engine Stale-Data Guards (feedHealthMonitor guard in all four engines + perp reconnection re-hydration)
+Last activity: 2026-03-22 -- Plan 47-02 complete (slippage display: CLI report table, dashboard PerformancePanel metric, TradeHistory column)
 
-Progress: [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0% (0/4 phases)
+Progress: [███████████████░░░░░░░░░░░░░░░] 50% (2/4 phases complete, ready for Phase 48)
 
 ## Performance Metrics
 
@@ -39,6 +39,8 @@ Progress: [░░░░░░░░░░░░░░░░░░░░░░░
 - 46-01: 2 files, +466 lines, 882 tests, 3 min
 - 46-02: 8 files, +400 lines, 887 tests, 10 min
 - 46-03: 4 files, +113 lines, 882 tests, 3 min
+- 47-01: 7 files, +463 lines, 894 tests, 8 min
+- 47-02: 5 files, +103 lines, 894 tests, 3 min
 
 ## Accumulated Context
 
@@ -48,6 +50,8 @@ All v1.0-v2.1 decisions logged in PROJECT.md Key Decisions table.
 - 46-01: 2.5x stale multiplier (not 2.0x) for grace buffer against timer drift; 5x dead multiplier for DEAD severity; Date.now() receipt time not candle.timestamp
 - 46-02: Guard after buffer.push() before signal eval (candles always buffered); optional chaining for backward compat; synchronous re-hydration on reconnect; 'feedHealth' as any for wave-2 parallel type
 - 46-03: Two-color scheme (green LIVE, red STALE/DEAD -- no yellow); upsert-and-sort for feedHealth WS state; panel above LiveReadinessPanel for visibility
+- 47-01: Stop-loss exitSignalPrice uses check.stopPrice not candle.close; signal prices null after restart recovery; slippage strings with 4 decimal bps / 8 decimal prices
+- 47-02: CLI slippage table uses raw LiveTrade[] not normalized Trade[]; null-safe display for old data; round-trip = entry + exit bps with red/green coloring
 
 ### Open Issues / Tech Debt
 
@@ -61,4 +65,4 @@ None.
 ## Session Continuity
 
 Last session: 2026-03-22
-Stopped at: Completed 46-02-PLAN.md (Engine Stale-Data Guards). Phase 46 fully complete (all 3 plans done). Ready for phase 47.
+Stopped at: Phase 47 Slippage Tracking complete (2/2 plans). 894 tests passing. Ready to proceed to Phase 48.

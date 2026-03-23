@@ -29,12 +29,10 @@ import type {
 
 const log = createModuleLogger('perp-order-engine');
 
-/** Failure reasons that should never be retried. */
-const NON_RETRYABLE_REASONS = new Set([
-  'INSUFFICIENT_FUND',
-  'INVALID_SIZE',
-  'INVALID_PRICE',
-  'INVALID_PRODUCT',
+/** Failure reasons that are safe to retry (allowlist).
+ * Any unrecognized reason is treated as non-retryable (fail-safe default). */
+const RETRYABLE_FAILURE_REASONS = new Set([
+  'UNKNOWN_FAILURE_REASON',
 ]);
 
 /** Typed error for order placement failures. */
@@ -192,7 +190,16 @@ export class PerpOrderEngine extends EventEmitter {
         const errMsg = placeError instanceof Error ? placeError.message : String(placeError);
         const failureReason = this._extractFailureReason(errMsg);
 
-        if (failureReason && NON_RETRYABLE_REASONS.has(failureReason)) {
+        if (failureReason && !RETRYABLE_FAILURE_REASONS.has(failureReason)) {
+          // Non-retryable -- log ERROR with full context and abort
+          log.error({
+            instrument,
+            side,
+            size,
+            limitPrice: midPrice,
+            failureReason,
+            errorMessage: errMsg,
+          }, 'Non-retryable order rejection -- trade abandoned');
           order.status = 'FAILED';
           order.updatedAt = Date.now();
           this.stateStore.persistOrder(order);
@@ -732,8 +739,15 @@ export class PerpOrderEngine extends EventEmitter {
     const match = errMsg.match(/["\']?failure_reason["\']?\s*:\s*["\']?([A-Z_]+)["\']?/);
     if (match) return match[1];
 
-    // Check if error message directly contains a known non-retryable reason
-    for (const reason of NON_RETRYABLE_REASONS) {
+    // Fallback: check if error message directly contains a well-known reason string
+    const WELL_KNOWN_REASONS = [
+      'INSUFFICIENT_FUND',
+      'INVALID_SIZE',
+      'INVALID_PRICE',
+      'INVALID_PRODUCT',
+      'UNKNOWN_FAILURE_REASON',
+    ];
+    for (const reason of WELL_KNOWN_REASONS) {
       if (errMsg.includes(reason)) return reason;
     }
 

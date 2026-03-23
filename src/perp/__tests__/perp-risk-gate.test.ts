@@ -41,6 +41,8 @@ function makeConfig(): IntxConfig {
     perpMaxLossPct: 0.02,
     fundingDrainThresholdPct: 0.005,
     perpMode: 'none',
+    orderMaxWaitSeconds: 60,
+    orderCloseMaxRetries: 3,
   };
 }
 

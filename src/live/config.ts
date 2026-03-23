@@ -59,6 +59,12 @@ export const liveConfigSchema = z.object({
 
   /** REST fallback polling interval in milliseconds */
   pollIntervalMs: z.number().int().min(1000).default(60000),
+
+  /** Max wall-clock seconds to wait for an entry fill before cancelling */
+  orderMaxWaitSeconds: z.number().int().min(5).max(300).default(60),
+
+  /** Max retries for a failed close order before triggering emergency close */
+  orderCloseMaxRetries: z.number().int().min(1).max(10).default(3),
 });
 
 // ── Parse function ───────────────────────────────────────────────────

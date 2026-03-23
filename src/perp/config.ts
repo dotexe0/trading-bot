@@ -38,6 +38,12 @@ export const fcmConfigSchema = z
     perpMaxLossPct: z.number().min(0.001).max(0.2).default(0.02),
     fundingDrainThresholdPct: z.number().min(0.001).max(0.1).default(0.005),
     perpMode: z.enum(['paper', 'live', 'none']).default('none'),
+
+    /** Max wall-clock seconds to wait for an entry fill before cancelling */
+    orderMaxWaitSeconds: z.number().int().min(5).max(300).default(60),
+
+    /** Max retries for a failed close order before triggering emergency close */
+    orderCloseMaxRetries: z.number().int().min(1).max(10).default(3),
   })
   .refine(
     (data) => !data.enabled || (!!data.apiKey && !!data.apiSecret),
