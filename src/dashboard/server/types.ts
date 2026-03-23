@@ -76,6 +76,10 @@ export interface ApiTrade {
   pnlPct?: string;
   holdingPeriodMs?: number;
   strategyName?: string;
+  signalPrice?: string;
+  exitSignalPrice?: string;
+  entrySlippageBps?: string;
+  exitSlippageBps?: string;
 }
 
 export interface ApiOrder {
@@ -224,6 +228,10 @@ export function toApiTrade(trade: LiveTrade): ApiTrade {
     pnl: trade.pnl,
     pnlPct: trade.pnlPct,
     holdingPeriodMs: trade.holdingPeriodMs,
+    signalPrice: trade.signalPrice,
+    exitSignalPrice: trade.exitSignalPrice,
+    entrySlippageBps: trade.entrySlippageBps,
+    exitSlippageBps: trade.exitSlippageBps,
   };
 }
 
