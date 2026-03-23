@@ -127,6 +127,7 @@ export class LiveTradingEngine extends EventEmitter {
   private cooldownCandlesRemaining: number = 0;
   private entrySignalPrice: Decimal | null = null;
   private exitSignalPrice: Decimal | null = null;
+  private entryTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: LiveTradingEngineOptions) {
     super();
@@ -349,16 +350,14 @@ export class LiveTradingEngine extends EventEmitter {
 
           const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
           this.exitSignalPrice = d(candle.close);
-          this.orderManager
-            .submitMarketOrder({
-              pair: candle.pair,
-              side: closeSide,
-              baseSize: this.currentPosition.quantity.toFixed(8),
-              purpose: 'EXIT',
-            })
-            .catch((err) => {
-              log.error({ err }, 'Failed to submit exit order');
-            });
+          this.submitCloseWithRetry(
+            candle.pair,
+            closeSide,
+            this.currentPosition.quantity.toFixed(8),
+            'EXIT',
+          ).catch((err) => {
+            log.error({ err }, 'Failed to submit exit order');
+          });
 
           this.exitManager = null;
           return; // Don't evaluate strategy after exit
@@ -409,19 +408,17 @@ export class LiveTradingEngine extends EventEmitter {
             'Stop-loss triggered',
           );
 
-          // Submit close order via OrderManager
+          // Submit close order via OrderManager (with retry)
           const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
           this.exitSignalPrice = check.stopPrice;
-          this.orderManager
-            .submitMarketOrder({
-              pair: candle.pair,
-              side: closeSide,
-              baseSize: this.currentPosition.quantity.toFixed(8),
-              purpose: 'STOP_LOSS',
-            })
-            .catch((err) => {
-              log.error({ err }, 'Failed to submit stop-loss close order');
-            });
+          this.submitCloseWithRetry(
+            candle.pair,
+            closeSide,
+            this.currentPosition.quantity.toFixed(8),
+            'STOP_LOSS',
+          ).catch((err) => {
+            log.error({ err }, 'Failed to submit stop-loss close order');
+          });
 
           this.stopLossTracker = null;
           return; // Don't evaluate strategy after stop-loss
@@ -705,7 +702,18 @@ export class LiveTradingEngine extends EventEmitter {
         // Clear pending position on failure
         this.currentPosition = null;
         this.positionDirection = null;
+        // Clear timeout timer since position is already cleared
+        if (this.entryTimeoutTimer) {
+          clearTimeout(this.entryTimeoutTimer);
+          this.entryTimeoutTimer = null;
+        }
       });
+
+    // Start wall-clock timeout for entry order
+    const timeoutMs = this.config.orderMaxWaitSeconds * 1000;
+    this.entryTimeoutTimer = setTimeout(() => {
+      this.handleEntryTimeout();
+    }, timeoutMs);
   }
 
   private processCloseSignal(signal: Signal, candle: Candle): void {
@@ -715,13 +723,12 @@ export class LiveTradingEngine extends EventEmitter {
     const closeSide = this.currentPosition.side === 'BUY' ? 'SELL' : 'BUY';
     this.exitSignalPrice = d(candle.close);
 
-    this.orderManager
-      .submitMarketOrder({
-        pair: candle.pair,
-        side: closeSide,
-        baseSize: this.currentPosition.quantity.toFixed(8),
-        purpose: 'EXIT',
-      })
+    this.submitCloseWithRetry(
+      candle.pair,
+      closeSide,
+      this.currentPosition.quantity.toFixed(8),
+      'EXIT',
+    )
       .then((order) => {
         log.info(
           { sessionId: this.session?.id, orderId: order.orderId },
@@ -767,12 +774,129 @@ export class LiveTradingEngine extends EventEmitter {
     }
   }
 
+  /**
+   * Handle entry order timeout. Cancels the pending order and returns
+   * the engine to flat state. Handles the race condition where the order
+   * may have filled between the timeout firing and the cancel arriving.
+   */
+  private async handleEntryTimeout(): Promise<void> {
+    this.entryTimeoutTimer = null;
+
+    if (!this.currentPosition || !this.currentPosition.pending) {
+      return; // Already filled or cleared -- no-op
+    }
+
+    const orderId = this.currentPosition.orderId;
+    log.info(
+      { sessionId: this.session?.id, orderId, timeoutSeconds: this.config.orderMaxWaitSeconds },
+      'Entry order timed out -- cancelling and abandoning trade',
+    );
+
+    // Attempt to cancel the order
+    if (orderId) {
+      try {
+        const cancelled = await this.orderManager.cancelOrder(orderId);
+        if (!cancelled) {
+          // Cancel failed -- order may have filled. Check status via getTrackedOrder.
+          const tracked = this.orderManager.getTrackedOrder(orderId);
+          if (tracked && tracked.status === 'FILLED') {
+            log.info({ orderId }, 'Entry order filled before cancel arrived -- treating as normal fill');
+            return; // The fill event handler will process this
+          }
+        }
+      } catch (err) {
+        log.error({ err, orderId }, 'Failed to cancel timed-out entry order');
+      }
+    }
+
+    // Clear position state -- return to flat
+    this.currentPosition = null;
+    this.positionDirection = null;
+    this.entrySignalPrice = null;
+    this.stopLossTracker = null;
+    this.exitManager = null;
+  }
+
+  /**
+   * Submit a close order with retry + exponential backoff.
+   * After orderCloseMaxRetries exhausted, triggers emergency close.
+   * If emergency close also fails, triggers reconciliation as last resort.
+   */
+  private async submitCloseWithRetry(
+    pair: string,
+    closeSide: 'BUY' | 'SELL',
+    baseSize: string,
+    purpose: 'EXIT' | 'STOP_LOSS',
+  ): Promise<LiveOrder> {
+    const maxRetries = this.config.orderCloseMaxRetries;
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        return await this.orderManager.submitMarketOrder({
+          pair,
+          side: closeSide,
+          baseSize,
+          purpose,
+        });
+      } catch (err) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        log.warn(
+          { attempt, maxRetries, pair, err: lastError.message, purpose },
+          'Close order failed -- retrying',
+        );
+        // Exponential backoff: 1s, 2s, 4s
+        await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, attempt - 1)));
+      }
+    }
+
+    // All retries exhausted -- trigger emergency close
+    log.error(
+      {
+        sessionId: this.session?.id,
+        pair,
+        closeSide,
+        baseSize,
+        purpose,
+        attempts: maxRetries,
+        lastError: lastError?.message,
+      },
+      'EMERGENCY CLOSE: all close retries exhausted -- submitting emergency market order',
+    );
+
+    // Emergency close: one final attempt (no retry)
+    try {
+      return await this.orderManager.submitMarketOrder({
+        pair,
+        side: closeSide,
+        baseSize,
+        purpose: 'EXIT',
+      });
+    } catch (emergencyErr) {
+      log.error(
+        { err: emergencyErr instanceof Error ? emergencyErr.message : String(emergencyErr) },
+        'CRITICAL: Emergency close also failed -- triggering reconciliation',
+      );
+      // Trigger reconciliation as last resort
+      this.orderManager.reconcile().catch(reconcileErr => {
+        log.error({ err: reconcileErr }, 'Post-emergency reconciliation failed');
+      });
+      throw emergencyErr;
+    }
+  }
+
   // ── Order event handlers ──────────────────────────────────────────
 
   private onOrderFilled(order: LiveOrder): void {
     if (!this.session) return;
 
     if (order.purpose === 'ENTRY') {
+      // Clear entry timeout timer -- order filled successfully
+      if (this.entryTimeoutTimer) {
+        clearTimeout(this.entryTimeoutTimer);
+        this.entryTimeoutTimer = null;
+      }
+
       // Confirm position with actual fill data
       const fillPrice = d(order.averageFillPrice ?? order.baseSize);
       const fillQty = d(order.filledSize);
@@ -915,6 +1039,11 @@ export class LiveTradingEngine extends EventEmitter {
     );
 
     if (order.purpose === 'ENTRY') {
+      // Clear entry timeout timer
+      if (this.entryTimeoutTimer) {
+        clearTimeout(this.entryTimeoutTimer);
+        this.entryTimeoutTimer = null;
+      }
       // Clear pending position state
       this.currentPosition = null;
       this.positionDirection = null;
@@ -977,6 +1106,12 @@ export class LiveTradingEngine extends EventEmitter {
     // Step 1: Block signals
     this.shutdownState = 'blocking_signals';
     this.isRunning = false;
+
+    // Clear entry timeout timer
+    if (this.entryTimeoutTimer) {
+      clearTimeout(this.entryTimeoutTimer);
+      this.entryTimeoutTimer = null;
+    }
 
     // Clear reconciliation interval
     if (this.reconciliationTimer) {
@@ -1093,6 +1228,10 @@ export class LiveTradingEngine extends EventEmitter {
 
   private forceClose(): void {
     this.isRunning = false;
+    if (this.entryTimeoutTimer) {
+      clearTimeout(this.entryTimeoutTimer);
+      this.entryTimeoutTimer = null;
+    }
     if (this.reconciliationTimer) {
       clearInterval(this.reconciliationTimer);
       this.reconciliationTimer = null;

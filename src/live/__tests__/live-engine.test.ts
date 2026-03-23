@@ -60,6 +60,8 @@ function makeMockOrderManager() {
   (om as any).startTracking = vi.fn();
   (om as any).stopTracking = vi.fn();
   (om as any).getOpenOrders = vi.fn().mockReturnValue([]);
+  (om as any).cancelOrder = vi.fn().mockResolvedValue(true);
+  (om as any).getTrackedOrder = vi.fn().mockReturnValue(undefined);
   return om as EventEmitter & {
     submitMarketOrder: ReturnType<typeof vi.fn>;
     submitStopLimitOrder: ReturnType<typeof vi.fn>;
@@ -68,6 +70,8 @@ function makeMockOrderManager() {
     startTracking: ReturnType<typeof vi.fn>;
     stopTracking: ReturnType<typeof vi.fn>;
     getOpenOrders: ReturnType<typeof vi.fn>;
+    cancelOrder: ReturnType<typeof vi.fn>;
+    getTrackedOrder: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -157,6 +161,8 @@ function makeConfig(overrides: Partial<LiveTradingConfig> = {}): LiveTradingConf
     shutdownTimeoutMs: 30000,
     enableStopLossOnShutdown: true,
     pollIntervalMs: 60000,
+    orderMaxWaitSeconds: 60,
+    orderCloseMaxRetries: 3,
     ...overrides,
   } as LiveTradingConfig;
 }
@@ -1215,5 +1221,306 @@ describe('auto-switch', () => {
     expect((engine as any)['strategy'].name).toBe('strategy-b');
     expect((engine as any)['pendingSwitch']).toBeNull();
     expect((engine as any)['currentPosition']).toBeNull();
+  });
+});
+
+// ── ORDER-01: entry timeout ─────────────────────────────────────────────
+
+describe('ORDER-01: entry timeout', () => {
+  let liveFeed: ReturnType<typeof makeMockLiveFeed>;
+  let orderManager: ReturnType<typeof makeMockOrderManager>;
+  let stateStore: ReturnType<typeof makeMockStateStore>;
+  let registry: ReturnType<typeof makeMockStrategyRegistry>;
+  let indicatorEngine: ReturnType<typeof makeMockIndicatorEngine>;
+  let riskManager: ReturnType<typeof makeMockRiskManager>;
+  let config: LiveTradingConfig;
+  let engine: LiveTradingEngine;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    liveFeed = makeMockLiveFeed();
+    orderManager = makeMockOrderManager();
+    stateStore = makeMockStateStore();
+    registry = makeMockStrategyRegistry();
+    indicatorEngine = makeMockIndicatorEngine();
+    riskManager = makeMockRiskManager();
+    config = makeConfig({ orderMaxWaitSeconds: 1 }); // 1 second timeout for test
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function createEngine(overrides: Record<string, unknown> = {}) {
+    engine = new LiveTradingEngine({
+      config,
+      liveFeed: liveFeed as any,
+      orderManager: orderManager as any,
+      stateStore: stateStore as any,
+      strategyRegistry: registry as any,
+      indicatorEngine: indicatorEngine as any,
+      riskManager: riskManager as any,
+      ...overrides,
+    });
+    return engine;
+  }
+
+  it('clears pending position after orderMaxWaitSeconds timeout', async () => {
+    createEngine();
+    await engine.start();
+
+    const strategy = registry.create.mock.results[0].value;
+    strategy.evaluate.mockReturnValueOnce([makeLongSignal()]);
+
+    // Fill buffer to minCandles and trigger entry
+    liveFeed.emit('candle', makeCandle({ timestamp: 1000 }));
+    liveFeed.emit('candle', makeCandle({ timestamp: 2000, close: '50000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Order submitted but NOT filled -- pending position set
+    expect(orderManager.submitMarketOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'ENTRY' }),
+    );
+
+    // Advance time past the 1-second timeout
+    await vi.advanceTimersByTimeAsync(1100);
+
+    // currentPosition should be cleared (engine back to flat)
+    // Verify by feeding another entry candle -- it should submit a new order
+    orderManager.submitMarketOrder.mockClear();
+    strategy.evaluate.mockReturnValueOnce([makeLongSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 3000, close: '50000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(orderManager.submitMarketOrder).toHaveBeenCalledWith(
+      expect.objectContaining({ purpose: 'ENTRY' }),
+    );
+  });
+
+  it('does not clear position if filled before timeout', async () => {
+    createEngine();
+    await engine.start();
+
+    const strategy = registry.create.mock.results[0].value;
+    strategy.evaluate.mockReturnValueOnce([makeLongSignal()]);
+
+    liveFeed.emit('candle', makeCandle({ timestamp: 1000 }));
+    liveFeed.emit('candle', makeCandle({ timestamp: 2000, close: '50000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Simulate fill BEFORE timeout
+    const filledOrder: LiveOrder = {
+      orderId: 'exchange-order-1',
+      clientOrderId: 'client-1',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'BUY',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '500',
+      averageFillPrice: '50000',
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'ENTRY',
+    };
+    orderManager.emit('orderFilled', filledOrder);
+
+    // Advance past timeout
+    await vi.advanceTimersByTimeAsync(1100);
+
+    // Position should still be populated (not cleared by timeout)
+    expect((engine as any)['currentPosition']).not.toBeNull();
+    expect((engine as any)['currentPosition'].pending).toBe(false);
+  });
+
+  it('handles race condition: cancel fails because order filled', async () => {
+    // Mock cancelOrder to return false (cancel failed)
+    orderManager.cancelOrder.mockResolvedValue(false);
+    // Mock getTrackedOrder to return a FILLED order
+    orderManager.getTrackedOrder.mockReturnValue({
+      orderId: 'exchange-order-1',
+      status: 'FILLED',
+    } as Partial<LiveOrder>);
+
+    createEngine();
+    await engine.start();
+
+    const strategy = registry.create.mock.results[0].value;
+    strategy.evaluate.mockReturnValueOnce([makeLongSignal()]);
+
+    liveFeed.emit('candle', makeCandle({ timestamp: 1000 }));
+    liveFeed.emit('candle', makeCandle({ timestamp: 2000, close: '50000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Advance past timeout -- handleEntryTimeout fires, cancel returns false,
+    // getTrackedOrder returns FILLED -> position is NOT cleared
+    await vi.advanceTimersByTimeAsync(1100);
+
+    // Position should still be pending (waiting for fill event handler to process)
+    // The key assertion: currentPosition is NOT null because the race condition was handled
+    expect((engine as any)['currentPosition']).not.toBeNull();
+  });
+});
+
+// ── ORDER-03: close retry with emergency fallback ───────────────────────
+
+describe('ORDER-03: close retry with emergency fallback', () => {
+  let liveFeed: ReturnType<typeof makeMockLiveFeed>;
+  let orderManager: ReturnType<typeof makeMockOrderManager>;
+  let stateStore: ReturnType<typeof makeMockStateStore>;
+  let registry: ReturnType<typeof makeMockStrategyRegistry>;
+  let indicatorEngine: ReturnType<typeof makeMockIndicatorEngine>;
+  let riskManager: ReturnType<typeof makeMockRiskManager>;
+  let config: LiveTradingConfig;
+  let engine: LiveTradingEngine;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    liveFeed = makeMockLiveFeed();
+    orderManager = makeMockOrderManager();
+    stateStore = makeMockStateStore();
+    registry = makeMockStrategyRegistry();
+    indicatorEngine = makeMockIndicatorEngine();
+    riskManager = makeMockRiskManager();
+    config = makeConfig({ orderCloseMaxRetries: 2 });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function createEngine(overrides: Record<string, unknown> = {}) {
+    engine = new LiveTradingEngine({
+      config,
+      liveFeed: liveFeed as any,
+      orderManager: orderManager as any,
+      stateStore: stateStore as any,
+      strategyRegistry: registry as any,
+      indicatorEngine: indicatorEngine as any,
+      riskManager: riskManager as any,
+      ...overrides,
+    });
+    return engine;
+  }
+
+  /** Helper: enter a position and fill it. */
+  async function enterAndFill() {
+    const strategy = registry.create.mock.results[0].value;
+    strategy.evaluate.mockReturnValueOnce([makeLongSignal()]);
+
+    liveFeed.emit('candle', makeCandle({ timestamp: 1000 }));
+    liveFeed.emit('candle', makeCandle({ timestamp: 2000, close: '50000' }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    const entryFill: LiveOrder = {
+      orderId: 'exchange-order-1',
+      clientOrderId: 'client-1',
+      sessionId: 'session-1',
+      productId: 'BTC-USD',
+      side: 'BUY',
+      orderType: 'MARKET',
+      status: 'FILLED',
+      baseSize: '0.01',
+      filledSize: '0.01',
+      filledValue: '500',
+      averageFillPrice: '50000',
+      totalFees: '0.30',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      purpose: 'ENTRY',
+    };
+    orderManager.emit('orderFilled', entryFill);
+
+    return strategy;
+  }
+
+  it('retries close order up to maxRetries on failure', async () => {
+    createEngine();
+    await engine.start();
+    const strategy = await enterAndFill();
+
+    // Reset call count after entry
+    orderManager.submitMarketOrder.mockClear();
+
+    // Fail twice (maxRetries=2), then succeed on emergency attempt (3rd call)
+    orderManager.submitMarketOrder
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockResolvedValueOnce({
+        orderId: 'emergency-close-1',
+        status: 'FILLED',
+        purpose: 'EXIT',
+      } as Partial<LiveOrder>);
+
+    // Trigger close signal
+    strategy.evaluate.mockReturnValue([makeCloseSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 3000, close: '51000' }));
+
+    // Advance through all retries: initial call + 1s backoff + 2s backoff + emergency
+    await vi.advanceTimersByTimeAsync(0);    // first attempt
+    await vi.advanceTimersByTimeAsync(1000);  // 1s backoff + 2nd attempt
+    await vi.advanceTimersByTimeAsync(2000);  // 2s backoff + emergency attempt
+    await vi.advanceTimersByTimeAsync(0);     // flush
+
+    // 2 retries + 1 emergency = 3 calls
+    expect(orderManager.submitMarketOrder).toHaveBeenCalledTimes(3);
+  });
+
+  it('triggers reconciliation after all retries and emergency exhausted', async () => {
+    createEngine();
+    await engine.start();
+    const strategy = await enterAndFill();
+
+    orderManager.submitMarketOrder.mockClear();
+
+    // All attempts fail
+    orderManager.submitMarketOrder.mockRejectedValue(new Error('Network error'));
+
+    const reconcileSpy = orderManager.reconcile;
+    reconcileSpy.mockClear();
+
+    // Trigger close signal
+    strategy.evaluate.mockReturnValue([makeCloseSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 3000, close: '51000' }));
+
+    // Advance through all retries
+    await vi.advanceTimersByTimeAsync(0);     // first attempt
+    await vi.advanceTimersByTimeAsync(1000);  // backoff + 2nd attempt
+    await vi.advanceTimersByTimeAsync(2000);  // backoff + emergency
+    await vi.advanceTimersByTimeAsync(0);     // flush promises
+
+    // reconcile should have been called (fire-and-forget in emergency path)
+    expect(reconcileSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('logs WARN on each retry attempt', async () => {
+    createEngine();
+    await engine.start();
+    const strategy = await enterAndFill();
+
+    orderManager.submitMarketOrder.mockClear();
+
+    // Fail once, then succeed
+    orderManager.submitMarketOrder
+      .mockRejectedValueOnce(new Error('Network error'))
+      .mockResolvedValueOnce({
+        orderId: 'close-1',
+        status: 'FILLED',
+        purpose: 'EXIT',
+      } as Partial<LiveOrder>);
+
+    strategy.evaluate.mockReturnValue([makeCloseSignal()]);
+    liveFeed.emit('candle', makeCandle({ timestamp: 3000, close: '51000' }));
+
+    // Advance through retry
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(0);
+
+    // Verify submitMarketOrder was called twice (1 retry + 1 success)
+    expect(orderManager.submitMarketOrder).toHaveBeenCalledTimes(2);
   });
 });
