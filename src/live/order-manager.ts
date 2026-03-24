@@ -654,6 +654,32 @@ export class OrderManager extends EventEmitter {
     );
   }
 
+  /**
+   * Query the current status of a specific order from the exchange.
+   * Used by recovery to verify order state without exposing restClient.
+   */
+  async queryOrderStatus(orderId: string): Promise<{
+    order: {
+      status: string;
+      filled_size: string;
+      filled_value: string;
+      average_filled_price: string;
+      fee: string;
+    };
+  }> {
+    await this.rateLimiter.acquire();
+    const response = await this.restClient.getOrder({ order_id: orderId });
+    return {
+      order: {
+        status: response.order.status,
+        filled_size: response.order.filled_size,
+        filled_value: response.order.filled_value,
+        average_filled_price: response.order.average_filled_price,
+        fee: response.order.fee ?? '0',
+      },
+    };
+  }
+
   /** Stop tracking: unsubscribe from WS user channel and clear map. */
   stopTracking(): void {
     this.wsClient.unsubscribe(
@@ -739,8 +765,9 @@ export class OrderManager extends EventEmitter {
 
   /**
    * Map exchange status string to our OrderStatus type.
+   * Public for recovery callers that need to map statuses outside of reconciliation.
    */
-  private mapExchangeStatus(exchangeStatus: string): OrderStatus {
+  mapExchangeStatus(exchangeStatus: string): OrderStatus {
     const statusMap: Record<string, OrderStatus> = {
       PENDING: 'PENDING',
       OPEN: 'OPEN',

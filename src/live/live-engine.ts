@@ -1350,6 +1350,111 @@ export class LiveTradingEngine extends EventEmitter {
       }
     }
 
+    // 3b. Ghost PENDING order cleanup (RECOV-02 spot side)
+    for (const order of pendingOrders) {
+      try {
+        const exOrderResponse = await this.orderManager.queryOrderStatus(order.orderId);
+        const exOrder = exOrderResponse.order;
+        const mappedStatus = this.orderManager.mapExchangeStatus(exOrder.status);
+        this.stateStore.updateOrderStatus(order.orderId, {
+          status: mappedStatus,
+          filledSize: exOrder.filled_size,
+          filledValue: exOrder.filled_value,
+          averageFillPrice: exOrder.average_filled_price,
+          totalFees: exOrder.fee,
+        });
+        if (mappedStatus === 'FILLED') {
+          log.warn(
+            { orderId: order.orderId, filledSize: exOrder.filled_size },
+            'Ghost PENDING order was actually FILLED on exchange -- synced',
+          );
+        } else {
+          log.info(
+            { orderId: order.orderId, mappedStatus },
+            'Ghost PENDING order synced to exchange status',
+          );
+        }
+      } catch (err) {
+        // API error -- mark FAILED conservatively
+        this.stateStore.updateOrderStatus(order.orderId, { status: 'FAILED' });
+        log.warn(
+          { orderId: order.orderId, err: err instanceof Error ? err.message : String(err) },
+          'Ghost PENDING order unreachable -- marking FAILED conservatively',
+        );
+      }
+    }
+
+    // 3c. Position field-level verification (RECOV-01 spot side)
+    if (hasOpenPosition && this.currentPosition) {
+      const openTrade = trades.find((t) => !t.exitTimestamp);
+      const entryOrderId = openTrade?.entryOrderId;
+
+      if (entryOrderId) {
+        try {
+          const exOrderResponse = await this.orderManager.queryOrderStatus(entryOrderId);
+          const exOrder = exOrderResponse.order;
+
+          // Size verification (0.1% relative tolerance)
+          const dbQty = this.currentPosition.quantity;
+          const exchangeQty = d(exOrder.filled_size ?? '0');
+          const sizeDiff = dbQty.minus(exchangeQty).abs();
+          const sizeTolerance = dbQty.mul(d('0.001'));
+
+          if (sizeDiff.greaterThan(sizeTolerance)) {
+            log.error(
+              {
+                sessionId,
+                dbQuantity: dbQty.toString(),
+                exchangeFilledSize: exchangeQty.toString(),
+                entryOrderId,
+              },
+              'ALERT: Spot position size mismatch DB vs exchange -- recovery failed',
+            );
+            this.isRunning = false;
+            this.recoveryFailed = true;
+            this.emit('error', new Error('ALERT: Spot position size mismatch DB vs exchange'));
+            return;
+          }
+
+          // Entry price verification (1% tolerance)
+          const dbPrice = this.currentPosition.entryPrice;
+          const exchangePrice = d(exOrder.average_filled_price ?? '0');
+          if (!exchangePrice.isZero()) {
+            const priceDiff = dbPrice.minus(exchangePrice).abs().div(dbPrice);
+            if (priceDiff.greaterThan(d('0.01'))) {
+              log.error(
+                {
+                  sessionId,
+                  dbEntryPrice: dbPrice.toString(),
+                  exchangeAvgPrice: exchangePrice.toString(),
+                  entryOrderId,
+                },
+                'ALERT: Spot entry price mismatch DB vs exchange -- recovery failed',
+              );
+              this.isRunning = false;
+              this.recoveryFailed = true;
+              this.emit('error', new Error('ALERT: Spot entry price mismatch DB vs exchange'));
+              return;
+            }
+          }
+
+          log.info(
+            { sessionId, entryOrderId },
+            'Position verified against exchange: size and entry price match',
+          );
+        } catch (err) {
+          log.error(
+            { sessionId, entryOrderId, err: err instanceof Error ? err.message : String(err) },
+            'ALERT: Failed to verify position against exchange -- recovery failed',
+          );
+          this.isRunning = false;
+          this.recoveryFailed = true;
+          this.emit('error', new Error('ALERT: Failed to verify position against exchange'));
+          return;
+        }
+      }
+    }
+
     // 4. Check for critical discrepancies
     const criticalDiscrepancies = report.discrepancies.filter(
       (d) => d.type === 'BALANCE_MISMATCH' || d.type === 'MISSING_FROM_EXCHANGE',
