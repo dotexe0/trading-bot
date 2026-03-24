@@ -29,7 +29,7 @@ import {
   toApiTrade,
   toApiPaperTrade,
 } from './types.js';
-import type { ApiTrade, ApiEquityPoint, ApiStrategyInfo, WsCommand } from './types.js';
+import type { ApiTrade, ApiEquityPoint, ApiStrategyInfo, WsCommand, SystemHealthPayload } from './types.js';
 import { WsBroadcaster } from './ws/broadcaster.js';
 import { wsHandler } from './ws/handler.js';
 import { registerSessionRoutes } from './routes/sessions.js';
@@ -175,6 +175,32 @@ export async function createDashboardServer(
   let _lastMarkPricePnlBroadcastMs = 0;
   let _lastMarkPricePnlBroadcastSecond = 0;
 
+  // Recovery state tracking for SystemHealth panel
+  let currentRecoveryState: 'NORMAL' | 'RECOVERING' | 'RECONCILIATION_NEEDED' = 'NORMAL';
+  let lastReconciliationAt: number | null = null;
+
+  function broadcastSystemHealth(): void {
+    const riskState = deps.riskManager?.getCurrentRiskState();
+    const feedStatuses = deps.feedHealthMonitor?.getAllStatuses() ?? [];
+    const payload: SystemHealthPayload = {
+      recoveryState: currentRecoveryState,
+      lastReconciliationAt,
+      feedHealth: feedStatuses.map(s => ({
+        instrument: s.instrument,
+        status: s.status,
+        lastCandleAt: s.lastCandleAt,
+        lastMarkPriceAt: s.lastMarkPriceAt,
+      })),
+      riskProximity: {
+        currentDrawdownPct: riskState?.currentDrawdownPct ?? 0,
+        maxDrawdownPct: riskState?.thresholds.maxDrawdownPct ?? 20,
+        currentExposurePct: riskState?.currentExposurePct ?? 0,
+        maxExposurePct: riskState?.thresholds.maxExposurePct ?? 80,
+      },
+    };
+    broadcaster.broadcast('systemHealth', payload);
+  }
+
   // Wire engine events to broadcaster
   for (const engine of deps.engines) {
     for (const [engineEvent, wsType] of Object.entries(ENGINE_EVENT_MAP)) {
@@ -182,6 +208,27 @@ export async function createDashboardServer(
         broadcaster.broadcast(wsType as any, args.length === 1 ? args[0] : args);
       });
     }
+  }
+
+  // Recovery state tracking — spot engines only (PerpPositionManager does not emit reconciliation/started)
+  for (const engine of deps.engines) {
+    engine.on('reconciliation', () => {
+      lastReconciliationAt = Date.now();
+      broadcastSystemHealth();
+    });
+    engine.on('started', () => {
+      if (currentRecoveryState === 'RECOVERING') {
+        currentRecoveryState = 'NORMAL';
+        broadcastSystemHealth();
+      }
+    });
+    engine.on('error', () => {
+      currentRecoveryState = 'RECONCILIATION_NEEDED';
+      broadcastSystemHealth();
+    });
+    engine.on('riskUpdate', () => {
+      broadcastSystemHealth();
+    });
   }
 
   // Wire perp engine events to broadcaster — separate from spot ENGINE_EVENT_MAP
@@ -299,7 +346,10 @@ export async function createDashboardServer(
   // Register WebSocket handler
   await wsHandler(app, {
     broadcaster,
-    getSnapshot: () => buildSnapshot(routeDeps, fundingRingBuffer, pnlRingBuffer, deps.feedHealthMonitor),
+    getSnapshot: () => buildSnapshot(routeDeps, fundingRingBuffer, pnlRingBuffer, deps.feedHealthMonitor, {
+      recoveryState: currentRecoveryState,
+      lastReconciliationAt,
+    }),
     onCommand: (cmd, ws) => handleCommand(cmd, routeDeps, broadcaster),
   });
 
@@ -350,6 +400,7 @@ function buildSnapshot(
   fundingRingBuffer?: RingBuffer<{ instrument: string; time: number; value: number; color: string }>,
   pnlRingBuffer?: RingBuffer<{ time: number; value: number }>,
   feedHealthMonitor?: FeedHealthMonitor,
+  recoveryInfo?: { recoveryState: 'NORMAL' | 'RECOVERING' | 'RECONCILIATION_NEEDED'; lastReconciliationAt: number | null },
 ) {
   const liveSessions = deps.liveStateStore.listSessions('running').map(toApiSession);
   const paperSessions = deps.sessionStore.listSessions('running').map(toApiPaperSession);
@@ -408,6 +459,26 @@ function buildSnapshot(
       lastCandleAt: s.lastCandleAt,
       lastMarkPriceAt: s.lastMarkPriceAt,
     })) ?? [],
+    systemHealth: (() => {
+      const riskState = deps.riskManager?.getCurrentRiskState?.();
+      const feedStatuses = feedHealthMonitor?.getAllStatuses() ?? [];
+      return {
+        recoveryState: recoveryInfo?.recoveryState ?? 'NORMAL',
+        lastReconciliationAt: recoveryInfo?.lastReconciliationAt ?? null,
+        feedHealth: feedStatuses.map(s => ({
+          instrument: s.instrument,
+          status: s.status,
+          lastCandleAt: s.lastCandleAt,
+          lastMarkPriceAt: s.lastMarkPriceAt,
+        })),
+        riskProximity: {
+          currentDrawdownPct: riskState?.currentDrawdownPct ?? 0,
+          maxDrawdownPct: riskState?.thresholds.maxDrawdownPct ?? 20,
+          currentExposurePct: riskState?.currentExposurePct ?? 0,
+          maxExposurePct: riskState?.thresholds.maxExposurePct ?? 80,
+        },
+      };
+    })(),
   };
 }
 

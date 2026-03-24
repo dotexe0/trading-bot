@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-22)
 
 **Core value:** The bot must reliably execute trades with correct position sizing, risk limits, and stop-losses -- never losing more than configured risk parameters allow.
-**Current focus:** v2.2 Live Trading Hardening -- Phase 48 Order Hardening
+**Current focus:** v2.2 Live Trading Hardening -- Phase 49 Recovery Hardening
 
 ## Current Position
 
-Phase: 48 of 49 (Order Hardening)
-Plan: 2 of 2 complete
-Status: Phase 48 complete
-Last activity: 2026-03-22 -- 48-02 complete (entry timeout + close retry, 915 tests)
+Phase: 49 of 49 (Recovery Hardening)
+Plan: 1 of 2 complete
+Status: In progress
+Last activity: 2026-03-24 -- 49-01 complete (DB/FCM verification + ghost cleanup, 926 tests)
 
-Progress: [██████████████████████░░░░░░░░] 75% (3/4 phases)
+Progress: [███████████████████████████░░░] 87.5% (3.5/4 phases)
 
 ## Performance Metrics
 
@@ -43,6 +43,7 @@ Progress: [██████████████████████░
 - 47-02: 5 files, +103 lines, 894 tests, 3 min
 - 48-01: 10 files, +471/-31 lines, 905 tests, 8 min
 - 48-02: 6 files, +740/-38 lines, 915 tests, 9 min
+- 49-01: 7 files, +821/-13 lines, 926 tests, 9 min
 
 ## Accumulated Context
 
@@ -56,6 +57,7 @@ All v1.0-v2.1 decisions logged in PROJECT.md Key Decisions table.
 - 47-02: CLI slippage table uses raw LiveTrade[] not normalized Trade[]; null-safe display for old data; round-trip = entry + exit bps with red/green coloring
 - 48-01: Only UNKNOWN_FAILURE_REASON retryable (allowlist); WELL_KNOWN_REASONS for extraction fallback; orderMaxWaitSeconds=60, orderCloseMaxRetries=3 defaults
 - 48-02: Shutdown/partial close NOT wrapped in retry; executeEmergencyClose NOT wrapped in closePositionWithRetry; entryOrderTimeoutMs superseded by orderMaxWaitSeconds
+- 49-01: Spot recovery uses recoveryFailed flag (not emergency close); perp recovery uses executeEmergencyClose; 0.1% size tolerance, 1% price tolerance; mapExchangeStatus made public on OrderManager
 
 ### Open Issues / Tech Debt
 
@@ -68,5 +70,5 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-03-22
-Stopped at: Phase 48 complete (entry timeout + close retry). 915 tests passing. Ready for Phase 49.
+Last session: 2026-03-24
+Stopped at: Completed 49-01-PLAN.md (DB/FCM verification + ghost cleanup). 926 tests passing. Ready for 49-02.

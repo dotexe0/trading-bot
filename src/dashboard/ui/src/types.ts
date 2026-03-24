@@ -28,7 +28,8 @@ export type WsMessageType =
   | 'perpFundingHistory'
   | 'perpPnlUpdate'
   | 'perpMarkPriceUpdate'
-  | 'feedHealth';
+  | 'feedHealth'
+  | 'systemHealth';
 
 export interface WsMessage {
   type: WsMessageType;
@@ -155,6 +156,7 @@ export interface SnapshotPayload {
   perpFundingHistory?: PerpFundingBarPayload[];
   perpPnlHistory?: PerpPnlPointPayload[];
   feedHealth?: FeedHealthPayload[];
+  systemHealth?: SystemHealthPayload;
 }
 
 // ── Perp Payloads ─────────────────────────────────────────────────────
@@ -211,6 +213,18 @@ export interface FeedHealthPayload {
   status: 'LIVE' | 'STALE' | 'DEAD';
   lastCandleAt: number | null;
   lastMarkPriceAt: number | null;
+}
+
+export interface SystemHealthPayload {
+  recoveryState: 'NORMAL' | 'RECOVERING' | 'RECONCILIATION_NEEDED';
+  lastReconciliationAt: number | null;
+  feedHealth: FeedHealthPayload[];
+  riskProximity: {
+    currentDrawdownPct: number;
+    maxDrawdownPct: number;
+    currentExposurePct: number;
+    maxExposurePct: number;
+  };
 }
 
 // ── Gate Status ──────────────────────────────────────────────────────
