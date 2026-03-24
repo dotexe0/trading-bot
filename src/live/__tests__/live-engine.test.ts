@@ -62,6 +62,13 @@ function makeMockOrderManager() {
   (om as any).getOpenOrders = vi.fn().mockReturnValue([]);
   (om as any).cancelOrder = vi.fn().mockResolvedValue(true);
   (om as any).getTrackedOrder = vi.fn().mockReturnValue(undefined);
+  (om as any).queryOrderStatus = vi.fn().mockResolvedValue({
+    order: { status: 'FILLED', filled_size: '0.01', filled_value: '490.00', average_filled_price: '49000', fee: '0.30' },
+  });
+  (om as any).mapExchangeStatus = vi.fn().mockImplementation((status: string) => {
+    const map: Record<string, string> = { PENDING: 'PENDING', OPEN: 'OPEN', FILLED: 'FILLED', CANCELLED: 'CANCELLED', EXPIRED: 'EXPIRED', FAILED: 'FAILED' };
+    return map[status] ?? 'PENDING';
+  });
   return om as EventEmitter & {
     submitMarketOrder: ReturnType<typeof vi.fn>;
     submitStopLimitOrder: ReturnType<typeof vi.fn>;
@@ -72,6 +79,8 @@ function makeMockOrderManager() {
     getOpenOrders: ReturnType<typeof vi.fn>;
     cancelOrder: ReturnType<typeof vi.fn>;
     getTrackedOrder: ReturnType<typeof vi.fn>;
+    queryOrderStatus: ReturnType<typeof vi.fn>;
+    mapExchangeStatus: ReturnType<typeof vi.fn>;
   };
 }
 
