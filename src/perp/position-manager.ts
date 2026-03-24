@@ -718,10 +718,22 @@ export class PerpPositionManager extends EventEmitter {
         this.stateStore.persistOrder({ ...order, status: 'FAILED', updatedAt: Date.now() });
       }
 
+      // Clean up orphaned OPEN orders (RECOV-02 perp side)
+      const openOrders = this.stateStore.getOpenOrdersBySession(dbSession.id);
       // Find matching FCM position on exchange by product_id
       const exchangePos = positions.find((p) => p.product_id === dbSession.instrument);
       const contracts = exchangePos?.number_of_contracts;
       const isZeroOnExchange = !exchangePos || Number(contracts) === 0;
+
+      for (const order of openOrders) {
+        if (isZeroOnExchange) {
+          log.warn(
+            { orderId: order.id, instrument: order.instrument, sessionId: dbSession.id },
+            'Orphaned OPEN order on restart — marking FAILED (exchange position gone)',
+          );
+          this.stateStore.persistOrder({ ...order, status: 'FAILED', updatedAt: Date.now() });
+        }
+      }
 
       const isLongOnExchange = !isZeroOnExchange && exchangePos?.side === 'LONG';
       const isShortOnExchange = !isZeroOnExchange && exchangePos?.side === 'SHORT';
@@ -731,12 +743,62 @@ export class PerpPositionManager extends EventEmitter {
         (dbSession.direction === 'short' && isShortOnExchange);
 
       if (sessionMatchesExchange) {
-        // Position still open — restore
+        // Field-level verification before restore (RECOV-01 perp side)
+
+        // Size verification (0.1% relative tolerance)
+        const dbSize = d(dbSession.size);
+        const exchangeSize = d(contracts ?? '0');
+        const sizeDiff = dbSize.minus(exchangeSize).abs();
+        const sizeTolerance = dbSize.mul(d('0.001'));
+
+        if (sizeDiff.greaterThan(sizeTolerance)) {
+          log.error(
+            {
+              dbSize: dbSize.toString(),
+              exchangeSize: exchangeSize.toString(),
+              sessionId: dbSession.id,
+            },
+            'ALERT: Perp position size mismatch DB vs exchange -- triggering emergency close',
+          );
+          // Temporarily set currentSession so executeEmergencyClose can close it
+          this.currentSession = dbSession;
+          await this.executeEmergencyClose(
+            exchangePos!.current_price ?? dbSession.entryPrice,
+            '0',
+          );
+          return { restored: false, closedExternally: false };
+        }
+
+        // Entry price verification (1% tolerance)
+        const dbEntry = d(dbSession.entryPrice);
+        const exchangeEntry = d(exchangePos!.avg_entry_price ?? '0');
+        if (!exchangeEntry.isZero()) {
+          const priceDiff = dbEntry.minus(exchangeEntry).abs().div(dbEntry);
+          if (priceDiff.greaterThan(d('0.01'))) {
+            log.error(
+              {
+                dbEntry: dbEntry.toString(),
+                exchangeEntry: exchangeEntry.toString(),
+                sessionId: dbSession.id,
+              },
+              'ALERT: Perp entry price mismatch DB vs exchange -- triggering emergency close',
+            );
+            // Temporarily set currentSession so executeEmergencyClose can close it
+            this.currentSession = dbSession;
+            await this.executeEmergencyClose(
+              exchangePos!.current_price ?? dbSession.entryPrice,
+              '0',
+            );
+            return { restored: false, closedExternally: false };
+          }
+        }
+
+        // Position still open and verified — restore
         this.currentSession = dbSession;
         restored = true;
         log.info(
           { sessionId: dbSession.id, instrument: dbSession.instrument, direction: dbSession.direction },
-          'recoverFromRestart: session restored from DB — exchange position confirmed open',
+          'recoverFromRestart: session restored from DB — exchange position confirmed open and verified',
         );
       } else {
         // Position closed externally

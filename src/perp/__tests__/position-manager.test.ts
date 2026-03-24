@@ -151,6 +151,7 @@ function makeStateStore(): PerpStateStore {
     persistOrder: vi.fn(),
     getOrderByClientId: vi.fn().mockReturnValue(null),
     getPendingOrders: vi.fn().mockReturnValue([]),
+    getOpenOrdersBySession: vi.fn().mockReturnValue([]),
     recordTrade: vi.fn(),
     close: vi.fn(),
   } as unknown as PerpStateStore;
@@ -434,7 +435,7 @@ describe('PerpPositionManager', () => {
       (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
       (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
         balances: [],
-        positions: [{ product_id: 'BTC-PERP', side: 'LONG', number_of_contracts: '1', avg_entry_price: '50000', current_price: '51000' }],
+        positions: [{ product_id: 'BTC-PERP', side: 'LONG', number_of_contracts: '0.1', avg_entry_price: '50000', current_price: '51000' }],
         summary: {},
       });
       (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
@@ -512,7 +513,7 @@ describe('PerpPositionManager', () => {
       (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([pendingOrder]);
       (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
         balances: [],
-        positions: [{ product_id: 'BTC-PERP', side: 'LONG', number_of_contracts: '1', avg_entry_price: '50000', current_price: '51000' }],
+        positions: [{ product_id: 'BTC-PERP', side: 'LONG', number_of_contracts: '0.1', avg_entry_price: '50000', current_price: '51000' }],
         summary: {},
       });
 
@@ -522,7 +523,7 @@ describe('PerpPositionManager', () => {
       expect(stateStore.persistOrder).toHaveBeenCalledWith(
         expect.objectContaining({ clientOrderId: 'order-uuid-1', status: 'FAILED' }),
       );
-      // placeOrder never called
+      // placeOrder never called (no emergency close triggered since size matches)
       expect(intxClient.placeOrder).not.toHaveBeenCalled();
     });
 
@@ -535,6 +536,173 @@ describe('PerpPositionManager', () => {
       expect(result.closedExternally).toBe(false);
       // getAccountState not called when no sessions to check
       expect((intxClient as any).getAccountState).toBeUndefined();
+    });
+
+    // ── RECOV-01: size mismatch triggers emergency close ────────────
+    it('triggers emergency close when DB size diverges from exchange number_of_contracts', async () => {
+      const dbSession: any = {
+        id: 'session-size-mismatch',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '50000',
+        size: '0.1',
+        leverage: 10,
+        liquidationPrice: '46665',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: Date.now(),
+      };
+
+      (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
+      (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (stateStore as any).getOpenOrdersBySession = vi.fn().mockReturnValue([]);
+      (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
+        balances: [],
+        positions: [{
+          product_id: 'BTC-PERP',
+          side: 'LONG',
+          number_of_contracts: '0.05',  // DB says 0.1, exchange says 0.05
+          avg_entry_price: '50000',
+          current_price: '51000',
+        }],
+        summary: {},
+      });
+
+      // Mock closePosition to succeed (executeEmergencyClose delegates to closePosition)
+      const emergencyCloseFn = vi.fn();
+      manager.on('emergencyClose', emergencyCloseFn);
+
+      const result = await manager.recoverFromRestart();
+
+      expect(result.restored).toBe(false);
+      expect(result.closedExternally).toBe(false);
+
+      // emergencyClose event was emitted
+      expect(emergencyCloseFn).toHaveBeenCalledOnce();
+      // Session was NOT restored
+      expect(manager.getCurrentSession()).toBeNull();
+    });
+
+    // ── RECOV-01: entry price mismatch triggers emergency close ─────
+    it('triggers emergency close when DB entry price diverges >1% from exchange avg_entry_price', async () => {
+      const dbSession: any = {
+        id: 'session-price-mismatch',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '50000',
+        size: '0.1',
+        leverage: 10,
+        liquidationPrice: '46665',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: Date.now(),
+      };
+
+      (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
+      (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (stateStore as any).getOpenOrdersBySession = vi.fn().mockReturnValue([]);
+      (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
+        balances: [],
+        positions: [{
+          product_id: 'BTC-PERP',
+          side: 'LONG',
+          number_of_contracts: '0.1',  // Size matches
+          avg_entry_price: '48000',     // 4% off from 50000 (>1% tolerance)
+          current_price: '51000',
+        }],
+        summary: {},
+      });
+
+      const emergencyCloseFn = vi.fn();
+      manager.on('emergencyClose', emergencyCloseFn);
+
+      const result = await manager.recoverFromRestart();
+
+      expect(result.restored).toBe(false);
+      expect(emergencyCloseFn).toHaveBeenCalledOnce();
+      expect(manager.getCurrentSession()).toBeNull();
+    });
+
+    // ── RECOV-01: size and price within tolerance passes ────────────
+    it('restores session when size and entry price are within tolerance', async () => {
+      const dbSession: any = {
+        id: 'session-within-tolerance',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '50000',
+        size: '0.1000',
+        leverage: 10,
+        liquidationPrice: '46665',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: Date.now(),
+      };
+
+      (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
+      (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (stateStore as any).getOpenOrdersBySession = vi.fn().mockReturnValue([]);
+      (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
+        balances: [],
+        positions: [{
+          product_id: 'BTC-PERP',
+          side: 'LONG',
+          number_of_contracts: '0.1001',  // Within 0.1% of 0.1000
+          avg_entry_price: '50050',        // Within 1% of 50000
+          current_price: '51000',
+        }],
+        summary: {},
+      });
+
+      const result = await manager.recoverFromRestart();
+
+      expect(result.restored).toBe(true);
+      expect(result.closedExternally).toBe(false);
+      expect(manager.getCurrentSession()).toEqual(dbSession);
+    });
+
+    // ── RECOV-02: orphaned OPEN order marked FAILED ─────────────────
+    it('marks orphaned OPEN orders as FAILED when exchange position is gone', async () => {
+      const dbSession: any = {
+        id: 'session-ghost-open',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '50000',
+        size: '0.1',
+        leverage: 10,
+        liquidationPrice: '46665',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: Date.now(),
+      };
+
+      const openOrder: any = {
+        id: 'open-order-1',
+        clientOrderId: 'open-uuid-1',
+        sessionId: dbSession.id,
+        instrument: 'BTC-PERP',
+        side: 'BUY',
+        size: '0.1',
+        status: 'OPEN',
+        purpose: 'ENTRY',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      (stateStore.getAllOpenSessions as ReturnType<typeof vi.fn>).mockReturnValue([dbSession]);
+      (stateStore.getPendingOrders as ReturnType<typeof vi.fn>).mockReturnValue([]);
+      (stateStore as any).getOpenOrdersBySession = vi.fn().mockReturnValue([openOrder]);
+      (intxClient as any).getAccountState = vi.fn().mockResolvedValue({
+        balances: [],
+        positions: [{ product_id: 'BTC-PERP', side: 'LONG', number_of_contracts: '0', avg_entry_price: '50000', current_price: '51000' }],
+        summary: {},
+      });
+
+      await manager.recoverFromRestart();
+
+      // Orphaned OPEN order marked FAILED
+      expect(stateStore.persistOrder).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'open-order-1', status: 'FAILED' }),
+      );
     });
   });
 
