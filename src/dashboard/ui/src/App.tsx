@@ -17,6 +17,7 @@ import { FundingHistoryChart } from './components/FundingHistoryChart.js';
 import { PnlCurveChart } from './components/PnlCurveChart.js';
 import { LeverageHistoryChart } from './components/LeverageHistoryChart.js';
 import { FeedHealthPanel } from './components/FeedHealthPanel.js';
+import { SystemHealthPanel } from './components/SystemHealthPanel.js';
 import { LiveReadinessPanel } from './components/LiveReadinessPanel.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { BacktestViewer } from './components/BacktestViewer.js';
@@ -38,6 +39,7 @@ import type {
   SessionData,
   SnapshotPayload,
   StrategyInfo,
+  SystemHealthPayload,
   TradeData,
 } from './types.js';
 import type { CandlestickData, HistogramData, BaselineData, AreaData, Time } from 'lightweight-charts';
@@ -86,6 +88,7 @@ function App(): React.ReactElement {
   const [gateStatus, setGateStatus] = useState<GateStatusData | null>(null);
   const [feedHealthData, setFeedHealthData] = useState<FeedHealthPayload[]>([]);
   const [feedHealthUpdatedAt, setFeedHealthUpdatedAt] = useState<number | undefined>(undefined);
+  const [systemHealth, setSystemHealth] = useState<SystemHealthPayload | null>(null);
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
@@ -314,6 +317,10 @@ function App(): React.ReactElement {
             setFeedHealthData(snap.feedHealth);
             setFeedHealthUpdatedAt(Date.now());
           }
+          // System health: hydrate from snapshot
+          if (snap.systemHealth) {
+            setSystemHealth(snap.systemHealth);
+          }
           // DASH-02: hydrate P&L history from ring buffer snapshot
           if (snap.perpPnlHistory && snap.perpPnlHistory.length > 0) {
             pnlPointsRef.current = snap.perpPnlHistory.map((p) => ({
@@ -485,6 +492,11 @@ function App(): React.ReactElement {
           break;
         }
 
+        case 'systemHealth': {
+          setSystemHealth(payload as SystemHealthPayload);
+          break;
+        }
+
         default:
           break;
       }
@@ -571,6 +583,10 @@ function App(): React.ReactElement {
 
           <div className="panel">
             <FeedHealthPanel feeds={feedHealthData} lastUpdatedAt={feedHealthUpdatedAt} />
+          </div>
+
+          <div className="panel">
+            <SystemHealthPanel systemHealth={systemHealth} />
           </div>
 
           <div className="panel">
