@@ -595,13 +595,15 @@ function App(): React.ReactElement {
             <FeedHealthPanel feeds={feedHealthData} lastUpdatedAt={feedHealthUpdatedAt} />
           </div>
 
-          <div className="panel">
-            <SystemHealthPanel systemHealth={systemHealth} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">Live Readiness</div>
-            <LiveReadinessPanel gateStatus={gateStatus} trades={trades} />
+          {/* System Health + Live Readiness side by side */}
+          <div style={{ display: 'flex', gap: '1rem' }}>
+            <div className="panel" style={{ flex: 1, minWidth: 0 }}>
+              <SystemHealthPanel systemHealth={systemHealth} />
+            </div>
+            <div className="panel" style={{ flex: 1, minWidth: 0 }}>
+              <div className="panel-title">Live Readiness</div>
+              <LiveReadinessPanel gateStatus={gateStatus} trades={trades} />
+            </div>
           </div>
 
           <RiskPanel

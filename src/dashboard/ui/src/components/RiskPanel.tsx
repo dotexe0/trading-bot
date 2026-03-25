@@ -1,16 +1,5 @@
-/**
- * RiskPanel — Risk dashboard panel with semicircular gauges and circuit breaker event log.
- *
- * Combines:
- * - DrawdownGauge: config-driven semicircular gauge for drawdown %
- * - ExposureGauge: config-driven semicircular gauge for exposure %
- * - Circuit breaker event log: recent triggers with timestamp, type, resolution
- */
-
 import React from 'react';
 import type { CircuitBreakerEvent, RiskStatus } from '../types.js';
-import { DrawdownGauge } from './DrawdownGauge.js';
-import { ExposureGauge } from './ExposureGauge.js';
 
 interface RiskPanelProps {
   riskStatus: RiskStatus;
@@ -30,6 +19,46 @@ function formatTs(ts: number): string {
   });
 }
 
+function barColor(ratio: number): string {
+  if (ratio > 0.8) return '#ef4444';
+  if (ratio > 0.5) return '#f59e0b';
+  return '#22c55e';
+}
+
+interface RiskBarProps {
+  label: string;
+  current: number;
+  max: number;
+}
+
+function RiskBar({ label, current, max }: RiskBarProps): React.ReactElement {
+  const ratio = max > 0 ? Math.min(current / max, 1) : 0;
+  const over = max > 0 && current > max;
+  return (
+    <div style={{ marginBottom: '10px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
+        <span style={{ color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '11px' }}>
+          {label}
+        </span>
+        <span style={{ fontFamily: 'monospace', color: over ? '#ef4444' : '#d1d5db' }}>
+          {current.toFixed(1)}% / {max.toFixed(0)}%
+        </span>
+      </div>
+      <div style={{ width: '100%', height: '10px', borderRadius: '5px', backgroundColor: '#374151' }}>
+        <div
+          style={{
+            width: `${Math.min(ratio * 100, 100)}%`,
+            height: '100%',
+            borderRadius: '5px',
+            backgroundColor: barColor(ratio),
+            transition: 'width 0.4s ease',
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function RiskPanel({
   riskStatus,
   riskConfig,
@@ -38,8 +67,6 @@ export function RiskPanel({
   const { circuitBreakerTripped } = riskStatus;
   const currentDrawdown = riskStatus.currentDrawdownPct ?? 0;
   const currentExposure = riskStatus.currentExposurePct ?? 0;
-
-  // Ensure sensible defaults so gauges always render
   const maxDrawdown = riskConfig.maxDrawdown > 0 ? riskConfig.maxDrawdown : 20;
   const maxExposure = riskConfig.maxExposure > 0 ? riskConfig.maxExposure : 80;
 
@@ -54,17 +81,8 @@ export function RiskPanel({
         )}
       </div>
 
-      {/* Gauges side by side */}
-      <div className="gauge-row">
-        <DrawdownGauge
-          currentDrawdownPct={currentDrawdown}
-          maxDrawdownPct={maxDrawdown}
-        />
-        <ExposureGauge
-          currentExposurePct={currentExposure}
-          maxExposurePct={maxExposure}
-        />
-      </div>
+      <RiskBar label="Drawdown" current={currentDrawdown} max={maxDrawdown} />
+      <RiskBar label="Exposure" current={currentExposure} max={maxExposure} />
 
       {/* Circuit Breaker Event Log */}
       <div className="event-log-title">Circuit Breaker Log</div>
