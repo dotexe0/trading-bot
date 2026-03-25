@@ -132,7 +132,7 @@ export function LiveReadinessPanel({ gateStatus, trades }: LiveReadinessPanelPro
         <div style={{ color: '#94a3b8', fontWeight: 600, marginBottom: '4px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           Gate Thresholds
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'max-content auto', gap: '4px 12px', fontSize: '12px' }}>
           <span style={{ color: '#64748b' }}>Min trades</span>
           <span style={{ textAlign: 'right' }}>{gateStatus.config.minTrades}</span>
           <span style={{ color: '#64748b' }}>Min net P&L</span>
@@ -147,7 +147,7 @@ export function LiveReadinessPanel({ gateStatus, trades }: LiveReadinessPanelPro
         <div style={{ color: '#94a3b8', fontWeight: 600, marginBottom: '4px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           Risk Config
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'max-content auto', gap: '4px 12px', fontSize: '12px' }}>
           <span style={{ color: '#64748b' }}>Max drawdown</span>
           <span style={{ textAlign: 'right' }}>{gateStatus.riskConfig.maxDrawdownPct != null ? `${gateStatus.riskConfig.maxDrawdownPct}%` : 'N/A'}</span>
           <span style={{ color: '#64748b' }}>Max exposure</span>
@@ -164,7 +164,7 @@ export function LiveReadinessPanel({ gateStatus, trades }: LiveReadinessPanelPro
         <div style={{ color: '#94a3b8', fontWeight: 600, marginBottom: '4px', fontSize: '12px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
           Fee Tier
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px', fontSize: '12px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'max-content auto', gap: '4px 12px', fontSize: '12px' }}>
           <span style={{ color: '#64748b' }}>Spot taker</span>
           <span style={{ textAlign: 'right' }}>{(gateStatus.feeConfig.spotTakerRate * 100).toFixed(2)}%</span>
           <span style={{ color: '#64748b' }}>Perp taker</span>

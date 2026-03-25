@@ -25,23 +25,28 @@ export function FeedHealthPanel({ feeds, lastUpdatedAt }: FeedHealthPanelProps):
   return (
     <div>
       <h3 style={{ margin: '0 0 0.5rem' }}>Feed Health</h3>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', tableLayout: 'fixed' }}>
+        <colgroup>
+          <col style={{ width: '45%' }} />
+          <col style={{ width: '30%' }} />
+          <col style={{ width: '25%' }} />
+        </colgroup>
         <thead>
           <tr style={{ borderBottom: '1px solid #374151', color: '#9ca3af' }}>
-            <th style={{ textAlign: 'left', padding: '4px 8px' }}>Instrument</th>
-            <th style={{ textAlign: 'center', padding: '4px 8px' }}>Status</th>
-            <th style={{ textAlign: 'right', padding: '4px 8px' }}>Last Candle</th>
+            <th style={{ textAlign: 'left', padding: '4px 6px' }}>Instrument</th>
+            <th style={{ textAlign: 'center', padding: '4px 6px' }}>Status</th>
+            <th style={{ textAlign: 'right', padding: '4px 6px' }}>Last Candle</th>
           </tr>
         </thead>
         <tbody>
           {feeds.map((feed) => (
             <tr key={feed.instrument} style={{ borderBottom: '1px solid #1f2937' }}>
-              <td style={{ padding: '4px 8px', fontFamily: 'monospace' }}>{feed.instrument}</td>
-              <td style={{ textAlign: 'center', padding: '4px 8px' }}>
+              <td style={{ padding: '4px 6px', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{feed.instrument}</td>
+              <td style={{ textAlign: 'center', padding: '4px 6px' }}>
                 <span
                   style={{
                     display: 'inline-block',
-                    padding: '1px 8px',
+                    padding: '1px 6px',
                     borderRadius: '4px',
                     fontSize: '11px',
                     fontWeight: 600,
@@ -52,7 +57,7 @@ export function FeedHealthPanel({ feeds, lastUpdatedAt }: FeedHealthPanelProps):
                   {feed.status}
                 </span>
               </td>
-              <td style={{ textAlign: 'right', padding: '4px 8px', fontFamily: 'monospace', fontSize: '12px' }}>
+              <td style={{ textAlign: 'right', padding: '4px 6px', fontFamily: 'monospace', fontSize: '12px', whiteSpace: 'nowrap' }}>
                 {feed.lastCandleAt
                   ? new Date(feed.lastCandleAt).toLocaleTimeString()
                   : '\u2014'}

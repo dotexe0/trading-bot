@@ -9,8 +9,8 @@ interface PerpPositionRowProps {
 function PerpPositionRow({ position }: PerpPositionRowProps): React.ReactElement {
   const markFlash = useFlash(position.markPrice ?? position.entryPrice);
   const pnlFlash = useFlash(position.unrealizedPnl ?? '0');
-  const pnlValue = parseFloat(position.unrealizedPnl ?? '0');
-  const pnlClass = pnlValue >= 0 ? 'text-green' : 'text-red';
+  const pnlValue = position.unrealizedPnl != null ? parseFloat(position.unrealizedPnl) : null;
+  const pnlClass = pnlValue != null && pnlValue >= 0 ? 'text-green' : pnlValue != null ? 'text-red' : 'text-muted';
 
   return (
     <tr>
@@ -25,9 +25,9 @@ function PerpPositionRow({ position }: PerpPositionRowProps): React.ReactElement
       </td>
       <td className="mono text-muted">{position.liquidationPrice}</td>
       <td className={`mono ${pnlClass} ${pnlFlash === 'up' ? 'flash-up' : pnlFlash === 'down' ? 'flash-down' : ''}`}>
-        {pnlValue >= 0 ? '+' : ''}{position.unrealizedPnl ?? '0.00000000'}
+        {pnlValue != null ? `${pnlValue >= 0 ? '+' : ''}${position.unrealizedPnl}` : '—'}
       </td>
-      <td className="mono text-muted">{position.cumulativeFundingCost ?? '0.00000000'}</td>
+      <td className="mono text-muted">{position.cumulativeFundingCost ?? '—'}</td>
     </tr>
   );
 }
