@@ -33,6 +33,21 @@ vi.mock('../components/RiskPanel.js', () => ({ RiskPanel: () => <div /> }));
 vi.mock('../components/PerformancePanel.js', () => ({ PerformancePanel: () => <div /> }));
 vi.mock('../components/CircuitBreakerBanner.js', () => ({ CircuitBreakerBanner: () => <div /> }));
 vi.mock('../components/PortfolioStats.js', () => ({ PortfolioStats: () => <div /> }));
+vi.mock('../components/PerpPositionsPanel.js', () => ({ PerpPositionsPanel: () => <div /> }));
+vi.mock('../components/PerpFundingPanel.js', () => ({ PerpFundingPanel: () => <div /> }));
+vi.mock('../components/PerpLeverageMeter.js', () => ({ PerpLeverageMeter: () => <div /> }));
+vi.mock('../components/FundingHistoryChart.js', () => ({
+  FundingHistoryChart: React.forwardRef((_p: object, _r: React.Ref<unknown>) => <div />),
+}));
+vi.mock('../components/PnlCurveChart.js', () => ({
+  PnlCurveChart: React.forwardRef((_p: object, _r: React.Ref<unknown>) => <div />),
+}));
+vi.mock('../components/LeverageHistoryChart.js', () => ({
+  LeverageHistoryChart: React.forwardRef((_p: object, _r: React.Ref<unknown>) => <div />),
+}));
+vi.mock('../components/FeedHealthPanel.js', () => ({ FeedHealthPanel: () => <div /> }));
+vi.mock('../components/SystemHealthPanel.js', () => ({ SystemHealthPanel: () => <div /> }));
+vi.mock('../components/LiveReadinessPanel.js', () => ({ LiveReadinessPanel: () => <div /> }));
 
 // ── Mock useWebSocket to control message dispatch ─────────────────────────────
 
@@ -60,11 +75,14 @@ const EMPTY_RISK_STATUS = {
 function makeFetchMock() {
   return vi.fn((url: string) => {
     const bodies: Record<string, unknown> = {
-      '/api/sessions':     [],
-      '/api/positions':    [],
-      '/api/strategies':   [],
-      '/api/risk/events':  [],
-      '/api/risk':         EMPTY_RISK_STATUS,
+      '/api/sessions':        [],
+      '/api/positions':       [],
+      '/api/strategies':      [],
+      '/api/risk/events':     [],
+      '/api/risk':            EMPTY_RISK_STATUS,
+      '/api/perp/positions':  [],
+      '/api/gate/status':     { passed: false, failReasons: [], spotTradeCount: 0, perpTradeCount: 0, totalTradeCount: 0, spotNetPnl: '0', perpNetPnl: '0', totalNetPnl: '0', spotWinRate: 0, perpWinRate: 0, config: { minTrades: 10, minNetPnl: 0 }, riskConfig: {}, feeConfig: { spotTakerRate: 0.008 } },
+      '/api/candles':         [],
     };
     // Longest-prefix match so /api/risk/events beats /api/risk
     const key = Object.keys(bodies)
@@ -115,11 +133,14 @@ describe('App — orderFilled WebSocket handler', () => {
     };
     const overrideFetch = vi.fn((url: string) => {
       const bodies: Record<string, unknown> = {
-        '/api/sessions':     [runningSession],
-        '/api/positions':    [],
-        '/api/strategies':   [],
-        '/api/risk/events':  [],
-        '/api/risk':         EMPTY_RISK_STATUS,
+        '/api/sessions':        [runningSession],
+        '/api/positions':       [],
+        '/api/strategies':      [],
+        '/api/risk/events':     [],
+        '/api/risk':            EMPTY_RISK_STATUS,
+        '/api/perp/positions':  [],
+        '/api/gate/status':     { passed: false, failReasons: [], spotTradeCount: 0, perpTradeCount: 0, totalTradeCount: 0, spotNetPnl: '0', perpNetPnl: '0', totalNetPnl: '0', spotWinRate: 0, perpWinRate: 0, config: { minTrades: 10, minNetPnl: 0 }, riskConfig: {}, feeConfig: { spotTakerRate: 0.008 } },
+        '/api/candles':         [],
       };
       // Trades endpoint for any session
       if ((url as string).includes('/trades')) {
