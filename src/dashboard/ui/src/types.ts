@@ -155,6 +155,7 @@ export interface SnapshotPayload {
   risk?: RiskStatus;
   perpFundingHistory?: PerpFundingBarPayload[];
   perpPnlHistory?: PerpPnlPointPayload[];
+  perpFundingRates?: PerpFundingPayload[];
   feedHealth?: FeedHealthPayload[];
   systemHealth?: SystemHealthPayload;
 }

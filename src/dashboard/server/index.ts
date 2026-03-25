@@ -175,6 +175,9 @@ export async function createDashboardServer(
   let _lastMarkPricePnlBroadcastMs = 0;
   let _lastMarkPricePnlBroadcastSecond = 0;
 
+  // Cache latest funding rate per instrument — populated from fundingUpdate events, included in snapshot
+  const lastKnownFundingRates = new Map<string, { instrument: string; currentFundingRate: string; cumulativeFundingCost: string }>();
+
   // Recovery state tracking for SystemHealth panel
   let currentRecoveryState: 'NORMAL' | 'RECOVERING' | 'RECONCILIATION_NEEDED' = 'NORMAL';
   let lastReconciliationAt: number | null = null;
@@ -246,13 +249,22 @@ export async function createDashboardServer(
     }
   }
 
-  // Additional fundingUpdate listener for DASH-01 (funding histogram) and DASH-02 (P&L curve)
-  // This is separate from PERP_EVENT_MAP which handles perpFundingUpdate for the live rate display.
+  // Additional fundingUpdate listener for DASH-01 (funding histogram), DASH-02 (P&L curve),
+  // and snapshot hydration cache. Separate from PERP_EVENT_MAP perpFundingUpdate broadcast.
   for (const engine of (deps.perpEngines ?? [])) {
-    engine.on('fundingUpdate', (payload: { instrument?: string; currentFundingRate?: string; unrealizedPnl?: string }) => {
+    engine.on('fundingUpdate', (payload: { instrument?: string; currentFundingRate?: string; cumulativeFundingCost?: string; unrealizedPnl?: string }) => {
       const now = Date.now();
       const instrument = payload.instrument ?? 'UNKNOWN';
       const rawRate = parseFloat(payload.currentFundingRate ?? '0');
+
+      // Cache latest rate per instrument so new dashboard clients get it immediately via snapshot
+      if (payload.instrument) {
+        lastKnownFundingRates.set(payload.instrument, {
+          instrument: payload.instrument,
+          currentFundingRate: payload.currentFundingRate ?? '0',
+          cumulativeFundingCost: payload.cumulativeFundingCost ?? '0',
+        });
+      }
 
       // DASH-01: funding rate histogram bar
       const bar = {
@@ -349,7 +361,7 @@ export async function createDashboardServer(
     getSnapshot: () => buildSnapshot(routeDeps, fundingRingBuffer, pnlRingBuffer, deps.feedHealthMonitor, {
       recoveryState: currentRecoveryState,
       lastReconciliationAt,
-    }),
+    }, lastKnownFundingRates),
     onCommand: (cmd, ws) => handleCommand(cmd, routeDeps, broadcaster),
   });
 
@@ -401,6 +413,7 @@ function buildSnapshot(
   pnlRingBuffer?: RingBuffer<{ time: number; value: number }>,
   feedHealthMonitor?: FeedHealthMonitor,
   recoveryInfo?: { recoveryState: 'NORMAL' | 'RECOVERING' | 'RECONCILIATION_NEEDED'; lastReconciliationAt: number | null },
+  knownFundingRates?: Map<string, { instrument: string; currentFundingRate: string; cumulativeFundingCost: string }>,
 ) {
   const liveSessions = deps.liveStateStore.listSessions('running').map(toApiSession);
   const paperSessions = deps.sessionStore.listSessions('running').map(toApiPaperSession);
@@ -453,6 +466,7 @@ function buildSnapshot(
     sessions, trades, equity, strategies, risk,
     perpFundingHistory: fundingRingBuffer?.toArray() ?? [],
     perpPnlHistory: pnlRingBuffer?.toArray() ?? [],
+    perpFundingRates: knownFundingRates ? Array.from(knownFundingRates.values()) : [],
     feedHealth: feedHealthMonitor?.getAllStatuses().map(s => ({
       instrument: s.instrument,
       status: s.status,

@@ -172,6 +172,7 @@ function App(): React.ReactElement {
           if (perpPosRes.ok) {
             const perpPosData = (await perpPosRes.json()) as PerpPositionPayload[];
             setPerpPositions(perpPosData);
+            if (perpPosData.length > 0) setPerpPositionUpdatedAt(Date.now());
           }
         } catch { /* API not ready */ }
 
@@ -320,6 +321,15 @@ function App(): React.ReactElement {
           // System health: hydrate from snapshot
           if (snap.systemHealth) {
             setSystemHealth(snap.systemHealth);
+          }
+          // Perp funding rates: hydrate from snapshot (server caches last known rate per instrument)
+          if (snap.perpFundingRates && snap.perpFundingRates.length > 0) {
+            const rateMap: Record<string, PerpFundingPayload> = {};
+            for (const rate of snap.perpFundingRates) {
+              rateMap[rate.instrument] = rate;
+            }
+            setPerpFunding(rateMap);
+            setPerpFundingUpdatedAt(Date.now());
           }
           // DASH-02: hydrate P&L history from ring buffer snapshot
           if (snap.perpPnlHistory && snap.perpPnlHistory.length > 0) {
