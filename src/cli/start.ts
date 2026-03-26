@@ -37,6 +37,7 @@ import { IntxClient, PaperPerpEngine, PerpPositionManager } from '../perp/index.
 import { PerpStateStore } from '../perp/perp-state-store.js';
 import { runPerpTournament } from '../perp/perp-tournament-runner.js';
 import type { FeeConfig } from '../perp/fee-config.js';
+import { CBAdvancedTradeClient } from 'coinbase-api';
 import type { Candle } from '../core/types.js';
 import type { EventEmitter } from 'node:events';
 import {
@@ -46,7 +47,7 @@ import {
   DEFAULT_GRID,
 } from '../optimizer/index.js';
 import type { OptimizerConfig } from '../optimizer/index.js';
-import { parseBacktestConfig, DEFAULT_FEE_TAKER } from '../backtest/types.js';
+import { parseBacktestConfig, DEFAULT_FEE_TAKER, DEFAULT_FEE_MAKER } from '../backtest/types.js';
 import type { RegimeLeaderboards } from '../tournament/types.js';
 import { SpotSignalGate } from '../risk/spot-signal-gate.js';
 import { PreLiveGate } from '../risk/pre-live-gate.js';
@@ -260,12 +261,32 @@ program
       feedHealthMonitor.register('BTC-USD', 60_000);
       feedHealthMonitor.register('ETH-USD', 60_000);
 
+      // Fetch real spot taker fee from Coinbase API — never throws, falls back to constant
+      let spotTakerFeeRate = DEFAULT_FEE_TAKER;
+      let spotFeeSource: 'api' | 'fallback' = 'fallback';
+      try {
+        const cbClient = new CBAdvancedTradeClient({
+          apiKey: config.coinbase.apiKeyName,
+          apiSecret: config.coinbase.apiKeySecret,
+        });
+        const summary = await cbClient.getTransactionSummary({ product_type: 'SPOT' });
+        const raw = (summary as any)?.fee_tier?.taker_fee_rate;
+        const parsed = typeof raw === 'string' && raw.length > 0 ? parseFloat(raw) : NaN;
+        if (Number.isFinite(parsed) && parsed > 0 && parsed < 0.1) {
+          spotTakerFeeRate = parsed;
+          spotFeeSource = 'api';
+        }
+      } catch { /* use fallback */ }
+      out.info(`Spot taker fee: ${(spotTakerFeeRate * 100).toFixed(4)}% (source: ${spotFeeSource})`);
+
       // Spot fee-drag gate: blocks entries whose expected move <= round-trip fee * multiple
       const spotSignalGate = new SpotSignalGate({
-        takerFeeRate: DEFAULT_FEE_TAKER,
+        takerFeeRate: spotTakerFeeRate,
         feeDragMultiple: config.spotStrategyOverrides.feeDragMultiple,
         atrPeriod: config.spotStrategyOverrides.feeDragAtrPeriod,
       });
+
+      const spotFeeConfig: LiveFeeSnapshot = { takerFeeRate: spotTakerFeeRate, makerFeeRate: DEFAULT_FEE_MAKER, source: spotFeeSource };
 
       const backtestEngine = new BacktestEngine({
         strategyRegistry: registry,
@@ -430,6 +451,7 @@ program
             const liveFeed = new LiveDataFeed({
               apiKey: config.coinbase.apiKeyName,
               apiSecret: config.coinbase.apiKeySecret,
+              timeframe,
             });
 
             // Wire candle events to feed health monitor
@@ -511,7 +533,11 @@ program
       const perpEngineEmitters: EventEmitter[] = [];
 
       // GATE-02: Hoist feeConfig for dashboard — assigned inside FCM block if enabled
-      let dashboardFeeConfig: { takerFeeRate: number; makerFeeRate: number; source: string } | undefined;
+      let dashboardFeeConfig: LiveFeeSnapshot | undefined;
+      // Hoisted for fee refresh service (assigned inside FCM block when enabled)
+      let perpClientForFeeRefresh: import('../perp/intx-client.js').IntxClient | undefined;
+      // Mutable live fee snapshots — mutated in-place by FeeRefreshService every 6h
+      type LiveFeeSnapshot = import('../core/fee-refresh-service.js').LiveFeeSnapshot;
 
       // Instantiate stores for dashboard routes
       correlationStore = new CorrelationStore({ dbPath: config.database.path });
@@ -529,6 +555,7 @@ program
         const liveFeed = new LiveDataFeed({
           apiKey: config.coinbase.apiKeyName,
           apiSecret: config.coinbase.apiKeySecret,
+          timeframe,
         });
 
         // Wire candle events to feed health monitor
@@ -565,6 +592,7 @@ program
       // ── Perp engine wiring (INFRA-03: error listener, INFRA-04: shutdown order) ──
       if (config.intx.enabled && config.intx.perpMode !== 'none') {
         const perpClient = new IntxClient(config.intx);
+        perpClientForFeeRefresh = perpClient;
 
         // INFRA-03: error listener MUST be registered before .start() to prevent
         // Node.js from throwing an uncaught exception on unhandled 'error' events.
@@ -595,11 +623,11 @@ program
           ` (source: ${feeConfig.source})`,
         );
 
-        // GATE-02: expose FCM fee config to dashboard
+        // GATE-02: expose FCM fee config to dashboard (mutable — FeeRefreshService updates in-place)
         dashboardFeeConfig = {
           takerFeeRate: feeConfig.takerFeeRate,
           makerFeeRate: feeConfig.makerFeeRate,
-          source: feeConfig.source,
+          source: (feeConfig.source as 'api' | 'fallback') ?? 'api',
         };
 
         // PIPE-01: Run perp tournament to get regime leaderboards
@@ -653,6 +681,7 @@ program
           const perpLiveFeed = new LiveDataFeed({
             apiKey: config.coinbase.apiKeyName,
             apiSecret: config.coinbase.apiKeySecret,
+            timeframe,
           });
 
           // Wire perp LiveDataFeed candle events to feed health monitor
@@ -710,6 +739,7 @@ program
             }
 
             perpManager.start();
+            perpManager.startBalanceMonitor(); // every 15 min
             perpEngineEmitters.push(perpManager);
 
             perpLiveFeed.on('candle', (candle: Candle) => {
@@ -721,6 +751,7 @@ program
             resources.push({
               name: 'perp-position-manager',
               stop: async () => {
+                perpManager.stopBalanceMonitor();
                 perpManager.stop();
                 perpLiveFeed.stop();
               },
@@ -741,6 +772,22 @@ program
       feedHealthMonitor.start();
       resources.push({ name: 'FeedHealthMonitor', stop: async () => feedHealthMonitor.stop() });
 
+      // Start fee refresh service (every 6h) — spot always, FCM only when enabled
+      const { FeeRefreshService } = await import('../core/fee-refresh-service.js');
+      const cbFeeClient = new CBAdvancedTradeClient({
+        apiKey: config.coinbase.apiKeyName,
+        apiSecret: config.coinbase.apiKeySecret,
+      });
+      const feeRefreshService = new FeeRefreshService(
+        cbFeeClient,
+        spotSignalGate,
+        spotFeeConfig,
+        perpClientForFeeRefresh,
+        dashboardFeeConfig,
+      );
+      feeRefreshService.start();
+      resources.push({ name: 'FeeRefreshService', stop: async () => feeRefreshService.stop() });
+
       const server = await createDashboardServer(dashboardConfig, {
         liveStateStore,
         sessionStore,
@@ -756,6 +803,7 @@ program
         perpStateStore,
         gateConfig: config.preLiveGate,
         feeConfig: dashboardFeeConfig,
+        spotFeeConfig,
         feedHealthMonitor,
       });
 

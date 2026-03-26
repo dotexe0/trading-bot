@@ -198,4 +198,50 @@ describe('LiveDataFeed', () => {
       'advTradeMarketData',
     );
   });
+
+  it('deduplicates historical snapshot candles — blocks already-seen timestamps', () => {
+    // Simulate the Coinbase WS pattern: each update sends a 100-candle snapshot
+    // (all historical). Without deduplication, every batch re-emits 99 stale candles.
+    // With deduplication, only genuinely new candles (strictly newer than the last
+    // emitted timestamp) are forwarded.
+    const candles: unknown[] = [];
+    feed.on('candle', (c) => candles.push(c));
+
+    // Simulate a batch of 5 historical candles (T, T+5m, T+10m, T+15m, T+20m)
+    // The Coinbase WS sends these as a snapshot. Each successive candle triggers
+    // emission of the previous (all pass dedup since they're ascending).
+    sendCandleUpdate('BTC-USD', '1688998200');  // T=1m (stored)
+    sendCandleUpdate('BTC-USD', '1688998260');  // T+1m → emit T
+    sendCandleUpdate('BTC-USD', '1688998320');  // T+2m → emit T+1m
+    sendCandleUpdate('BTC-USD', '1688998380');  // T+3m → emit T+2m
+    sendCandleUpdate('BTC-USD', '1688998440');  // T+4m → emit T+3m
+    expect(candles).toHaveLength(4); // T through T+3m emitted (T+4m pending)
+
+    // Now simulate the WS sending the SAME historical batch again (snapshot replay).
+    // Only the first candle in the old batch (T) differs from pendingStart (T+4m),
+    // which triggers emitting the pending T+4m. Then T through T+3m are blocked by dedup.
+    sendCandleUpdate('BTC-USD', '1688998200', { open: '99999.00' }); // historical T — flushes T+4m
+    // T+4m gets emitted (it's newer than last emitted T+3m)
+    expect(candles).toHaveLength(5);
+
+    // Further historical candles in the same replay batch are blocked (older than T+4m)
+    sendCandleUpdate('BTC-USD', '1688998260', { open: '88888.00' }); // T+1m — blocked
+    sendCandleUpdate('BTC-USD', '1688998320', { open: '77777.00' }); // T+2m — blocked
+    expect(candles).toHaveLength(5); // No new emissions
+
+    // All original candles are unmodified
+    expect((candles[0] as { open: string }).open).toBe('50000.00');
+  });
+
+  it('emits candles with the configured timeframe label', () => {
+    const candles: unknown[] = [];
+    feed.on('candle', (c) => candles.push(c));
+
+    sendCandleUpdate('BTC-USD', '1688998200');
+    sendCandleUpdate('BTC-USD', '1688998260');
+
+    expect(candles).toHaveLength(1);
+    // Default timeframe is '5m' (WS native)
+    expect((candles[0] as { timeframe: string }).timeframe).toBe('5m');
+  });
 });
