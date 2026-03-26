@@ -114,6 +114,10 @@ export class PerpPositionManager extends EventEmitter {
 
   private _riskGate: PerpRiskGate | null;
 
+  // ── FCM balance monitor ────────────────────────────────────────────────────
+  private _balanceTimer?: ReturnType<typeof setInterval>;
+  private _lastKnownAvailableFunds?: string;
+
   private currentSession: PerpSession | null = null;
   private _emergencyCloseInProgress = false;
   private _onMarkPrice: ((evt: IntxMarkPriceEvent) => void) | null = null;
@@ -288,6 +292,58 @@ export class PerpPositionManager extends EventEmitter {
     if (this._onFundingRate) {
       this.intxClient.off('fundingRate', this._onFundingRate);
       this._onFundingRate = null;
+    }
+  }
+
+  // ── FCM balance monitor ───────────────────────────────────────────────────
+
+  /**
+   * Start periodic FCM balance checks. Logs when available margin changes.
+   * Default: every 15 minutes. Never throws.
+   */
+  startBalanceMonitor(intervalMs = 15 * 60 * 1000): void {
+    void this._checkBalance(); // immediate snapshot
+    this._balanceTimer = setInterval(() => void this._checkBalance(), intervalMs);
+  }
+
+  stopBalanceMonitor(): void {
+    if (this._balanceTimer !== undefined) {
+      clearInterval(this._balanceTimer);
+      this._balanceTimer = undefined;
+    }
+  }
+
+  private async _checkBalance(): Promise<void> {
+    try {
+      const state = await this.intxClient.getAccountState();
+      const summary = (state.balances ?? state.summary) as Record<string, any>;
+
+      // Prefer cfm_usd_balance (cleared funds), fall back to available_margin
+      const raw =
+        summary?.cfm_usd_balance?.value ??
+        summary?.available_margin?.value ??
+        summary?.futures_buying_power?.value;
+
+      const available = raw != null ? String(raw) : undefined;
+      if (available === undefined) return;
+
+      if (
+        this._lastKnownAvailableFunds !== undefined &&
+        this._lastKnownAvailableFunds !== available
+      ) {
+        const prev = parseFloat(this._lastKnownAvailableFunds);
+        const curr = parseFloat(available);
+        const delta = curr - prev;
+        log.info(
+          `FCM balance update: $${available}` +
+            ` (was $${this._lastKnownAvailableFunds},` +
+            ` ${delta >= 0 ? '+' : ''}${delta.toFixed(2)})`,
+        );
+        this.emit('fcmBalanceChanged', { previous: this._lastKnownAvailableFunds, current: available });
+      }
+      this._lastKnownAvailableFunds = available;
+    } catch (err) {
+      log.warn(`FCM balance check failed: ${String(err)}`);
     }
   }
 

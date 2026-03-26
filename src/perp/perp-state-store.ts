@@ -341,6 +341,24 @@ export class PerpStateStore {
     };
   }
 
+  /**
+   * Delete all perp trading history (sessions, orders, trades).
+   * Returns row counts cleared per table.
+   */
+  resetHistory(): Record<string, number> {
+    const tables = ['perp_trades', 'perp_orders', 'perp_sessions'];
+    const counts: Record<string, number> = {};
+    for (const table of tables) {
+      try {
+        const result = this.sqlite.prepare(`DELETE FROM ${table}`).run();
+        counts[table] = result.changes;
+      } catch {
+        counts[table] = 0;
+      }
+    }
+    return counts;
+  }
+
   private rowToTrade(row: typeof perpTrades.$inferSelect): PerpTradeRecord {
     return {
       sessionId: row.sessionId,

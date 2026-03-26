@@ -81,6 +81,7 @@ export interface DashboardDeps {
   perpStateStore?: PerpStateStore;
   gateConfig?: { minTrades: number; minNetPnl: number; lookbackTrades?: number };
   feeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
+  spotFeeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
   /** When provided, enables feed health broadcasting and snapshot inclusion. */
   feedHealthMonitor?: FeedHealthMonitor;
 }
@@ -99,6 +100,7 @@ export interface RouteDeps {
   perpStateStore?: PerpStateStore;
   gateConfig?: { minTrades: number; minNetPnl: number; lookbackTrades?: number };
   feeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
+  spotFeeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
 }
 
 export interface DashboardServer {
@@ -353,6 +355,7 @@ export async function createDashboardServer(
     perpStateStore: deps.perpStateStore,
     gateConfig: deps.gateConfig,
     feeConfig: deps.feeConfig,
+    spotFeeConfig: deps.spotFeeConfig,
   };
 
   // Register WebSocket handler
@@ -387,6 +390,18 @@ export async function createDashboardServer(
       uptime: process.uptime(),
       wsClients: broadcaster.getClientCount(),
     };
+  });
+
+  // Reset paper trading history (paper mode only)
+  app.post('/api/reset-paper', async (_req, reply) => {
+    // Guard: refuse if any live session is running
+    const liveSessions = deps.liveStateStore.listSessions('running');
+    if (liveSessions.length > 0) {
+      return reply.code(403).send({ error: 'Cannot reset while live sessions are running' });
+    }
+    const spotCounts = deps.sessionStore.resetPaperHistory();
+    const perpCounts = deps.perpStateStore?.resetHistory() ?? {};
+    return { cleared: { ...spotCounts, ...perpCounts } };
   });
 
   return {

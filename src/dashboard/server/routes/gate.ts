@@ -43,13 +43,15 @@ export async function registerGateRoutes(
       riskConfig.maxPositionCount = state.thresholds.maxPositionCount;
     }
 
-    // Fee config: spot taker is the constant DEFAULT_FEE_TAKER (0.0075)
+    // Fee config: spot taker from API fetch (falls back to DEFAULT_FEE_TAKER)
     const feeConfig: {
       spotTakerRate: number;
+      spotFeeSource?: string;
       perpTakerRate?: number;
       perpFeeSource?: string;
     } = {
-      spotTakerRate: DEFAULT_FEE_TAKER,
+      spotTakerRate: deps.spotFeeConfig?.takerFeeRate ?? DEFAULT_FEE_TAKER,
+      spotFeeSource: deps.spotFeeConfig?.source,
     };
 
     if (deps.feeConfig) {

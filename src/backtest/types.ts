@@ -23,9 +23,9 @@ export const COINBASE_FEE_TIERS = [
   { name: 'Advanced 3', maker: 0.0, taker: 0.002 },
 ] as const;
 
-/** Default fee rates: Coinbase Intro 2 tier */
-export const DEFAULT_FEE_MAKER = 0.0035;
-export const DEFAULT_FEE_TAKER = 0.0075;
+/** Default fee rates: Coinbase VIP 4 tier (fetched live at startup via getTransactionSummary) */
+export const DEFAULT_FEE_MAKER = 0.00025;
+export const DEFAULT_FEE_TAKER = 0.00065;
 
 // ── Zod schema for BacktestConfig ─────────────────────────────────────
 

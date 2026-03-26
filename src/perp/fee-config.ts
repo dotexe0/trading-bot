@@ -9,8 +9,8 @@
 /** FCM promotional taker rate (used as fallback when API fetch fails). */
 export const FCM_FALLBACK_TAKER_RATE = 0.0003;
 
-/** FCM promotional maker rate (0 for post-only limit orders). */
-export const FCM_FALLBACK_MAKER_RATE = 0.0000;
+/** FCM maker rate fallback (VIP 4 tier). */
+export const FCM_FALLBACK_MAKER_RATE = 0.00025;
 
 /**
  * FeeConfig value object.

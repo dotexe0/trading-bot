@@ -166,7 +166,12 @@ export function LiveReadinessPanel({ gateStatus, trades }: LiveReadinessPanelPro
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'max-content auto', gap: '4px 12px', fontSize: '12px' }}>
           <span style={{ color: '#64748b' }}>Spot taker</span>
-          <span style={{ textAlign: 'right' }}>{(gateStatus.feeConfig.spotTakerRate * 100).toFixed(2)}%</span>
+          <span style={{ textAlign: 'right' }}>
+            {(gateStatus.feeConfig.spotTakerRate * 100).toFixed(4)}%
+            {gateStatus.feeConfig.spotFeeSource === 'api' && (
+              <span style={{ color: '#22c55e', fontSize: '10px', marginLeft: '4px' }}>live</span>
+            )}
+          </span>
           <span style={{ color: '#64748b' }}>Perp taker</span>
           <span style={{ textAlign: 'right' }}>
             {gateStatus.feeConfig.perpTakerRate != null

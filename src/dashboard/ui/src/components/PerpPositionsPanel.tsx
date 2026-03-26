@@ -8,9 +8,10 @@ interface PerpPositionRowProps {
 
 function PerpPositionRow({ position }: PerpPositionRowProps): React.ReactElement {
   const markFlash = useFlash(position.markPrice ?? position.entryPrice);
-  const pnlFlash = useFlash(position.unrealizedPnl ?? '0');
-  const pnlValue = position.unrealizedPnl != null ? parseFloat(position.unrealizedPnl) : null;
-  const pnlClass = pnlValue != null && pnlValue >= 0 ? 'text-green' : pnlValue != null ? 'text-red' : 'text-muted';
+  const rawPnl = position.unrealizedPnl ?? '0';
+  const pnlFlash = useFlash(rawPnl);
+  const pnlValue = parseFloat(rawPnl);
+  const pnlClass = pnlValue >= 0 ? 'text-green' : 'text-red';
 
   return (
     <tr>
@@ -25,9 +26,9 @@ function PerpPositionRow({ position }: PerpPositionRowProps): React.ReactElement
       </td>
       <td className="mono text-muted">{position.liquidationPrice}</td>
       <td className={`mono ${pnlClass} ${pnlFlash === 'up' ? 'flash-up' : pnlFlash === 'down' ? 'flash-down' : ''}`}>
-        {pnlValue != null ? `${pnlValue >= 0 ? '+' : ''}${position.unrealizedPnl}` : '—'}
+        {`${pnlValue >= 0 ? '+' : ''}${rawPnl}`}
       </td>
-      <td className="mono text-muted">{position.cumulativeFundingCost ?? '—'}</td>
+      <td className="mono text-muted">{position.cumulativeFundingCost ?? '0.00000000'}</td>
     </tr>
   );
 }

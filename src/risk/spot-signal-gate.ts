@@ -37,7 +37,7 @@ export interface SpotGateResult {
 }
 
 export class SpotSignalGate {
-  private readonly _takerRate: number;
+  private _takerRate: number;
   private readonly _multiple: number;
   /** ATR period for expected-move estimation. Engines read this when computing ATR. */
   readonly atrPeriod: number;
@@ -46,6 +46,11 @@ export class SpotSignalGate {
     this._takerRate = options.takerFeeRate;
     this._multiple = options.feeDragMultiple;
     this.atrPeriod = options.atrPeriod ?? 14;
+  }
+
+  /** Update the taker fee rate at runtime (e.g. from daily fee refresh). */
+  updateTakerFeeRate(rate: number): void {
+    this._takerRate = rate;
   }
 
   /**

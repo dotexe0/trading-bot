@@ -153,6 +153,8 @@ export interface PerpPositionManagerEvents {
   fundingDrain: [PerpSession, { cumulativeFundingCost: string }];
   /** Emitted after positionOpened and positionClosed with current total notional vs cap. */
   exposureUpdate: [{ totalNotionalUsd: string; exposureCapUsd: string; utilizationPct: string }];
+  /** Emitted when the FCM available balance changes between periodic checks. */
+  fcmBalanceChanged: [{ previous: string; current: string }];
   error: [Error];
 }
 

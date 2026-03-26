@@ -254,6 +254,7 @@ export interface GateStatusData {
   };
   feeConfig: {
     spotTakerRate: number;
+    spotFeeSource?: string;
     perpTakerRate?: number;
     perpFeeSource?: string;
   };

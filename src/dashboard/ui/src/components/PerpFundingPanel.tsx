@@ -33,10 +33,8 @@ export function PerpFundingPanel({ fundingRates, lastUpdatedAt }: PerpFundingPan
             return (
               <tr key={fcmId}>
                 <td className="mono">{DISPLAY_NAME[fcmId] ?? fcmId}</td>
-                <td className="mono">
-                  {entry ? entry.currentFundingRate : (
-                    <span className="text-muted">Awaiting data</span>
-                  )}
+                <td className="mono text-muted">
+                  {entry ? entry.currentFundingRate : '—'}
                 </td>
                 <td className="mono text-muted">
                   {entry ? entry.cumulativeFundingCost : '—'}

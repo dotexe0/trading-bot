@@ -251,6 +251,33 @@ export class SessionStore {
   }
 
   /**
+   * Delete all paper trading history and optimizer outputs.
+   * Returns row counts cleared per table.
+   */
+  resetPaperHistory(): Record<string, number> {
+    const tables = [
+      'paper_trades',
+      'paper_equity',
+      'paper_sessions',
+      'tournaments',
+      'monte_carlo_results',
+      'exit_config_optimizations',
+      'regime_history',
+      'correlation_snapshots',
+    ];
+    const counts: Record<string, number> = {};
+    for (const table of tables) {
+      try {
+        const result = this.sqlite.prepare(`DELETE FROM ${table}`).run();
+        counts[table] = result.changes;
+      } catch {
+        counts[table] = 0;
+      }
+    }
+    return counts;
+  }
+
+  /**
    * Close the database connection.
    */
   close(): void {

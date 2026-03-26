@@ -86,6 +86,7 @@ function App(): React.ReactElement {
   const [perpFundingUpdatedAt, setPerpFundingUpdatedAt] = useState<number | undefined>(undefined);
   const [perpExposureUpdatedAt, setPerpExposureUpdatedAt] = useState<number | undefined>(undefined);
   const [gateStatus, setGateStatus] = useState<GateStatusData | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
   const [feedHealthData, setFeedHealthData] = useState<FeedHealthPayload[]>([]);
   const [feedHealthUpdatedAt, setFeedHealthUpdatedAt] = useState<number | undefined>(undefined);
   const [systemHealth, setSystemHealth] = useState<SystemHealthPayload | null>(null);
@@ -535,6 +536,33 @@ function App(): React.ReactElement {
     if (res.ok) setStrategies((await res.json()) as StrategyInfo[]);
   }
 
+  // ── Paper reset ──────────────────────────────────────────────────
+  const currentMode = sessions.find((s) => s.status === 'running')?.mode ?? 'paper';
+
+  async function handleResetPaper() {
+    if (!window.confirm('Reset all paper trading history? This cannot be undone.')) return;
+    setIsResetting(true);
+    try {
+      const res = await fetch('/api/reset-paper', { method: 'POST' });
+      if (!res.ok) {
+        const err = (await res.json()) as { error?: string };
+        alert(err.error ?? 'Reset failed');
+        return;
+      }
+      // Clear all local state
+      setSessions([]);
+      setTrades([]);
+      setEquity([]);
+      setPositions([]);
+      setCircuitBreakerEvents([]);
+      // Refresh gate status to reflect 0 trades
+      const gateRes = await fetch('/api/gate/status');
+      if (gateRes.ok) setGateStatus((await gateRes.json()) as GateStatusData);
+    } finally {
+      setIsResetting(false);
+    }
+  }
+
   // ── Equity chart data ─────────────────────────────────────────────
   const equityLineData = equity.map((p) => ({
     time: Math.floor(p.timestamp / 1000) as Time,
@@ -601,7 +629,26 @@ function App(): React.ReactElement {
               <SystemHealthPanel systemHealth={systemHealth} />
             </div>
             <div className="panel" style={{ flex: 1, minWidth: 0 }}>
-              <div className="panel-title">Live Readiness</div>
+              <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Live Readiness</span>
+                {currentMode === 'paper' && (
+                  <button
+                    onClick={() => void handleResetPaper()}
+                    disabled={isResetting}
+                    style={{
+                      fontSize: '10px',
+                      padding: '2px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid #374151',
+                      backgroundColor: isResetting ? '#1f2937' : '#111827',
+                      color: isResetting ? '#6b7280' : '#9ca3af',
+                      cursor: isResetting ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {isResetting ? 'Resetting…' : 'Reset Paper'}
+                  </button>
+                )}
+              </div>
               <LiveReadinessPanel gateStatus={gateStatus} trades={trades} />
             </div>
           </div>
