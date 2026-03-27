@@ -364,4 +364,48 @@ describe('TournamentRunner regime leaderboards', () => {
     expect(result.regimeLeaderboards!.TRENDING).toHaveLength(0);
     expect(result.regimeLeaderboards!.fallbackEntry.strategyName).toBe('stratA');
   });
+
+  describe('disqualification filter', () => {
+    it('ranks disqualified (negative robustness) strategy below qualified ones even if OOS Sharpe is higher', async () => {
+      // qualified: IS=2.0, OOS=1.5 → robustness=0.75 (positive, qualifies)
+      // disqualified: IS=-1.0, OOS=3.0 → robustness=-3.0 (negative, disqualified despite higher OOS)
+      mockWfRunner.run
+        .mockReturnValueOnce(makeWfResult(1.5, [2.0]))   // qualified
+        .mockReturnValueOnce(makeWfResult(3.0, [-1.0])); // disqualified
+
+      mockRegistry.list.mockReturnValue(['qualified-strat', 'disqualified-strat']);
+
+      const config = makeTournamentConfig();
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].strategyName).toBe('qualified-strat');
+      expect(result.leaderboard[0].disqualified).toBe(false);
+      expect(result.leaderboard[0].rank).toBe(1);
+
+      expect(result.leaderboard[1].strategyName).toBe('disqualified-strat');
+      expect(result.leaderboard[1].disqualified).toBe(true);
+      expect(result.leaderboard[1].disqualifyReason).toMatch(/IS\/OOS direction mismatch/);
+      expect(result.leaderboard[1].rank).toBe(2);
+    });
+
+    it('falls back to IS Sharpe ranking when all strategies are disqualified', async () => {
+      // strat-a: IS=-1.0, OOS=2.0 → robustness=-2.0, disqualified
+      // strat-b: IS=-0.5, OOS=1.0 → robustness=-2.0, disqualified but higher IS Sharpe
+      mockWfRunner.run
+        .mockReturnValueOnce(makeWfResult(2.0, [-1.0]))  // strat-a
+        .mockReturnValueOnce(makeWfResult(1.0, [-0.5])); // strat-b
+
+      mockRegistry.list.mockReturnValue(['strat-a', 'strat-b']);
+
+      const config = makeTournamentConfig();
+      const result = await runner.run(config, dummyCandles);
+
+      // strat-b has higher IS Sharpe (-0.5 > -1.0) so ranks first in fallback
+      expect(result.leaderboard[0].strategyName).toBe('strat-b');
+      expect(result.leaderboard[1].strategyName).toBe('strat-a');
+      // Both are still marked disqualified
+      expect(result.leaderboard[0].disqualified).toBe(true);
+      expect(result.leaderboard[1].disqualified).toBe(true);
+    });
+  });
 });
