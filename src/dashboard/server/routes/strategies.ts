@@ -122,4 +122,52 @@ export async function registerStrategyRoutes(
       });
     }
   });
+
+  /**
+   * GET /api/tournament/latest
+   * Returns the most recent tournament leaderboard with IS/OOS metrics,
+   * robustness ratio, disqualification status, and active flag per strategy.
+   * Returns 204 if no tournament has been run yet.
+   */
+  app.get('/api/tournament/latest', async (_request, reply) => {
+    if (!deps.tournamentStore) {
+      return reply.status(204).send();
+    }
+    const result = deps.tournamentStore.getLatestTournament();
+    if (!result) {
+      return reply.status(204).send();
+    }
+
+    const activeEngines = deps.activationBridge.getActiveEngines();
+    const activeNames = new Set(activeEngines.keys());
+
+    return {
+      runAt: result.runTimestamp,
+      strategiesEvaluated: result.strategiesEvaluated,
+      leaderboard: result.leaderboard.map((e) => ({
+        rank: e.rank,
+        strategyName: e.strategyName,
+        isSharpe: e.isMetrics.sharpeRatio,
+        oosSharpe: e.oosMetrics.sharpeRatio,
+        robustnessRatio: e.robustnessRatio,
+        oosTradeCount: e.oosMetrics.totalTrades,
+        oosWinRate: parseFloat(String(e.oosMetrics.winRate)),
+        disqualified: e.disqualified,
+        disqualifyReason: e.disqualifyReason,
+        active: activeNames.has(e.strategyName),
+      })),
+    };
+  });
+
+  /**
+   * GET /api/strategies/available
+   * Returns all strategy names registered in the StrategyRegistry.
+   * Used to populate the UI before any tournament has run.
+   */
+  app.get('/api/strategies/available', async () => {
+    if (!deps.strategyRegistry) {
+      return { strategies: [] as string[] };
+    }
+    return { strategies: deps.strategyRegistry.list() };
+  });
 }
