@@ -23,6 +23,8 @@ import type { CandleRepository } from '../../data/storage/candle-repo.js';
 import type { PaperTradingEngine } from '../../paper/paper-engine.js';
 import type { PerpStateStore } from '../../perp/perp-state-store.js';
 import type { FeedHealthMonitor, FeedHealthState } from '../../core/feed-health.js';
+import type { TournamentStore } from '../../tournament/tournament-store.js';
+import type { StrategyRegistry } from '../../strategies/registry.js';
 import {
   toApiSession,
   toApiPaperSession,
@@ -84,6 +86,10 @@ export interface DashboardDeps {
   spotFeeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
   /** When provided, enables feed health broadcasting and snapshot inclusion. */
   feedHealthMonitor?: FeedHealthMonitor;
+  /** Latest tournament results — used by /api/tournament/latest endpoint. */
+  tournamentStore?: TournamentStore;
+  /** All registered strategy names — used by /api/strategies/available endpoint. */
+  strategyRegistry?: StrategyRegistry;
 }
 
 export interface RouteDeps {
@@ -101,6 +107,10 @@ export interface RouteDeps {
   gateConfig?: { minTrades: number; minNetPnl: number; lookbackTrades?: number };
   feeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
   spotFeeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
+  /** Latest tournament results — used by /api/tournament/latest endpoint. */
+  tournamentStore?: TournamentStore;
+  /** All registered strategy names — used by /api/strategies/available endpoint. */
+  strategyRegistry?: StrategyRegistry;
 }
 
 export interface DashboardServer {
@@ -356,6 +366,8 @@ export async function createDashboardServer(
     gateConfig: deps.gateConfig,
     feeConfig: deps.feeConfig,
     spotFeeConfig: deps.spotFeeConfig,
+    tournamentStore: deps.tournamentStore,
+    strategyRegistry: deps.strategyRegistry,
   };
 
   // Register WebSocket handler

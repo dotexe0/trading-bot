@@ -822,6 +822,8 @@ program
         feeConfig: dashboardFeeConfig,
         spotFeeConfig,
         feedHealthMonitor,
+        tournamentStore,
+        strategyRegistry: registry,
       });
 
       await server.start();
