@@ -38,7 +38,8 @@ import { PerpStateStore } from '../perp/perp-state-store.js';
 import { runPerpTournament } from '../perp/perp-tournament-runner.js';
 import type { FeeConfig } from '../perp/fee-config.js';
 import { CBAdvancedTradeClient } from 'coinbase-api';
-import type { Candle } from '../core/types.js';
+import type { Candle, TradingPair } from '../core/types.js';
+import { TIMEFRAME_MS } from '../core/types.js';
 import type { EventEmitter } from 'node:events';
 import {
   ExitConfigOptimizer,
@@ -256,10 +257,16 @@ program
       const riskConfig = parseRiskConfig({});
       const riskManager = new RiskManager(riskConfig);
 
-      // Feed health monitoring for all instruments (spot pairs use 1m candles = 60_000ms interval)
+      // Feed health monitoring for all instruments.
+      // expectedIntervalMs = REST poll interval (60s) for non-5m timeframes — health is
+      // tracked via 'polled' heartbeats, not candle emission, so long candle intervals
+      // (e.g. 1h) no longer cause false DEAD between candle boundaries.
+      // For 5m WS-native timeframe there is no REST polling in normal operation, so we
+      // use the candle interval itself as the expected interval.
+      const feedExpectedMs = timeframe === '5m' ? TIMEFRAME_MS['5m'] : 60_000;
       const feedHealthMonitor = new FeedHealthMonitor();
-      feedHealthMonitor.register('BTC-USD', 60_000);
-      feedHealthMonitor.register('ETH-USD', 60_000);
+      feedHealthMonitor.register('BTC-USD', feedExpectedMs);
+      feedHealthMonitor.register('ETH-USD', feedExpectedMs);
 
       // Fetch real spot taker fee from Coinbase API — never throws, falls back to constant
       let spotTakerFeeRate = DEFAULT_FEE_TAKER;
@@ -454,7 +461,11 @@ program
               timeframe,
             });
 
-            // Wire candle events to feed health monitor
+            // Wire feed health monitor: 'polled' fires on every successful REST poll
+            // (even when deduplicated), keeping health current between candle emissions.
+            liveFeed.on('polled', (pair: TradingPair) => {
+              feedHealthMonitor.onCandle(pair);
+            });
             liveFeed.on('candle', (candle: Candle) => {
               feedHealthMonitor.onCandle(candle.pair);
             });
@@ -558,7 +569,10 @@ program
           timeframe,
         });
 
-        // Wire candle events to feed health monitor
+        // Wire feed health monitor
+        liveFeed.on('polled', (pair: TradingPair) => {
+          feedHealthMonitor.onCandle(pair);
+        });
         liveFeed.on('candle', (candle: Candle) => {
           feedHealthMonitor.onCandle(candle.pair);
         });
@@ -684,7 +698,10 @@ program
             timeframe,
           });
 
-          // Wire perp LiveDataFeed candle events to feed health monitor
+          // Wire perp LiveDataFeed feed health monitor
+          perpLiveFeed.on('polled', (pair: TradingPair) => {
+            feedHealthMonitor.onCandle(pair);
+          });
           perpLiveFeed.on('candle', (candle: Candle) => {
             feedHealthMonitor.onCandle(candle.pair);
           });

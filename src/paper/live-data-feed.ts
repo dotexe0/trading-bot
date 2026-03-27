@@ -362,6 +362,9 @@ export class LiveDataFeed extends EventEmitter {
         this.currentCandle.set(pair, candleObj);
 
         this.emitIfNew(pair, candleObj);
+        // Heartbeat: fire on every successful poll so FeedHealthMonitor stays
+        // current regardless of candle deduplication (e.g. long timeframes).
+        this.emit('polled', pair as TradingPair);
       } catch (err) {
         log.error({ err, pair }, 'REST poll error');
       }

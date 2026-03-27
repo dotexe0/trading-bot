@@ -64,6 +64,9 @@ export interface PaperTradingResult {
 /** Typed events for the LiveDataFeed EventEmitter. */
 export interface LiveDataFeedEvents {
   candle: [Candle];
+  /** Fires on every successful REST poll per pair — even when the candle is deduplicated.
+   *  Used by FeedHealthMonitor to track pipeline liveness independent of candle cadence. */
+  polled: [TradingPair];
   error: [Error];
   connected: [];
   disconnected: [];

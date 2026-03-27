@@ -21,6 +21,9 @@ const mockWsInstance = {
   unsubscribe: vi.fn(),
 };
 
+// Capture the most recently created REST client instance
+let mockRestInstance: { getProductCandles: ReturnType<typeof vi.fn> } | null = null;
+
 vi.mock('coinbase-api', () => ({
   WebsocketClient: class MockWebsocketClient {
     constructor() {
@@ -30,6 +33,10 @@ vi.mock('coinbase-api', () => ({
   },
   CBAdvancedTradeClient: class MockCBAdvancedTradeClient {
     getProductCandles = vi.fn();
+    constructor() {
+      // eslint-disable-next-line @typescript-eslint/no-this-alias
+      mockRestInstance = this as unknown as { getProductCandles: ReturnType<typeof vi.fn> };
+    }
   },
 }));
 
@@ -243,5 +250,91 @@ describe('LiveDataFeed', () => {
     expect(candles).toHaveLength(1);
     // Default timeframe is '5m' (WS native)
     expect((candles[0] as { timeframe: string }).timeframe).toBe('5m');
+  });
+});
+
+// ── REST polling / 'polled' heartbeat ────────────────────────────────────────
+
+describe('LiveDataFeed REST polling', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockRestInstance = null;
+    vi.clearAllMocks();
+    for (const key of Object.keys(wsHandlers)) {
+      delete wsHandlers[key];
+    }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Build a minimal candle response as returned by getProductCandles. */
+  function makeRestResponse(starts: number[]) {
+    return {
+      candles: starts.map((s) => ({
+        start: String(s),
+        open: '50000',
+        high: '50500',
+        low: '49500',
+        close: '50200',
+        volume: '1.0',
+      })),
+    };
+  }
+
+  it("emits 'polled' on every successful REST poll, even when candle is deduplicated", async () => {
+    // 1h feed uses REST polling as primary data source
+    const restFeed = new LiveDataFeed({
+      apiKey: 'key',
+      apiSecret: 'secret',
+      timeframe: '1h',
+    });
+
+    const polledPairs: string[] = [];
+    const emittedCandles: unknown[] = [];
+    restFeed.on('polled', (pair) => polledPairs.push(pair));
+    restFeed.on('candle', (c) => emittedCandles.push(c));
+
+    // Two candle timestamps: in-progress = t, completed = t-1h (skip[0], emit[1])
+    const t = 1700000000;
+    mockRestInstance!.getProductCandles.mockResolvedValue(makeRestResponse([t, t - 3600]));
+
+    restFeed.start(['BTC-USD'], 60_000);
+
+    // The immediate first poll fires synchronously via `void this._pollRest()`.
+    // Advance a tiny bit to let the async promise resolve.
+    await vi.advanceTimersByTimeAsync(1);
+    expect(polledPairs).toHaveLength(1);
+    expect(polledPairs[0]).toBe('BTC-USD');
+    expect(emittedCandles).toHaveLength(1); // first completed candle emitted
+
+    // Second poll — same completed candle is deduplicated, but 'polled' still fires
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(polledPairs).toHaveLength(2);
+    expect(emittedCandles).toHaveLength(1); // no new candle (deduplicated)
+
+    restFeed.stop();
+  });
+
+  it("does NOT emit 'polled' when REST poll throws", async () => {
+    const restFeed = new LiveDataFeed({
+      apiKey: 'key',
+      apiSecret: 'secret',
+      timeframe: '1h',
+    });
+
+    const polledPairs: string[] = [];
+    restFeed.on('polled', (pair) => polledPairs.push(pair));
+
+    mockRestInstance!.getProductCandles.mockRejectedValue(new Error('API error'));
+
+    restFeed.start(['BTC-USD'], 60_000);
+    // Let the immediate first poll resolve (it throws, so no 'polled')
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(polledPairs).toHaveLength(0);
+
+    restFeed.stop();
   });
 });

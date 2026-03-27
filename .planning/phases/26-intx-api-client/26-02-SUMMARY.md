@@ -45,7 +45,7 @@ completed: 2026-03-10
 - **Duration:** ~5 min
 - **Started:** 2026-03-10T19:50:24Z
 - **Completed:** 2026-03-10T19:55:27Z
-- **Tasks:** 2 auto + 1 checkpoint
+- **Tasks:** 3 (2 auto + 1 human-verify checkpoint, approved)
 - **Files modified:** 1
 
 ## Accomplishments
@@ -67,6 +67,9 @@ completed: 2026-03-10
 
 1. **Task 1: Verify WebSocket streaming** - `51261d0` (feat) — added two FCM limitation comments, all spec items verified
 2. **Task 2: Verify perp-status CLI** - `7dabcf8` (chore) — all spec requirements confirmed, no file changes needed
+3. **Task 3: Human verify perp:status CLI and full test suite** - human-approved checkpoint (no code commit)
+
+**Plan metadata:** `ca1fb83` (docs: complete WebSocket streaming verification plan)
 
 ## Files Created/Modified
 
@@ -88,7 +91,7 @@ None - plan executed exactly as written. Both Task 1 and Task 2 files already ma
 
 ## User Setup Required
 
-See Task 3 checkpoint — human verification of `npm test` (14 intx-client tests) and `npm run perp:status` disabled-guard path.
+None. Human verification (Task 3 checkpoint) approved: `npm test` 14/14 passing, `npx tsc --noEmit` clean, `npm run perp:status` exits with FCM disabled error as expected.
 
 ## Next Phase Readiness
 
