@@ -40,6 +40,8 @@ function makeEntry(rank: number, name: string, oosSharpe: number): LeaderboardEn
     isMetrics: makeMetrics({ sharpeRatio: oosSharpe * 1.5 }),
     robustnessRatio: 1 / 1.5,
     windowCount: 3,
+    disqualified: false,
+    disqualifyReason: null,
   };
 }
 

@@ -91,6 +91,8 @@ function deserializeEntry(raw: Record<string, unknown>): LeaderboardEntry {
     isMetrics: deserializeMetrics(raw.isMetrics as Record<string, unknown>),
     robustnessRatio: raw.robustnessRatio as number,
     windowCount: raw.windowCount as number,
+    disqualified: (raw.disqualified as boolean | undefined) ?? false,
+    disqualifyReason: (raw.disqualifyReason as string | null | undefined) ?? null,
   };
 }
 

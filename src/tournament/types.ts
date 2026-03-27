@@ -28,6 +28,10 @@ export interface LeaderboardEntry {
   robustnessRatio: number;
   /** Number of walk-forward windows evaluated */
   windowCount: number;
+  /** True when robustnessRatio < 0 (IS and OOS point in opposite directions). */
+  disqualified: boolean;
+  /** Human-readable reason for disqualification, null when not disqualified. */
+  disqualifyReason: string | null;
   /** Monte Carlo simulation result (if MC was run) */
   mcResult?: MonteCarloResult;
   /** MC-adjusted composite score: (1-w)*oosSharpe + w*mcP5Sharpe */

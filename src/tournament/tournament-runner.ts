@@ -123,6 +123,8 @@ export class TournamentRunner {
           isMetrics,
           robustnessRatio,
           windowCount: wfResult.windows.length,
+          disqualified: false,       // set in ranking phase
+          disqualifyReason: null,    // set in ranking phase
         },
         validateTrades: wfResult.validateTrades,
         validateCandleCount,
@@ -182,15 +184,43 @@ export class TournamentRunner {
     // Extract entries from accumulators for sorting
     const entries = accumulators.map((a) => a.entry);
 
-    // Sort by mcAdjustedScore when MC is enabled, otherwise by OOS Sharpe
-    if (config.monteCarlo?.enabled) {
-      entries.sort((a, b) => {
-        const scoreA = a.mcAdjustedScore ?? a.oosMetrics.sharpeRatio;
-        const scoreB = b.mcAdjustedScore ?? b.oosMetrics.sharpeRatio;
-        return scoreB - scoreA;
-      });
+    // Mark disqualified entries: robustness < 0 means IS and OOS point in opposite
+    // directions — the OOS result is a statistical fluke, not genuine edge.
+    for (const entry of entries) {
+      if (entry.robustnessRatio < 0) {
+        entry.disqualified = true;
+        entry.disqualifyReason =
+          `IS/OOS direction mismatch (robustness ${entry.robustnessRatio.toFixed(2)})`;
+      } else {
+        entry.disqualified = false;
+        entry.disqualifyReason = null;
+      }
+    }
+
+    const qualified = entries.filter((e) => !e.disqualified);
+    const disqualifiedEntries = entries.filter((e) => e.disqualified);
+
+    const sortFn = config.monteCarlo?.enabled
+      ? (a: LeaderboardEntry, b: LeaderboardEntry) => {
+          const scoreA = a.mcAdjustedScore ?? a.oosMetrics.sharpeRatio;
+          const scoreB = b.mcAdjustedScore ?? b.oosMetrics.sharpeRatio;
+          return scoreB - scoreA;
+        }
+      : (a: LeaderboardEntry, b: LeaderboardEntry) =>
+          b.oosMetrics.sharpeRatio - a.oosMetrics.sharpeRatio;
+
+    if (qualified.length === 0) {
+      // All strategies disqualified — fall back to IS Sharpe ranking across all entries
+      log.warn(
+        { strategies: entries.map((e) => e.strategyName) },
+        'All strategies disqualified by robustness filter — falling back to IS Sharpe ranking',
+      );
+      entries.sort((a, b) => b.isMetrics.sharpeRatio - a.isMetrics.sharpeRatio);
     } else {
-      entries.sort((a, b) => b.oosMetrics.sharpeRatio - a.oosMetrics.sharpeRatio);
+      qualified.sort(sortFn);
+      disqualifiedEntries.sort(sortFn);
+      entries.length = 0;
+      entries.push(...qualified, ...disqualifiedEntries);
     }
 
     // Assign ranks

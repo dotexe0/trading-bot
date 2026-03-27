@@ -72,6 +72,8 @@ function makeRegimeLeaderboards(
     isMetrics: {} as any,
     robustnessRatio: 1.0,
     windowCount: 3,
+    disqualified: false,
+    disqualifyReason: null,
   };
 
   return {
