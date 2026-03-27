@@ -4,11 +4,10 @@ import { PriceChart } from './components/PriceChart.js';
 import { EquityCurve } from './components/EquityCurve.js';
 import { PositionsTable } from './components/PositionsTable.js';
 import { TradeHistory } from './components/TradeHistory.js';
-import { StrategyControls } from './components/StrategyControls.js';
+import { StrategiesPanel } from './components/StrategiesPanel.js';
 import { StrategyConfigEditor } from './components/StrategyConfigEditor.js';
 import { PortfolioHeatMap } from './components/PortfolioHeatMap.js';
 import { RiskPanel } from './components/RiskPanel.js';
-import { PerformancePanel } from './components/PerformancePanel.js';
 import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
 import { PerpPositionsPanel } from './components/PerpPositionsPanel.js';
 import { PerpFundingPanel } from './components/PerpFundingPanel.js';
@@ -41,6 +40,7 @@ import type {
   StrategyInfo,
   SystemHealthPayload,
   TradeData,
+  TournamentLeaderboard,
 } from './types.js';
 import type { CandlestickData, HistogramData, BaselineData, AreaData, Time } from 'lightweight-charts';
 import type { PriceChartHandle } from './components/PriceChart.js';
@@ -90,6 +90,8 @@ function App(): React.ReactElement {
   const [feedHealthData, setFeedHealthData] = useState<FeedHealthPayload[]>([]);
   const [feedHealthUpdatedAt, setFeedHealthUpdatedAt] = useState<number | undefined>(undefined);
   const [systemHealth, setSystemHealth] = useState<SystemHealthPayload | null>(null);
+  const [tournament, setTournament] = useState<TournamentLeaderboard | null>(null);
+  const [availableStrategies, setAvailableStrategies] = useState<string[]>([]);
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
@@ -110,6 +112,25 @@ function App(): React.ReactElement {
   const MAX_PNL_POINTS = 1440;
   // Track last leverage timestamp for monotonic zero-point (DASH-03 Pitfall 3)
   const lastLeverageSecondRef = useRef<number>(0);
+
+  // ── Tournament / available-strategy fetchers ─────────────────────
+  const fetchTournament = useCallback(async () => {
+    try {
+      const res = await fetch('/api/tournament/latest');
+      if (res.status === 204) { setTournament(null); return; }
+      const data = await res.json() as TournamentLeaderboard;
+      setTournament(data);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const fetchAvailableStrategies = useCallback(async () => {
+    try {
+      const res = await fetch('/api/strategies/available');
+      if (!res.ok) return;
+      const data = await res.json() as { strategies: string[] };
+      setAvailableStrategies(data.strategies);
+    } catch { /* non-fatal */ }
+  }, []);
 
   // ── Fetch initial candle history for both pairs ───────────────────
   useEffect(() => {
@@ -209,11 +230,14 @@ function App(): React.ReactElement {
             setGateStatus(gateData);
           }
         } catch { /* API not ready */ }
+
+        void fetchTournament();
+        void fetchAvailableStrategies();
       } catch {
         // API not available yet — dashboard shows empty state
       }
     })();
-  }, []);
+  }, [fetchTournament, fetchAvailableStrategies]);
 
   // ── WebSocket message handler ─────────────────────────────────────
   const handleMessage = useCallback(
@@ -353,6 +377,7 @@ function App(): React.ReactElement {
             .then((r) => r.json())
             .then((data) => setSessions(data as SessionData[]))
             .catch(() => undefined);
+          void fetchTournament();
           break;
         }
 
@@ -362,6 +387,7 @@ function App(): React.ReactElement {
             .then((r) => r.json())
             .then((data) => setStrategies(data as StrategyInfo[]))
             .catch(() => undefined);
+          void fetchTournament();
           break;
         }
 
@@ -512,7 +538,7 @@ function App(): React.ReactElement {
           break;
       }
     },
-    [activePair, sessions],
+    [activePair, sessions, fetchTournament],
   );
 
   const { status, send } = useWebSocket(WS_URL, handleMessage);
@@ -659,8 +685,6 @@ function App(): React.ReactElement {
             circuitBreakerEvents={circuitBreakerEvents}
           />
 
-          <PerformancePanel trades={trades} />
-
           <div className="panel">
             <div className="panel-title">Perp Positions</div>
             <PerpPositionsPanel positions={perpPositions} lastUpdatedAt={perpPositionUpdatedAt} />
@@ -696,9 +720,11 @@ function App(): React.ReactElement {
             <PortfolioHeatMap />
           </div>
 
-          <StrategyControls
+          <StrategiesPanel
             strategies={strategies}
-            onStart={handleStrategyStart}
+            trades={trades}
+            tournament={tournament}
+            availableStrategies={availableStrategies}
             onStop={handleStrategyStop}
           />
 
