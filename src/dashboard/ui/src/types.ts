@@ -228,6 +228,27 @@ export interface SystemHealthPayload {
   };
 }
 
+// ── Tournament Leaderboard ────────────────────────────────────────────
+
+export interface TournamentLeaderboardEntry {
+  rank: number;
+  strategyName: string;
+  isSharpe: number;
+  oosSharpe: number;
+  robustnessRatio: number;
+  oosTradeCount: number;
+  oosWinRate: number;
+  disqualified: boolean;
+  disqualifyReason: string | null;
+  active: boolean;
+}
+
+export interface TournamentLeaderboard {
+  runAt: number;
+  strategiesEvaluated: number;
+  leaderboard: TournamentLeaderboardEntry[];
+}
+
 // ── Gate Status ──────────────────────────────────────────────────────
 
 export interface GateStatusData {
