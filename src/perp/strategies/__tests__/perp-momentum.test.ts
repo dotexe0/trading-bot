@@ -505,6 +505,21 @@ describe('PerpMomentumStrategy', () => {
     });
   });
 
+  // ---- position state tracking --------------------------------------------
+
+  describe('position state tracking', () => {
+    it('starts with no open position — first evaluate on breakout emits long, not close', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+      const candles = makeBreakoutCandles(8);
+      const signals = strat.evaluate(candles, 'BTC-USD', '1h');
+      expect(signals.some((s) => s.direction === 'close')).toBe(false);
+      expect(signals.some((s) => s.direction === 'long')).toBe(true);
+    });
+  });
+
   // ---- signal fields ------------------------------------------------------
 
   describe('signal fields', () => {

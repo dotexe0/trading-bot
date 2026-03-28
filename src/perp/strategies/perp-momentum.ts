@@ -50,6 +50,11 @@ export class PerpMomentumStrategy implements IStrategy {
   private readonly fundingRateProvider: () => number | null;
   private readonly maxHoldCandles: number;
 
+  // ── Position state (mutable — tracks open position across candle calls) ──
+  private _openDirection: 'long' | 'short' | null = null;
+  private _entryLevel: number = 0;   // resistanceLevel for long, supportLevel for short
+  private _candlesHeld: number = 0;
+
   constructor(config: PerpMomentumParams) {
     this.breakoutWindow = config.breakoutWindow;
     this.volumeWindow = config.volumeWindow;
