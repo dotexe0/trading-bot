@@ -81,16 +81,11 @@ export class PerpMomentumStrategy implements IStrategy {
     // 1. Length guard
     if (candles.length < this.minCandles) return [];
 
-    // 2. No regime filter — perp strategies activate in all market conditions
-
-    // 3. Build priorCandles — exclude current candle so Highest/Lowest gives
-    //    the prior N-candle resistance/support level
+    // 2. Build priorCandles — exclude current candle to avoid lookahead on levels
     const priorCandles = candles.slice(0, -1);
-
-    // 4. Guard: ensure priorCandles has enough data for breakoutWindow
     if (priorCandles.length < this.breakoutWindow) return [];
 
-    // 5. Compute Highest and Lowest on prior candles
+    // 3. Compute Highest and Lowest on prior candles
     const highestResult = this.engine.compute(
       { name: 'Highest', period: this.breakoutWindow },
       priorCandles,
@@ -99,8 +94,6 @@ export class PerpMomentumStrategy implements IStrategy {
       { name: 'Lowest', period: this.breakoutWindow },
       priorCandles,
     );
-
-    // 6. Extract last values as resistance and support levels
     const highestValues = highestResult.values as number[];
     const lowestValues = lowestResult.values as number[];
     if (highestValues.length === 0 || lowestValues.length === 0) return [];
@@ -108,7 +101,45 @@ export class PerpMomentumStrategy implements IStrategy {
     const resistanceLevel = highestValues[highestValues.length - 1];
     const supportLevel = lowestValues[lowestValues.length - 1];
 
-    // 7. Volume SMA inline (DO NOT use engine.compute('SMA') — it uses extractCloses)
+    const lastCandle = candles[candles.length - 1];
+    const currentClose = parseFloat(lastCandle.close);
+    const currentHigh = parseFloat(lastCandle.high);
+    const currentLow = parseFloat(lastCandle.low);
+    const timestamp = lastCandle.timestamp;
+
+    // ── 4. EXIT CHECK — runs before volume gate; exits don't require volume ──
+    if (this._openDirection !== null) {
+      this._candlesHeld++;
+
+      const reversalExit =
+        (this._openDirection === 'long' && currentClose < this._entryLevel) ||
+        (this._openDirection === 'short' && currentClose > this._entryLevel);
+      const timeStop = this._candlesHeld >= this.maxHoldCandles;
+
+      if (reversalExit || timeStop) {
+        const reason = timeStop && !reversalExit ? 'TimeStop' : 'ReversalExit';
+        const capturedEntryLevel = this._entryLevel;
+        this._openDirection = null;
+        this._entryLevel = 0;
+        this._candlesHeld = 0;
+        return [{
+          strategyName: this.name,
+          pair,
+          timeframe,
+          timestamp,
+          direction: 'close',
+          confidence: 1,
+          reasoning: `${reason}: close=${currentClose.toFixed(2)}, entryLevel=${capturedEntryLevel.toFixed(2)}`,
+        }];
+      }
+
+      // Position open, no exit triggered → hold, no new signals
+      return [];
+    }
+
+    // ── 5. ENTRY CHECK — only when no open position ──────────────────────────
+
+    // 6. Volume gate (entry-only)
     const volumes = extractVolumes(candles);
     const recentVolumes = volumes.slice(-this.volumeWindow);
     const avgVolume = recentVolumes.reduce((sum, v) => sum + v, 0) / recentVolumes.length;
@@ -116,55 +147,39 @@ export class PerpMomentumStrategy implements IStrategy {
     const volumeConfirmed = currentVolume >= avgVolume * this.volumeMultiplier;
     if (!volumeConfirmed) return [];
 
-    // 8. Read last candle high and low
-    const lastCandle = candles[candles.length - 1];
-    const currentHigh = parseFloat(lastCandle.high);
-    const currentLow = parseFloat(lastCandle.low);
-
-    const signals: Signal[] = [];
-    const timestamp = lastCandle.timestamp;
-
-    // 9. Get funding rate once (synchronous, tournament-safe)
+    // 7. Get funding rate once (synchronous, tournament-safe)
     const fundingRate = this.fundingRateProvider();
 
-    // 10. LONG signal: current high breaks above prior resistance
+    const signals: Signal[] = [];
+
+    // 8. LONG entry: current high breaks above prior resistance
     if (currentHigh > resistanceLevel) {
       const rawConfidence = Math.min((currentHigh - resistanceLevel) / resistanceLevel * 20, 1);
-      const { confidence, fundingNote } = this._applyFundingAdjustment(
-        rawConfidence,
-        'long',
-        fundingRate,
-      );
+      const { confidence, fundingNote } = this._applyFundingAdjustment(rawConfidence, 'long', fundingRate);
       const baseReasoning = `Breakout above ${this.breakoutWindow}-candle high ${resistanceLevel.toFixed(2)}. High=${currentHigh.toFixed(2)}, Volume=${currentVolume.toFixed(0)} (${(currentVolume / avgVolume).toFixed(2)}x avg)`;
       signals.push({
-        strategyName: this.name,
-        pair,
-        timeframe,
-        timestamp,
-        direction: 'long',
-        confidence,
+        strategyName: this.name, pair, timeframe, timestamp,
+        direction: 'long', confidence,
         reasoning: fundingNote ? `${baseReasoning}. ${fundingNote}` : baseReasoning,
       });
+      this._openDirection = 'long';
+      this._entryLevel = resistanceLevel;
+      this._candlesHeld = 0;
     }
 
-    // 11. SHORT signal: current low breaks below prior support
-    if (currentLow < supportLevel) {
+    // 9. SHORT entry: current low breaks below prior support
+    if (currentLow < supportLevel && this._openDirection === null) {
       const rawConfidence = Math.min((supportLevel - currentLow) / supportLevel * 20, 1);
-      const { confidence, fundingNote } = this._applyFundingAdjustment(
-        rawConfidence,
-        'short',
-        fundingRate,
-      );
+      const { confidence, fundingNote } = this._applyFundingAdjustment(rawConfidence, 'short', fundingRate);
       const baseReasoning = `Breakdown below ${this.breakoutWindow}-candle low ${supportLevel.toFixed(2)}. Low=${currentLow.toFixed(2)}, Volume=${currentVolume.toFixed(0)} (${(currentVolume / avgVolume).toFixed(2)}x avg)`;
       signals.push({
-        strategyName: this.name,
-        pair,
-        timeframe,
-        timestamp,
-        direction: 'short',
-        confidence,
+        strategyName: this.name, pair, timeframe, timestamp,
+        direction: 'short', confidence,
         reasoning: fundingNote ? `${baseReasoning}. ${fundingNote}` : baseReasoning,
       });
+      this._openDirection = 'short';
+      this._entryLevel = supportLevel;
+      this._candlesHeld = 0;
     }
 
     return signals;

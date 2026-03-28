@@ -166,8 +166,12 @@ describe('PerpMomentumStrategy', () => {
     });
 
     it('generates short signal on downward breakdown with volume spike — no regime required', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const candles = makeBreakdownCandles(8);
-      const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+      const signals = strat.evaluate(candles, 'BTC-USD', '1h');
 
       const shortSignals = signals.filter((s) => s.direction === 'short');
       expect(shortSignals.length).toBeGreaterThanOrEqual(1);
@@ -179,23 +183,30 @@ describe('PerpMomentumStrategy', () => {
     });
 
     it('generates signals in any regime (TRENDING, RANGING, VOLATILE)', () => {
-      const candles = makeBreakoutCandles(8);
-
       // All three regimes should produce signals (no regime filter)
       for (const regime of [MarketRegime.TRENDING, MarketRegime.RANGING, MarketRegime.VOLATILE]) {
-        const signals = strategy.evaluate(candles, 'BTC-USD', '1h', undefined, regime);
+        const strat = new PerpMomentumStrategy({
+          breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+          fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+        });
+        const candles = makeBreakoutCandles(8);
+        const signals = strat.evaluate(candles, 'BTC-USD', '1h', undefined, regime);
         expect(signals.length).toBeGreaterThanOrEqual(1);
       }
     });
 
     it('returns empty when no volume spike (no breakout even with price move)', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const closes = Array(8).fill(100) as number[];
       const highs = Array(8).fill(101) as number[];
       const lows = Array(8).fill(99) as number[];
       const volumes = Array(8).fill(100) as number[];
       highs[7] = 130; // price breakout exists but no volume spike
       const candles = makeCandles({ closes, highs, lows, volumes });
-      const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+      const signals = strat.evaluate(candles, 'BTC-USD', '1h');
       expect(signals).toEqual([]);
     });
   });
@@ -420,8 +431,18 @@ describe('PerpMomentumStrategy', () => {
         timestamp: 1_700_000_000_000 + 8 * 3_600_000,
       }))];
 
-      const signalsBase = strategy.evaluate(baseCandles, 'BTC-USD', '1h');
-      const signalsSliced = strategy.evaluate(
+      // Use fresh instances to avoid shared state pollution between calls
+      const stratBase = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+      const stratSliced = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+
+      const signalsBase = stratBase.evaluate(baseCandles, 'BTC-USD', '1h');
+      const signalsSliced = stratSliced.evaluate(
         extendedCandles.slice(0, baseCandles.length),
         'BTC-USD',
         '1h',
@@ -430,11 +451,14 @@ describe('PerpMomentumStrategy', () => {
       expect(signalsBase).toEqual(signalsSliced);
     });
 
-    it('evaluate with N candles then same N candles again produces identical results (stateless)', () => {
+    it('evaluate with fresh instance produces long on first breakout call', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const candles = makeBreakoutCandles(8);
-      const result1 = strategy.evaluate(candles, 'BTC-USD', '1h');
-      const result2 = strategy.evaluate(candles, 'BTC-USD', '1h');
-      expect(result1).toEqual(result2);
+      const result = strat.evaluate(candles, 'BTC-USD', '1h');
+      expect(result.some((s) => s.direction === 'long')).toBe(true);
     });
 
     it('evaluate with N candles then N+1 candles: signal at N is consistent', () => {
@@ -453,8 +477,18 @@ describe('PerpMomentumStrategy', () => {
       const candlesN = makeCandles({ closes: closesN, highs: highsN, lows: lowsN, volumes: volumesN });
       const candlesN1 = makeCandles({ closes: closesN1, highs: highsN1, lows: lowsN1, volumes: volumesN1 });
 
-      const signalN = strategy.evaluate(candlesN, 'BTC-USD', '1h');
-      const signalN1 = strategy.evaluate(
+      // Use fresh instances to avoid state pollution
+      const stratN = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+      const stratN1 = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+
+      const signalN = stratN.evaluate(candlesN, 'BTC-USD', '1h');
+      const signalN1 = stratN1.evaluate(
         candlesN1.slice(0, closesN.length),
         'BTC-USD',
         '1h',
@@ -468,14 +502,26 @@ describe('PerpMomentumStrategy', () => {
   // ---- edge cases ---------------------------------------------------------
 
   describe('edge cases', () => {
-    it('is deterministic (same input → same output)', () => {
+    it('is deterministic (same input on fresh instances → same output)', () => {
       const candles = makeBreakoutCandles(8);
-      const result1 = strategy.evaluate(candles, 'BTC-USD', '1h');
-      const result2 = strategy.evaluate(candles, 'BTC-USD', '1h');
+      const strat1 = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+      const strat2 = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+      const result1 = strat1.evaluate(candles, 'BTC-USD', '1h');
+      const result2 = strat2.evaluate(candles, 'BTC-USD', '1h');
       expect(result1).toEqual(result2);
     });
 
     it('confidence is clamped to [0.01, 1.0]', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const closes = Array(8).fill(100) as number[];
       const highs = Array(8).fill(101) as number[];
       const lows = Array(8).fill(99) as number[];
@@ -483,7 +529,7 @@ describe('PerpMomentumStrategy', () => {
       highs[7] = 200; // massive breakout
       volumes[7] = 500;
       const candles = makeCandles({ closes, highs, lows, volumes });
-      const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+      const signals = strat.evaluate(candles, 'BTC-USD', '1h');
       for (const s of signals) {
         expect(s.confidence).toBeGreaterThanOrEqual(0.01);
         expect(s.confidence).toBeLessThanOrEqual(1);
@@ -492,6 +538,10 @@ describe('PerpMomentumStrategy', () => {
 
     it('returns empty when priorCandles.length < breakoutWindow', () => {
       // Exactly minCandles=6 candles: priorCandles has 5 (= breakoutWindow), should work
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const closes = Array(6).fill(100) as number[];
       const highs = Array(6).fill(101) as number[];
       const lows = Array(6).fill(99) as number[];
@@ -499,7 +549,7 @@ describe('PerpMomentumStrategy', () => {
       highs[5] = 130;
       volumes[5] = 300;
       const candles = makeCandles({ closes, highs, lows, volumes });
-      const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+      const signals = strat.evaluate(candles, 'BTC-USD', '1h');
       // priorCandles has exactly 5 elements = breakoutWindow, should produce signal
       expect(signals.length).toBeGreaterThanOrEqual(1);
     });
@@ -518,14 +568,151 @@ describe('PerpMomentumStrategy', () => {
       expect(signals.some((s) => s.direction === 'close')).toBe(false);
       expect(signals.some((s) => s.direction === 'long')).toBe(true);
     });
+
+    it('emits close when long and close drops back below entry resistance level', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+        maxHoldCandles: 20,
+      });
+
+      // Enter long: breakout candles where prior highs = 101, so resistanceLevel = 101
+      const entryCandles = makeBreakoutCandles(8);
+      const entrySignals = strat.evaluate(entryCandles, 'BTC-USD', '1h');
+      expect(entrySignals.some((s) => s.direction === 'long')).toBe(true);
+
+      // Next candle: close = 99 (below resistanceLevel 101) → should emit close
+      const exitCandles: Candle[] = [
+        ...entryCandles,
+        {
+          pair: 'BTC-USD' as TradingPair,
+          timeframe: '1h' as Timeframe,
+          timestamp: entryCandles[entryCandles.length - 1].timestamp + 3_600_000,
+          open: '99', high: '100', low: '98', close: '99',
+          volume: '100',
+        },
+      ];
+      const exitSignals = strat.evaluate(exitCandles, 'BTC-USD', '1h');
+      expect(exitSignals.some((s) => s.direction === 'close')).toBe(true);
+      expect(exitSignals.some((s) => s.direction === 'long')).toBe(false);
+    });
+
+    it('emits close when short and close rises back above entry support level', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+        maxHoldCandles: 20,
+      });
+
+      // Enter short: breakdown candles where prior lows = 99, so supportLevel = 99
+      const entryCandles = makeBreakdownCandles(8);
+      const entrySignals = strat.evaluate(entryCandles, 'BTC-USD', '1h');
+      expect(entrySignals.some((s) => s.direction === 'short')).toBe(true);
+
+      // Next candle: close = 101 (above supportLevel 99) → should emit close
+      const exitCandles: Candle[] = [
+        ...entryCandles,
+        {
+          pair: 'BTC-USD' as TradingPair,
+          timeframe: '1h' as Timeframe,
+          timestamp: entryCandles[entryCandles.length - 1].timestamp + 3_600_000,
+          open: '101', high: '102', low: '100', close: '101',
+          volume: '100',
+        },
+      ];
+      const exitSignals = strat.evaluate(exitCandles, 'BTC-USD', '1h');
+      expect(exitSignals.some((s) => s.direction === 'close')).toBe(true);
+      expect(exitSignals.some((s) => s.direction === 'short')).toBe(false);
+      const closeSignal = exitSignals.find((s) => s.direction === 'close')!;
+      expect(closeSignal.reasoning).toContain('ReversalExit');
+      expect(closeSignal.reasoning).toContain('101.00'); // capturedEntryLevel = resistanceLevel = 101
+    });
+
+    it('emits close after maxHoldCandles exceeded even when price stays above entry level', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+        maxHoldCandles: 3,
+      });
+
+      // Enter long
+      const entryCandles = makeBreakoutCandles(8);
+      strat.evaluate(entryCandles, 'BTC-USD', '1h');
+
+      // Hold 3 candles above entry level (close=130 > resistanceLevel=101)
+      let candles = entryCandles;
+      let lastSignals: Signal[] = [];
+      for (let i = 0; i < 3; i++) {
+        candles = [
+          ...candles,
+          {
+            pair: 'BTC-USD' as TradingPair,
+            timeframe: '1h' as Timeframe,
+            timestamp: candles[candles.length - 1].timestamp + 3_600_000,
+            open: '130', high: '131', low: '129', close: '130',
+            volume: '100',
+          },
+        ];
+        lastSignals = strat.evaluate(candles, 'BTC-USD', '1h');
+      }
+      // After 3 holding candles with maxHoldCandles=3, the 3rd should emit close
+      expect(lastSignals.some((s) => s.direction === 'close')).toBe(true);
+      const closeSignal = lastSignals.find((s) => s.direction === 'close')!;
+      expect(closeSignal.reasoning).toContain('TimeStop');
+      expect(closeSignal.reasoning).toContain('101.00'); // capturedEntryLevel = resistanceLevel = 101
+    });
+
+    it('after close, re-entry fires on the next qualifying breakout candle', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+        maxHoldCandles: 20,
+      });
+
+      // Enter long
+      const entryCandles = makeBreakoutCandles(8);
+      strat.evaluate(entryCandles, 'BTC-USD', '1h');
+
+      // Exit: close drops below entry level
+      const exitCandles: Candle[] = [
+        ...entryCandles,
+        {
+          pair: 'BTC-USD' as TradingPair,
+          timeframe: '1h' as Timeframe,
+          timestamp: entryCandles[entryCandles.length - 1].timestamp + 3_600_000,
+          open: '99', high: '100', low: '98', close: '99',
+          volume: '100',
+        },
+      ];
+      strat.evaluate(exitCandles, 'BTC-USD', '1h');
+
+      // Re-entry: new breakout candle with volume spike — should fire long again
+      const reentryCandles: Candle[] = [
+        ...exitCandles,
+        {
+          pair: 'BTC-USD' as TradingPair,
+          timeframe: '1h' as Timeframe,
+          timestamp: exitCandles[exitCandles.length - 1].timestamp + 3_600_000,
+          open: '101', high: '140', low: '100', close: '135',
+          volume: '400',
+        },
+      ];
+      const reentrySignals = strat.evaluate(reentryCandles, 'BTC-USD', '1h');
+      expect(reentrySignals.some((s) => s.direction === 'long')).toBe(true);
+      expect(reentrySignals.some((s) => s.direction === 'close')).toBe(false);
+    });
   });
 
   // ---- signal fields ------------------------------------------------------
 
   describe('signal fields', () => {
     it('strategyName is perp-momentum on all signals', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const candles = makeBreakoutCandles(8);
-      const signals = strategy.evaluate(candles, 'BTC-USD', '1h');
+      const signals = strat.evaluate(candles, 'BTC-USD', '1h');
       expect(signals.length).toBeGreaterThanOrEqual(1);
       for (const s of signals) {
         expect(s.strategyName).toBe('perp-momentum');
@@ -533,16 +720,24 @@ describe('PerpMomentumStrategy', () => {
     });
 
     it('reasoning contains Breakout for longs and Breakdown for shorts', () => {
+      const stratLong = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const longCandles = makeBreakoutCandles(8);
-      const longSignals = strategy.evaluate(longCandles, 'BTC-USD', '1h');
+      const longSignals = stratLong.evaluate(longCandles, 'BTC-USD', '1h');
       const longs = longSignals.filter((s) => s.direction === 'long');
       expect(longs.length).toBeGreaterThanOrEqual(1);
       for (const s of longs) {
         expect(s.reasoning).toContain('Breakout');
       }
 
+      const stratShort = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const shortCandles = makeBreakdownCandles(8);
-      const shortSignals = strategy.evaluate(shortCandles, 'BTC-USD', '1h');
+      const shortSignals = stratShort.evaluate(shortCandles, 'BTC-USD', '1h');
       const shorts = shortSignals.filter((s) => s.direction === 'short');
       expect(shorts.length).toBeGreaterThanOrEqual(1);
       for (const s of shorts) {
@@ -551,6 +746,10 @@ describe('PerpMomentumStrategy', () => {
     });
 
     it('timestamp matches last candle timestamp and pair/timeframe propagated', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
       const ethCandles = makeCandles({
         closes: Array(8).fill(100),
         highs: (() => { const h = Array(8).fill(101) as number[]; h[7] = 130; return h; })(),
@@ -559,7 +758,7 @@ describe('PerpMomentumStrategy', () => {
         pair: 'ETH-USD',
         timeframe: '4h',
       });
-      const signals = strategy.evaluate(ethCandles, 'ETH-USD', '4h');
+      const signals = strat.evaluate(ethCandles, 'ETH-USD', '4h');
       const expectedTs = ethCandles[ethCandles.length - 1].timestamp;
       expect(signals.length).toBeGreaterThanOrEqual(1);
       for (const s of signals) {
