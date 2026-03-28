@@ -33,6 +33,8 @@ interface PerpMomentumParams {
    * Returns null in tournament/paper mode (no adjustment applied).
    */
   fundingRateProvider: () => number | null;
+  /** Max candles to hold a position before forcing close (time stop). Default: 20. */
+  maxHoldCandles?: number;
 }
 
 export class PerpMomentumStrategy implements IStrategy {
@@ -46,6 +48,7 @@ export class PerpMomentumStrategy implements IStrategy {
   private readonly volumeMultiplier: number;
   private readonly fundingThreshold: number;
   private readonly fundingRateProvider: () => number | null;
+  private readonly maxHoldCandles: number;
 
   constructor(config: PerpMomentumParams) {
     this.breakoutWindow = config.breakoutWindow;
@@ -53,6 +56,7 @@ export class PerpMomentumStrategy implements IStrategy {
     this.volumeMultiplier = config.volumeMultiplier;
     this.fundingThreshold = config.fundingThreshold;
     this.fundingRateProvider = config.fundingRateProvider;
+    this.maxHoldCandles = config.maxHoldCandles ?? 20;
     // Needs enough candles for BOTH Highest/Lowest AND volume SMA.
     // The +1 is required so priorCandles = candles.slice(0, -1) has at least breakoutWindow candles.
     this.minCandles = Math.max(this.breakoutWindow, this.volumeWindow) + 1;

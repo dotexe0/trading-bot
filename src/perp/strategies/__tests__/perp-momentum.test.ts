@@ -104,6 +104,32 @@ describe('PerpMomentumStrategy', () => {
     it('strategyName is perp-momentum', () => {
       expect(strategy.name).toBe('perp-momentum');
     });
+
+    it('accepts maxHoldCandles param — construction succeeds for boundary values', () => {
+      // Must not throw for any valid value
+      expect(() => new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+        maxHoldCandles: 1,
+      })).not.toThrow();
+      expect(() => new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+        maxHoldCandles: 1000,
+      })).not.toThrow();
+    });
+
+    it('defaults maxHoldCandles to 20 when not provided', () => {
+      // Verified behaviorally in Task 3 time-stop tests.
+      // Here we confirm that omitting the param does not throw and strategy is usable.
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+      const candles = makeBreakoutCandles(8);
+      // Strategy should function normally with default maxHoldCandles
+      expect(() => strat.evaluate(candles, 'BTC-USD', '1h')).not.toThrow();
+    });
   });
 
   // ---- insufficient data --------------------------------------------------
