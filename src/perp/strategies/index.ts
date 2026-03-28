@@ -43,6 +43,7 @@ export function createPerpRegistry(): StrategyRegistry {
       volumeMultiplier: cfg.volumeMultiplier ?? 1.5,
       fundingThreshold: cfg.fundingThreshold ?? 0.01,
       fundingRateProvider: () => null,
+      maxHoldCandles: (cfg as Record<string, unknown>).maxHoldCandles as number | undefined,
     });
   });
 
@@ -107,6 +108,7 @@ export function createLivePerpRegistry(
       volumeMultiplier: cfg.volumeMultiplier ?? 1.5,
       fundingThreshold: cfg.fundingThreshold ?? 0.01,
       fundingRateProvider,
+      maxHoldCandles: (cfg as Record<string, unknown>).maxHoldCandles as number | undefined,
     });
   });
 

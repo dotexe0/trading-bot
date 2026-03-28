@@ -3,6 +3,7 @@ import type { Candle, TradingPair, Timeframe } from '../../../core/types.js';
 import type { Signal } from '../../../strategies/types.js';
 import { MarketRegime } from '../../../regime/types.js';
 import { PerpMomentumStrategy } from '../perp-momentum.js';
+import { createPerpRegistry } from '../index.js';
 
 // -- Helpers ----------------------------------------------------------------
 
@@ -767,5 +768,32 @@ describe('PerpMomentumStrategy', () => {
         expect(s.timeframe).toBe('4h');
       }
     });
+  });
+});
+
+describe('registry integration', () => {
+  it('createPerpRegistry produces a perp-momentum strategy that emits close signals', () => {
+    const registry = createPerpRegistry();
+    const strat = registry.create({ strategy: 'perp-momentum' });
+
+    // Registry defaults: breakoutWindow=20, volumeWindow=20 → minCandles=21
+    // Use 22 candles so the last candle is the breakout candle evaluated against 21 prior.
+    const entryCandles = makeBreakoutCandles(22);
+    const entrySigs = strat.evaluate(entryCandles, 'BTC-USD', '1h');
+    expect(entrySigs.some((s) => s.direction === 'long')).toBe(true);
+
+    // Exit: price drops below resistance
+    const exitCandles: Candle[] = [
+      ...entryCandles,
+      {
+        pair: 'BTC-USD' as TradingPair,
+        timeframe: '1h' as Timeframe,
+        timestamp: entryCandles[entryCandles.length - 1].timestamp + 3_600_000,
+        open: '99', high: '100', low: '98', close: '99',
+        volume: '100',
+      },
+    ];
+    const exitSigs = strat.evaluate(exitCandles, 'BTC-USD', '1h');
+    expect(exitSigs.some((s) => s.direction === 'close')).toBe(true);
   });
 });
