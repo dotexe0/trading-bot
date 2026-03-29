@@ -554,6 +554,49 @@ describe('PaperPerpEngine', () => {
       engine.stop();
     });
 
+    it('emits markPriceUpdate after strategy-driven open — instrument uses config.btcProductId not candle.pair', async () => {
+      // Regression test: position was opened with candle.pair ('BTC-USD') instead of
+      // config.btcProductId ('BIP-20DEC30-CDE'), causing the instrument guard in
+      // _handleMarkPrice to never match → P&L never updated.
+      const mockStrategy: IStrategy = {
+        name: 'mock-long',
+        minCandles: 1,
+        requiredIndicators: [],
+        evaluate: () => [{
+          strategyName: 'mock-long',
+          pair: 'BTC-USD',
+          timeframe: '1h' as const,
+          timestamp: Date.now(),
+          direction: 'long' as const,
+          confidence: 1,
+          reasoning: 'test',
+        }],
+      };
+
+      const engine = new PaperPerpEngine({ intxClient, stateStore, config, initialStrategy: mockStrategy });
+      engine.start();
+
+      const updates: Array<{ unrealizedPnl: string; markPrice: string }> = [];
+      engine.on('markPriceUpdate', (payload) => updates.push(payload));
+
+      // Open position via strategy signal path (onCandle → evaluate → openPaperPosition)
+      engine.onCandle(makeCandle('50000', 0));
+      // Allow async openPaperPosition microtask to settle
+      await new Promise<void>((r) => setTimeout(r, 0));
+
+      // Confirm position was opened (createSession should have been called)
+      expect(stateStore.createSession).toHaveBeenCalledTimes(1);
+
+      // Fire mark price with the perp product ID (not 'BTC-USD')
+      intxClient.emit('markPrice', makeMarkPriceEvt(config.btcProductId, '51000'));
+
+      // Position must receive P&L update — instrument guard must pass
+      expect(updates).toHaveLength(1);
+      expect(parseFloat(updates[0].unrealizedPnl)).toBeGreaterThan(0);
+
+      engine.stop();
+    });
+
     it('does NOT emit markPriceUpdate when no position is open', () => {
       const engine = new PaperPerpEngine({ intxClient, stateStore, config });
       engine.start();
