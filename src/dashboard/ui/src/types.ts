@@ -249,6 +249,27 @@ export interface TournamentLeaderboard {
   leaderboard: TournamentLeaderboardEntry[];
 }
 
+// ── Perp Tournament Leaderboard ───────────────────────────────────────
+
+export interface PerpTournamentEntry {
+  rank: number;
+  strategyName: string;
+  strategyConfig: Record<string, unknown>;
+  isSharpe: number;
+  oosSharpe: number;
+  robustnessRatio: number;
+  oosTradeCount: number;
+  oosWinRate: number;
+  disqualified: boolean;
+  disqualifyReason: string | null;
+}
+
+export interface PerpTournamentLeaderboard {
+  runAt: number;
+  strategiesEvaluated: number;
+  leaderboard: PerpTournamentEntry[];
+}
+
 // ── Gate Status ──────────────────────────────────────────────────────
 
 export interface GateStatusData {
