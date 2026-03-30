@@ -141,11 +141,12 @@ export class PerpStateStore {
     updates: Partial<
       Pick<
         PerpSession,
-        'markPrice' | 'unrealizedPnl' | 'cumulativeFundingCost' | 'status' | 'closedAt' | 'closeReason'
+        'instrument' | 'markPrice' | 'unrealizedPnl' | 'cumulativeFundingCost' | 'status' | 'closedAt' | 'closeReason'
       >
     >,
   ): void {
     const setFields: Record<string, unknown> = {};
+    if (updates.instrument !== undefined) setFields['instrument'] = updates.instrument;
     if (updates.markPrice !== undefined) setFields['markPrice'] = updates.markPrice;
     if (updates.unrealizedPnl !== undefined) setFields['unrealizedPnl'] = updates.unrealizedPnl;
     if (updates.cumulativeFundingCost !== undefined) setFields['cumulativeFundingCost'] = updates.cumulativeFundingCost;

@@ -155,6 +155,7 @@ function makeStateStore(): PerpStateStore & {
   return {
     createSession: vi.fn(),
     getOpenSession: vi.fn().mockReturnValue(null),
+    getAllOpenSessions: vi.fn().mockReturnValue([]),
     updateSession: vi.fn(),
     persistOrder: vi.fn(),
     getOrderByClientId: vi.fn().mockReturnValue(null),
@@ -906,6 +907,144 @@ describe('feed health guard', () => {
 
     // Verify getOpenSession was called with the correct instrument
     expect(stateStore.getOpenSession).toHaveBeenCalledWith('BTC-PERP');
+
+    engine.stop();
+  });
+});
+
+// ── Startup re-hydration ───────────────────────────────────────────────────
+
+describe('startup re-hydration', () => {
+  let intxClient: ReturnType<typeof makeIntxClient>;
+  let stateStore: ReturnType<typeof makeStateStore>;
+  const config = makeConfig();
+
+  function makeOpenSession(overrides: Partial<{ id: string; instrument: string; direction: 'long' | 'short'; entryPrice: string }> = {}) {
+    return {
+      id: 'session-001',
+      instrument: 'BIP-20DEC30-CDE',
+      direction: 'long' as const,
+      entryPrice: '50000',
+      size: '0.01',
+      leverage: 5,
+      liquidationPrice: '41665.00',
+      maintenanceMarginRate: '0.0333',
+      status: 'open' as const,
+      openedAt: Date.now() - 60000,
+      ...overrides,
+    };
+  }
+
+  beforeEach(() => {
+    intxClient = makeIntxClient();
+    stateStore = makeStateStore();
+  });
+
+  it('restores currentPosition from DB when start() finds an open session', () => {
+    const session = makeOpenSession();
+    stateStore.getAllOpenSessions = vi.fn().mockReturnValue([session]);
+
+    const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+    engine.start();
+
+    expect(engine.getCurrentSession()).not.toBeNull();
+    expect(engine.getCurrentSession()!.id).toBe('session-001');
+    expect(engine.isPositionOpen()).toBe(true);
+
+    engine.stop();
+  });
+
+  it('does nothing when no open sessions exist in DB', () => {
+    const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+    engine.start();
+
+    expect(engine.getCurrentSession()).toBeNull();
+    expect(engine.isPositionOpen()).toBe(false);
+
+    engine.stop();
+  });
+
+  it('corrects BTC-USD instrument to config.btcProductId on re-hydration', () => {
+    const session = makeOpenSession({ instrument: 'BTC-USD' });
+    stateStore.getAllOpenSessions = vi.fn().mockReturnValue([session]);
+
+    const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+    engine.start();
+
+    expect(engine.getCurrentSession()!.instrument).toBe(config.btcProductId);
+    expect(stateStore.updateSession).toHaveBeenCalledWith(
+      'session-001',
+      expect.objectContaining({ instrument: config.btcProductId }),
+    );
+
+    engine.stop();
+  });
+
+  it('corrects ETH-USD instrument to config.ethProductId on re-hydration', () => {
+    const session = makeOpenSession({ instrument: 'ETH-USD' });
+    stateStore.getAllOpenSessions = vi.fn().mockReturnValue([session]);
+
+    const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+    engine.start();
+
+    expect(engine.getCurrentSession()!.instrument).toBe(config.ethProductId);
+
+    engine.stop();
+  });
+
+  it('emits markPriceUpdate after re-hydration when mark price arrives for restored instrument', () => {
+    const session = makeOpenSession({ instrument: 'BTC-USD' }); // will be corrected to btcProductId
+    stateStore.getAllOpenSessions = vi.fn().mockReturnValue([session]);
+
+    const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+    engine.start();
+
+    const updates: Array<{ unrealizedPnl: string }> = [];
+    engine.on('markPriceUpdate', (p) => updates.push(p));
+
+    intxClient.emit('markPrice', makeMarkPriceEvt(config.btcProductId, '51000'));
+
+    expect(updates).toHaveLength(1);
+    expect(parseFloat(updates[0].unrealizedPnl)).toBeGreaterThan(0);
+
+    engine.stop();
+  });
+
+  it('closes orphaned sessions (all but most recent) on startup', () => {
+    const older = makeOpenSession({ id: 'session-old', openedAt: Date.now() - 120000 });
+    const newer = makeOpenSession({ id: 'session-new', openedAt: Date.now() - 60000 });
+    stateStore.getAllOpenSessions = vi.fn().mockReturnValue([older, newer]);
+
+    const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+    engine.start();
+
+    // Only the most recent session is restored
+    expect(engine.getCurrentSession()!.id).toBe('session-new');
+
+    // Orphaned session is closed
+    expect(stateStore.updateSession).toHaveBeenCalledWith(
+      'session-old',
+      expect.objectContaining({ status: 'closed', closeReason: 'engine-restart' }),
+    );
+
+    engine.stop();
+  });
+
+  it('restores strategy position state via restorePosition() when strategy supports it', () => {
+    const session = makeOpenSession({ direction: 'long', entryPrice: '50000' });
+    stateStore.getAllOpenSessions = vi.fn().mockReturnValue([session]);
+
+    const restorePosition = vi.fn();
+    const mockStrategy = {
+      name: 'mock', minCandles: 1, requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+      restorePosition,
+    };
+
+    const engine = new PaperPerpEngine({ intxClient, stateStore, config, initialStrategy: mockStrategy as any });
+    engine.start();
+
+    expect(restorePosition).toHaveBeenCalledWith('long', '50000');
 
     engine.stop();
   });

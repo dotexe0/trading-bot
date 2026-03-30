@@ -258,6 +258,53 @@ export class PaperPerpEngine extends EventEmitter {
     };
     this.intxClient.on('fundingRate', this._onFundingRate);
 
+    // Re-hydrate from DB: recover or clean up sessions left open by a previous run
+    const openSessions = this.stateStore.getAllOpenSessions();
+    if (openSessions.length > 0) {
+      // Sort descending by openedAt — keep the most recent, close the rest as orphans
+      openSessions.sort((a, b) => b.openedAt - a.openedAt);
+
+      for (const orphan of openSessions.slice(1)) {
+        this.stateStore.updateSession(orphan.id, {
+          status: 'closed',
+          closedAt: Date.now(),
+          closeReason: 'engine-restart',
+        });
+        log.info({ sessionId: orphan.id, instrument: orphan.instrument }, '[PAPER] Closed orphaned session on restart');
+      }
+
+      const session = openSessions[0];
+
+      // Correct instrument if session was opened with a raw trading pair (pre-fix bug)
+      let correctedInstrument = session.instrument;
+      if (session.instrument === 'BTC-USD') {
+        correctedInstrument = this.config.btcProductId;
+      } else if (session.instrument === 'ETH-USD') {
+        correctedInstrument = this.config.ethProductId;
+      }
+      if (correctedInstrument !== session.instrument) {
+        this.stateStore.updateSession(session.id, { instrument: correctedInstrument });
+        session.instrument = correctedInstrument;
+        log.info({ sessionId: session.id, correctedInstrument }, '[PAPER] Corrected session instrument on restart');
+      }
+
+      this.currentPosition = { session, paperEntryPrice: session.entryPrice };
+
+      // Restore strategy position state so exit logic can trigger
+      if (
+        this.strategy &&
+        typeof (this.strategy as Record<string, unknown>)['restorePosition'] === 'function'
+      ) {
+        (this.strategy as { restorePosition: (d: 'long' | 'short', e: string) => void })
+          .restorePosition(session.direction, session.entryPrice);
+      }
+
+      log.info(
+        { sessionId: session.id, instrument: session.instrument, direction: session.direction },
+        '[PAPER] Re-hydrated open position from DB on startup',
+      );
+    }
+
     log.info('PaperPerpEngine started');
   }
 

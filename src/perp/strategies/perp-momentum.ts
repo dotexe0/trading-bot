@@ -186,6 +186,17 @@ export class PerpMomentumStrategy implements IStrategy {
   }
 
   /**
+   * Restore in-memory position state after an engine restart.
+   * Called by PaperPerpEngine.start() when re-hydrating an open session from DB.
+   * _candlesHeld resets to 0 — gives the restored position the full maxHoldCandles window.
+   */
+  restorePosition(direction: 'long' | 'short', entryPrice: string): void {
+    this._openDirection = direction;
+    this._entryLevel = parseFloat(entryPrice);
+    this._candlesHeld = 0;
+  }
+
+  /**
    * Applies funding rate adjustment to raw confidence.
    * Returns adjusted confidence (clamped to [0.01, 1.0]) and optional funding note.
    *
