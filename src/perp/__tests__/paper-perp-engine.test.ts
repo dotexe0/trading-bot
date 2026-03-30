@@ -132,6 +132,7 @@ function makeConfig(overrides: Partial<IntxConfig> = {}): IntxConfig {
 function makeIntxClient(): IntxClient & EventEmitter & {
   placeOrder: ReturnType<typeof vi.fn>;
   cancelOrder: ReturnType<typeof vi.fn>;
+  fetchFundingRate: ReturnType<typeof vi.fn>;
 } {
   const emitter = new EventEmitter();
   const placeOrder = vi.fn().mockResolvedValue({
@@ -142,7 +143,8 @@ function makeIntxClient(): IntxClient & EventEmitter & {
     fee: '0.5',
   });
   const cancelOrder = vi.fn().mockResolvedValue(undefined);
-  return Object.assign(emitter, { placeOrder, cancelOrder }) as any;
+  const fetchFundingRate = vi.fn().mockResolvedValue(0);
+  return Object.assign(emitter, { placeOrder, cancelOrder, fetchFundingRate }) as any;
 }
 
 function makeStateStore(): PerpStateStore & {
@@ -1047,5 +1049,130 @@ describe('startup re-hydration', () => {
     expect(restorePosition).toHaveBeenCalledWith('long', '50000');
 
     engine.stop();
+  });
+});
+
+// ── Paper funding simulation ───────────────────────────────────────────────
+
+describe('paper funding simulation', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('emits fundingUpdate after one interval when position is open and rate is non-zero', async () => {
+    const intxClient = makeIntxClient();
+    const stateStore = makeStateStore();
+    const config = makeConfig();
+    intxClient.fetchFundingRate = vi.fn().mockResolvedValue(0.0001); // 0.01% rate
+
+    const engine = new PaperPerpEngine({
+      intxClient, stateStore, config,
+      paperFundingIntervalMs: 1000,
+    });
+    engine.start();
+    await engine.openPaperPosition(config.btcProductId, 'long', '0.01', 5, '80000');
+
+    const updates: any[] = [];
+    engine.on('fundingUpdate', (u) => updates.push(u));
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(updates.length).toBeGreaterThanOrEqual(1);
+    // Long pays when rate > 0 → cumulativeFundingCost is negative
+    expect(parseFloat(updates[0].cumulativeFundingCost)).toBeLessThan(0);
+    engine.stop();
+  });
+
+  it('does not emit fundingUpdate when no position is open', async () => {
+    const intxClient = makeIntxClient();
+    const stateStore = makeStateStore();
+    const config = makeConfig();
+    intxClient.fetchFundingRate = vi.fn().mockResolvedValue(0.0001);
+
+    const engine = new PaperPerpEngine({
+      intxClient, stateStore, config,
+      paperFundingIntervalMs: 1000,
+    });
+    engine.start();
+
+    const fundingUpdatesWithSession: any[] = [];
+    engine.on('fundingUpdate', (u) => { if (u.sessionId !== null) fundingUpdatesWithSession.push(u); });
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(fundingUpdatesWithSession).toHaveLength(0);
+    engine.stop();
+  });
+
+  it('short position receives funding (positive cost) when rate is positive', async () => {
+    const intxClient = makeIntxClient();
+    const stateStore = makeStateStore();
+    const config = makeConfig();
+    intxClient.fetchFundingRate = vi.fn().mockResolvedValue(0.0001);
+
+    const engine = new PaperPerpEngine({
+      intxClient, stateStore, config,
+      paperFundingIntervalMs: 1000,
+    });
+    engine.start();
+    await engine.openPaperPosition(config.btcProductId, 'short', '0.01', 5, '80000');
+
+    const updates: any[] = [];
+    engine.on('fundingUpdate', (u) => updates.push(u));
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(updates.length).toBeGreaterThanOrEqual(1);
+    // Short receives when rate > 0 → cumulativeFundingCost is positive
+    expect(parseFloat(updates[0].cumulativeFundingCost)).toBeGreaterThan(0);
+    engine.stop();
+  });
+
+  it('does not emit when fetchFundingRate returns 0', async () => {
+    const intxClient = makeIntxClient();
+    const stateStore = makeStateStore();
+    const config = makeConfig();
+    intxClient.fetchFundingRate = vi.fn().mockResolvedValue(0);
+
+    const engine = new PaperPerpEngine({
+      intxClient, stateStore, config,
+      paperFundingIntervalMs: 1000,
+    });
+    engine.start();
+    await engine.openPaperPosition(config.btcProductId, 'long', '0.01', 5, '80000');
+
+    const updates: any[] = [];
+    engine.on('fundingUpdate', (u) => { if (u.sessionId !== null) updates.push(u); });
+
+    await vi.advanceTimersByTimeAsync(1000);
+
+    expect(updates).toHaveLength(0);
+    engine.stop();
+  });
+
+  it('clears timer on stop()', async () => {
+    const intxClient = makeIntxClient();
+    const stateStore = makeStateStore();
+    const config = makeConfig();
+    intxClient.fetchFundingRate = vi.fn().mockResolvedValue(0.0001);
+
+    const engine = new PaperPerpEngine({
+      intxClient, stateStore, config,
+      paperFundingIntervalMs: 1000,
+    });
+    engine.start();
+    await engine.openPaperPosition(config.btcProductId, 'long', '0.01', 5, '80000');
+    engine.stop();
+
+    const updates: any[] = [];
+    engine.on('fundingUpdate', (u) => { if (u.sessionId !== null) updates.push(u); });
+
+    // Advance past where timer would have fired — should not fire since stopped
+    await vi.advanceTimersByTimeAsync(5000);
+
+    expect(updates).toHaveLength(0);
   });
 });

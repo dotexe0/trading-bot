@@ -122,6 +122,12 @@ export interface PaperPerpEngineOptions {
   fundingTracker?: FundingRateTracker;
   /** When provided, skips signal evaluation when feed is stale. */
   feedHealthMonitor?: FeedHealthMonitor;
+  /**
+   * Interval between simulated funding payments in ms.
+   * Defaults to 28_800_000 (8 hours) — matches real perpetual funding cadence.
+   * Override to a shorter value in tests.
+   */
+  paperFundingIntervalMs?: number;
 }
 
 // ── Engine ────────────────────────────────────────────────────────────────────
@@ -140,6 +146,8 @@ export class PaperPerpEngine extends EventEmitter {
   private _fundingRateTracker: FundingRateTracker;
   private _fundingDrainInProgress = false;
   private _onFundingRate: ((evt: IntxFundingRateEvent) => void) | null = null;
+  private _paperFundingTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly _paperFundingIntervalMs: number;
 
   // ── Regime auto-switch state ───────────────────────────────────────────────
   /** Active strategy for candle-based signal evaluation (null when onSignal is the signal source). */
@@ -195,6 +203,7 @@ export class PaperPerpEngine extends EventEmitter {
       this.strategyRegistry = options.strategyRegistry ?? null;
     }
     this.feedHealthMonitor = options.feedHealthMonitor;
+    this._paperFundingIntervalMs = options.paperFundingIntervalMs ?? 28_800_000;
   }
 
   // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -213,6 +222,11 @@ export class PaperPerpEngine extends EventEmitter {
 
     this._onFundingRate = (evt: IntxFundingRateEvent) => this._handleFundingRate(evt);
     this.intxClient.on('fundingRate', this._onFundingRate);
+
+    // Paper funding simulation: apply 8h funding payment on each interval
+    this._paperFundingTimer = setInterval(() => {
+      void this._applyPaperFunding();
+    }, this._paperFundingIntervalMs);
 
     // Re-hydrate from DB: recover or clean up sessions left open by a previous run
     const openSessions = this.stateStore.getAllOpenSessions();
@@ -275,6 +289,10 @@ export class PaperPerpEngine extends EventEmitter {
     if (this._onFundingRate) {
       this.intxClient.off('fundingRate', this._onFundingRate);
       this._onFundingRate = null;
+    }
+    if (this._paperFundingTimer) {
+      clearInterval(this._paperFundingTimer);
+      this._paperFundingTimer = null;
     }
     this._started = false;
     log.info('PaperPerpEngine stopped');
@@ -654,6 +672,49 @@ export class PaperPerpEngine extends EventEmitter {
         this._fundingDrainInProgress = false;
       }
     }
+  }
+
+  /**
+   * Simulate one funding payment for the current open position.
+   *
+   * Called by setInterval every paperFundingIntervalMs (default 8 h).
+   * Fetches the live funding rate from the Coinbase REST API and calculates
+   * the dollar payment for the current position size and mark price.
+   *
+   * Sign convention:
+   *   rate > 0 → longs pay shorts: long payment is negative (cost), short is positive (income)
+   *   rate < 0 → shorts pay longs: short payment is negative (cost), long is positive (income)
+   */
+  private async _applyPaperFunding(): Promise<void> {
+    if (!this.currentPosition) return;
+    const session = this.currentPosition.session;
+
+    const rate = await this.intxClient.fetchFundingRate(session.instrument);
+    if (rate === 0) return;
+
+    const markPrice = session.markPrice ?? session.entryPrice;
+    const notional = parseFloat(session.size) * parseFloat(markPrice);
+    const sign = session.direction === 'long' ? -1 : 1;
+    const payment = sign * rate * notional;
+
+    log.info(
+      {
+        sessionId: session.id,
+        instrument: session.instrument,
+        fundingRate: rate,
+        notional: notional.toFixed(2),
+        payment: payment.toFixed(8),
+      },
+      '[PAPER] Simulated funding payment applied',
+    );
+
+    this._handleFundingRate({
+      instrument: 'FCM',
+      fundingRate: payment.toFixed(8),
+      isFinal: true,
+      timestamp: Date.now(),
+      isStale: false,
+    });
   }
 
   // ── Mark price handler ────────────────────────────────────────────────────
