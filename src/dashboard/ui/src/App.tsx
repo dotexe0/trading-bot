@@ -5,6 +5,7 @@ import { EquityCurve } from './components/EquityCurve.js';
 import { PositionsTable } from './components/PositionsTable.js';
 import { TradeHistory } from './components/TradeHistory.js';
 import { StrategiesPanel } from './components/StrategiesPanel.js';
+import { PerpStrategiesPanel } from './components/PerpStrategiesPanel.js';
 import { StrategyConfigEditor } from './components/StrategyConfigEditor.js';
 import { PortfolioHeatMap } from './components/PortfolioHeatMap.js';
 import { RiskPanel } from './components/RiskPanel.js';
@@ -41,6 +42,7 @@ import type {
   SystemHealthPayload,
   TradeData,
   TournamentLeaderboard,
+  PerpTournamentLeaderboard,
 } from './types.js';
 import type { CandlestickData, HistogramData, BaselineData, AreaData, Time } from 'lightweight-charts';
 import type { PriceChartHandle } from './components/PriceChart.js';
@@ -92,6 +94,8 @@ function App(): React.ReactElement {
   const [systemHealth, setSystemHealth] = useState<SystemHealthPayload | null>(null);
   const [tournament, setTournament] = useState<TournamentLeaderboard | null>(null);
   const [availableStrategies, setAvailableStrategies] = useState<string[]>([]);
+  const [perpTournament, setPerpTournament] = useState<PerpTournamentLeaderboard | null>(null);
+  const [activeSection, setActiveSection] = useState<string>('overview');
 
   // ── Chart refs for imperative updates ────────────────────────────
   const priceChartRef = useRef<PriceChartHandle>(null);
@@ -120,6 +124,15 @@ function App(): React.ReactElement {
       if (res.status === 204) { setTournament(null); return; }
       const data = await res.json() as TournamentLeaderboard;
       setTournament(data);
+    } catch { /* non-fatal */ }
+  }, []);
+
+  const fetchPerpTournament = useCallback(async () => {
+    try {
+      const res = await fetch('/api/perp/tournament/latest');
+      if (res.status === 204) { setPerpTournament(null); return; }
+      const data = await res.json() as PerpTournamentLeaderboard;
+      setPerpTournament(data);
     } catch { /* non-fatal */ }
   }, []);
 
@@ -232,12 +245,13 @@ function App(): React.ReactElement {
         } catch { /* API not ready */ }
 
         void fetchTournament();
+        void fetchPerpTournament();
         void fetchAvailableStrategies();
       } catch {
         // API not available yet — dashboard shows empty state
       }
     })();
-  }, [fetchTournament, fetchAvailableStrategies]);
+  }, [fetchTournament, fetchPerpTournament, fetchAvailableStrategies]);
 
   // ── WebSocket message handler ─────────────────────────────────────
   const handleMessage = useCallback(
@@ -557,7 +571,12 @@ function App(): React.ReactElement {
   }
 
   async function handleStrategyStop(name: string) {
-    await fetch(`/api/strategies/${encodeURIComponent(name)}/stop`, { method: 'POST' });
+    // The leaderboard passes bare strategy names (e.g. "sma-crossover") but the
+    // ActivationBridge keys include the pair (e.g. "sma-crossover:BTC-USD").
+    // Resolve to the full engine key before hitting the API.
+    const fullName =
+      strategies.find((s) => s.name === name || s.name.startsWith(name + ':'))?.name ?? name;
+    await fetch(`/api/strategies/${encodeURIComponent(fullName)}/stop`, { method: 'POST' });
     const res = await fetch('/api/strategies');
     if (res.ok) setStrategies((await res.json()) as StrategyInfo[]);
   }
@@ -601,184 +620,324 @@ function App(): React.ReactElement {
     maxExposure: riskStatus.thresholds.maxExposurePct ?? 80,
   };
 
+  // ── Nav items ─────────────────────────────────────────────────────
+  const navItems = [
+    {
+      id: 'overview',
+      label: 'Overview',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
+          <rect x="1" y="1" width="6" height="6" rx="1" />
+          <rect x="9" y="1" width="6" height="6" rx="1" />
+          <rect x="1" y="9" width="6" height="6" rx="1" />
+          <rect x="9" y="9" width="6" height="6" rx="1" />
+        </svg>
+      ),
+    },
+    {
+      id: 'positions',
+      label: 'Positions',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="currentColor" width="15" height="15">
+          <rect x="1" y="2.5" width="14" height="2" rx="1" />
+          <rect x="1" y="7" width="14" height="2" rx="1" />
+          <rect x="1" y="11.5" width="14" height="2" rx="1" />
+        </svg>
+      ),
+    },
+    {
+      id: 'strategies',
+      label: 'Strategies',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" width="15" height="15">
+          <polyline points="1,12 5,7 9,9 15,3" />
+          <polyline points="11,3 15,3 15,7" />
+        </svg>
+      ),
+    },
+    {
+      id: 'analytics',
+      label: 'Analytics',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" width="15" height="15">
+          <rect x="1" y="9" width="3" height="6" rx="1" fill="currentColor" stroke="none" opacity="0.6" />
+          <rect x="6" y="6" width="3" height="9" rx="1" fill="currentColor" stroke="none" opacity="0.8" />
+          <rect x="11" y="2" width="3" height="13" rx="1" fill="currentColor" stroke="none" />
+        </svg>
+      ),
+    },
+    {
+      id: 'system',
+      label: 'System',
+      icon: (
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" width="15" height="15">
+          <polyline points="1,8 3,8 5,3 7,13 9,5 11,10 13,8 15,8" />
+        </svg>
+      ),
+    },
+  ] as const;
+
   // ── Render ────────────────────────────────────────────────────────
   return (
     <>
       <Header status={status} isMuted={isMuted} onMuteToggle={() => setIsMuted((m) => !m)} />
 
-      <PortfolioStats
-        mode={sessions.find((s) => s.status === 'running')?.mode ?? 'paper'}
-        refreshToken={equityVersion}
-      />
-
-      <CircuitBreakerBanner
-        isActive={cbBannerActive}
-        message={cbBannerMessage}
-        triggeredAt={cbTriggeredAt}
-        isMuted={isMuted}
-        onDismiss={() => setCbBannerActive(false)}
-      />
-
-      <div className="dashboard-grid">
-        {/* Left column: charts */}
-        <div className="dashboard-left">
-          <div className="panel">
-            <div className="panel-title">Price Chart</div>
-            <PriceChart
-              ref={priceChartRef}
-              initialData={chartData}
-              pair={activePair}
-              onPairChange={handlePairChange}
-            />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">Equity Curve</div>
-            <EquityCurve ref={equityCurveRef} data={equityLineData} />
-          </div>
-        </div>
-
-        {/* Right column: positions + risk + strategies */}
-        <div className="dashboard-right">
-          <div className="panel">
-            <div className="panel-title">Open Positions</div>
-            <PositionsTable positions={positions} />
-          </div>
-
-          <div className="panel">
-            <FeedHealthPanel feeds={feedHealthData} lastUpdatedAt={feedHealthUpdatedAt} />
-          </div>
-
-          {/* System Health + Live Readiness side by side */}
-          <div style={{ display: 'flex', gap: '1rem' }}>
-            <div className="panel" style={{ flex: 1, minWidth: 0 }}>
-              <SystemHealthPanel systemHealth={systemHealth} />
+      <div className="app-shell">
+        {/* ── Sidebar ─────────────────────────────────────────── */}
+        <nav className="sidebar">
+          <div className="sidebar-logo">
+            <div className="sidebar-logo-row">
+              <div className="sidebar-logo-mark">◈</div>
+              <span className="sidebar-logo-text">Signal</span>
             </div>
-            <div className="panel" style={{ flex: 1, minWidth: 0 }}>
-              <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <span>Live Readiness</span>
-                {currentMode === 'paper' && (
-                  <button
-                    onClick={() => void handleResetPaper()}
-                    disabled={isResetting}
-                    style={{
-                      fontSize: '10px',
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      border: '1px solid #374151',
-                      backgroundColor: isResetting ? '#1f2937' : '#111827',
-                      color: isResetting ? '#6b7280' : '#9ca3af',
-                      cursor: isResetting ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {isResetting ? 'Resetting…' : 'Reset Paper'}
-                  </button>
+          </div>
+
+          <div className="sidebar-nav">
+            {navItems.map((item) => (
+              <button
+                key={item.id}
+                className={`nav-item${activeSection === item.id ? ' active' : ''}`}
+                onClick={() => setActiveSection(item.id)}
+              >
+                <span className="nav-icon">{item.icon}</span>
+                <span className="nav-label">{item.label}</span>
+                {item.id === 'system' && cbBannerActive && (
+                  <span className="nav-alert" title="Circuit breaker active" />
                 )}
+              </button>
+            ))}
+          </div>
+        </nav>
+
+        {/* ── Content Area ────────────────────────────────────── */}
+        <main className="content-area">
+          <PortfolioStats
+            mode={currentMode}
+            refreshToken={equityVersion}
+          />
+
+          <CircuitBreakerBanner
+            isActive={cbBannerActive}
+            message={cbBannerMessage}
+            triggeredAt={cbTriggeredAt}
+            isMuted={isMuted}
+            onDismiss={() => setCbBannerActive(false)}
+          />
+
+          <div className="content-body">
+
+            {/* ── Overview ──────────────────────────────────────── */}
+            {activeSection === 'overview' && (
+              <div className="section-overview">
+                <div className="section-col">
+                  <div className="panel">
+                    <div className="panel-title">Price Chart</div>
+                    <PriceChart
+                      ref={priceChartRef}
+                      initialData={chartData}
+                      pair={activePair}
+                      onPairChange={handlePairChange}
+                    />
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title">Equity Curve</div>
+                    <EquityCurve ref={equityCurveRef} data={equityLineData} />
+                  </div>
+                </div>
+
+                <div className="section-col">
+                  <div className="overview-positions-row">
+                    <div className="panel">
+                      <div className="panel-title">Spot Positions</div>
+                      <PositionsTable positions={positions} />
+                    </div>
+                    <div className="panel">
+                      <div className="panel-title">Perp Positions</div>
+                      <PerpPositionsPanel positions={perpPositions} lastUpdatedAt={perpPositionUpdatedAt} />
+                    </div>
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Live Readiness</span>
+                      {currentMode === 'paper' && (
+                        <button
+                          onClick={() => void handleResetPaper()}
+                          disabled={isResetting}
+                          style={{
+                            fontSize: '10px',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-hi)',
+                            background: 'transparent',
+                            color: 'var(--text-lo)',
+                            cursor: isResetting ? 'not-allowed' : 'pointer',
+                            fontFamily: 'var(--font)',
+                          }}
+                        >
+                          {isResetting ? 'Resetting…' : 'Reset Paper'}
+                        </button>
+                      )}
+                    </div>
+                    <LiveReadinessPanel gateStatus={gateStatus} trades={trades} />
+                  </div>
+                </div>
               </div>
-              <LiveReadinessPanel gateStatus={gateStatus} trades={trades} />
-            </div>
-          </div>
-
-          <RiskPanel
-            riskStatus={riskStatus}
-            riskConfig={riskConfig}
-            circuitBreakerEvents={circuitBreakerEvents}
-          />
-
-          <div className="panel">
-            <div className="panel-title">Perp Positions</div>
-            <PerpPositionsPanel positions={perpPositions} lastUpdatedAt={perpPositionUpdatedAt} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">Perp Funding Rates</div>
-            <PerpFundingPanel fundingRates={perpFunding} lastUpdatedAt={perpFundingUpdatedAt} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">Perp Leverage Utilization</div>
-            <PerpLeverageMeter exposure={perpExposure} lastUpdatedAt={perpExposureUpdatedAt} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">Funding Rate History</div>
-            <FundingHistoryChart ref={fundingHistoryRef} data={fundingData} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">P&L Curve</div>
-            <PnlCurveChart ref={pnlCurveRef} data={pnlData} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">Leverage Utilization History</div>
-            <LeverageHistoryChart ref={leverageHistoryRef} data={[]} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">Portfolio Heat Map</div>
-            <PortfolioHeatMap />
-          </div>
-
-          <StrategiesPanel
-            strategies={strategies}
-            trades={trades}
-            tournament={tournament}
-            availableStrategies={availableStrategies}
-            onStop={handleStrategyStop}
-          />
-
-          <div className="panel">
-            <div className="panel-title">Strategy Config</div>
-            <StrategyConfigEditor strategies={strategies} />
-          </div>
-
-          <div className="panel">
-            <div className="panel-title">Sessions</div>
-            {sessions.length === 0 ? (
-              <div className="empty-state">No active sessions</div>
-            ) : (
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Strategy</th>
-                    <th>Pair</th>
-                    <th>Mode</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sessions.map((s) => (
-                    <tr key={s.id}>
-                      <td>{s.strategyName}</td>
-                      <td>{s.pair}</td>
-                      <td>{s.mode}</td>
-                      <td className={s.status === 'running' ? 'text-green' : 'text-muted'}>
-                        {s.status}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             )}
+
+            {/* ── Positions ─────────────────────────────────────── */}
+            {activeSection === 'positions' && (
+              <div className="section-positions">
+                <div className="positions-top">
+                  <div className="panel">
+                    <div className="panel-title">Spot Positions</div>
+                    <PositionsTable positions={positions} />
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title">Perp Positions</div>
+                    <PerpPositionsPanel positions={perpPositions} lastUpdatedAt={perpPositionUpdatedAt} />
+                  </div>
+                </div>
+                <div className="panel">
+                  <div className="panel-title">Trade History</div>
+                  <TradeHistory trades={trades} />
+                </div>
+              </div>
+            )}
+
+            {/* ── Strategies ────────────────────────────────────── */}
+            {activeSection === 'strategies' && (
+              <div className="section-strategies">
+                <div className="strategies-tournaments">
+                  <StrategiesPanel
+                    strategies={strategies}
+                    trades={trades}
+                    tournament={tournament}
+                    availableStrategies={availableStrategies}
+                    onStop={handleStrategyStop}
+                  />
+                  <PerpStrategiesPanel tournament={perpTournament} />
+                </div>
+                <div className="strategies-bottom">
+                  <div className="panel">
+                    <div className="panel-title">Strategy Config</div>
+                    <StrategyConfigEditor strategies={strategies} />
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title">Sessions</div>
+                    {sessions.length === 0 ? (
+                      <div className="empty-state">No active sessions</div>
+                    ) : (
+                      <table className="data-table">
+                        <thead>
+                          <tr>
+                            <th>Strategy</th>
+                            <th>Pair</th>
+                            <th>Mode</th>
+                            <th>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sessions.map((s) => (
+                            <tr key={s.id}>
+                              <td>{s.strategyName}</td>
+                              <td>{s.pair}</td>
+                              <td>{s.mode}</td>
+                              <td className={s.status === 'running' ? 'text-green' : 'text-muted'}>
+                                {s.status}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Analytics ─────────────────────────────────────── */}
+            {activeSection === 'analytics' && (
+              <div className="section-analytics">
+                <div className="analytics-row2">
+                  <div className="panel">
+                    <div className="panel-title">Equity Curve — Spot</div>
+                    <EquityCurve ref={equityCurveRef} data={equityLineData} />
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title">P&amp;L Curve — Perp</div>
+                    <PnlCurveChart ref={pnlCurveRef} data={pnlData} />
+                  </div>
+                </div>
+                <div className="analytics-row2">
+                  <div className="panel">
+                    <div className="panel-title">Funding Rates</div>
+                    <PerpFundingPanel fundingRates={perpFunding} lastUpdatedAt={perpFundingUpdatedAt} />
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title">Leverage Utilization</div>
+                    <PerpLeverageMeter exposure={perpExposure} lastUpdatedAt={perpExposureUpdatedAt} />
+                  </div>
+                </div>
+                <div className="analytics-row2">
+                  <div className="panel">
+                    <div className="panel-title">Funding Rate History</div>
+                    <FundingHistoryChart ref={fundingHistoryRef} data={fundingData} />
+                  </div>
+                  <div className="panel">
+                    <div className="panel-title">Leverage History</div>
+                    <LeverageHistoryChart ref={leverageHistoryRef} data={[]} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── System ────────────────────────────────────────── */}
+            {activeSection === 'system' && (
+              <div className="section-system">
+                <div className="system-row">
+                  <div className="panel">
+                    <FeedHealthPanel feeds={feedHealthData} lastUpdatedAt={feedHealthUpdatedAt} />
+                  </div>
+                  <div className="panel">
+                    <SystemHealthPanel systemHealth={systemHealth} />
+                  </div>
+                </div>
+                <div className="system-row">
+                  <div className="panel">
+                    <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span>Live Readiness</span>
+                      {currentMode === 'paper' && (
+                        <button
+                          onClick={() => void handleResetPaper()}
+                          disabled={isResetting}
+                          style={{
+                            fontSize: '10px',
+                            padding: '2px 8px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-hi)',
+                            background: 'transparent',
+                            color: 'var(--text-lo)',
+                            cursor: isResetting ? 'not-allowed' : 'pointer',
+                            fontFamily: 'var(--font)',
+                          }}
+                        >
+                          {isResetting ? 'Resetting…' : 'Reset Paper'}
+                        </button>
+                      )}
+                    </div>
+                    <LiveReadinessPanel gateStatus={gateStatus} trades={trades} />
+                  </div>
+                  <RiskPanel
+                    riskStatus={riskStatus}
+                    riskConfig={riskConfig}
+                    circuitBreakerEvents={circuitBreakerEvents}
+                  />
+                </div>
+              </div>
+            )}
+
           </div>
-        </div>
-      </div>
-
-      {/* Bottom: trade history */}
-      <div className="dashboard-bottom">
-        <div className="panel">
-          <div className="panel-title">Trade History</div>
-          <TradeHistory trades={trades} />
-        </div>
-      </div>
-
-      {/* Backtest Viewer */}
-      <div className="dashboard-bottom">
-        <div className="panel">
-          <div className="panel-title">Backtest Viewer</div>
-          <BacktestViewer />
-        </div>
+        </main>
       </div>
 
       {/* Hidden send reference to avoid unused variable warning */}
