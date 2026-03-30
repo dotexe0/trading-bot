@@ -211,51 +211,7 @@ export class PaperPerpEngine extends EventEmitter {
     // Re-hydrate in-memory state from DB on IntxClient reconnection
     this.intxClient.on('reconnected', () => this._handleReconnection());
 
-    this._onFundingRate = (evt: IntxFundingRateEvent) => {
-      if (evt.isStale) return;  // preserve stale guard (must be first check)
-      if (!this.currentPosition) {
-        // No position open — emit market-rate-only update so dashboard panel stays live.
-        // NOTE: evt.instrument is always 'FCM' (account-level channel); use config instrument.
-        this.emit('fundingUpdate', {
-          sessionId: null,
-          instrument: this.config.btcProductId,
-          currentFundingRate: evt.fundingRate,
-          cumulativeFundingCost: '0.00000000',
-          cumulativeFundingPct: '0.00000000',
-        });
-        return;
-      }
-      const session = this.currentPosition.session;
-      // NOTE: evt.instrument is always 'FCM' (account-level channel) — do NOT filter by instrument
-      const update = this._fundingRateTracker.onFundingEvent(evt, session);
-      const unrealizedPnl = this._computeUnrealizedPnl(session, update.cumulativeFundingCost);
-      this.stateStore.updateSession(session.id, {
-        cumulativeFundingCost: update.cumulativeFundingCost,
-        unrealizedPnl,
-      });
-      this.emit('fundingUpdate', {
-        sessionId: session.id,
-        instrument: session.instrument,
-        currentFundingRate: update.currentFundingRate,
-        cumulativeFundingCost: update.cumulativeFundingCost,
-        cumulativeFundingPct: update.cumulativeFundingPct,
-        unrealizedPnl,
-      });
-      if (update.drainTriggered && !this._fundingDrainInProgress && !this._emergencyCloseInProgress) {
-        this._fundingDrainInProgress = true;
-        log.warn(
-          { sessionId: session.id, cumulativeFundingPct: update.cumulativeFundingPct },
-          'FUNDING_DRAIN_EXIT triggered',
-        );
-        this.emit('fundingDrain', session, { cumulativeFundingCost: update.cumulativeFundingCost });
-        const markPrice = session.markPrice ?? session.entryPrice;
-        try {
-          this.closePaperPosition(markPrice, 'FUNDING_DRAIN_EXIT');
-        } finally {
-          this._fundingDrainInProgress = false;
-        }
-      }
-    };
+    this._onFundingRate = (evt: IntxFundingRateEvent) => this._handleFundingRate(evt);
     this.intxClient.on('fundingRate', this._onFundingRate);
 
     // Re-hydrate from DB: recover or clean up sessions left open by a previous run
@@ -652,6 +608,52 @@ export class PaperPerpEngine extends EventEmitter {
       ? markPriceD.minus(entryD).mul(sizeD)
       : entryD.minus(markPriceD).mul(sizeD);
     return pricePnl.plus(d(cumulativeFundingCost)).toFixed(8);
+  }
+
+  private _handleFundingRate(evt: IntxFundingRateEvent): void {
+    if (evt.isStale) return;  // preserve stale guard (must be first check)
+    if (!this.currentPosition) {
+      // No position open — emit market-rate-only update so dashboard panel stays live.
+      // NOTE: evt.instrument is always 'FCM' (account-level channel); use config instrument.
+      this.emit('fundingUpdate', {
+        sessionId: null,
+        instrument: this.config.btcProductId,
+        currentFundingRate: evt.fundingRate,
+        cumulativeFundingCost: '0.00000000',
+        cumulativeFundingPct: '0.00000000',
+      });
+      return;
+    }
+    const session = this.currentPosition.session;
+    // NOTE: evt.instrument is always 'FCM' (account-level channel) — do NOT filter by instrument
+    const update = this._fundingRateTracker.onFundingEvent(evt, session);
+    const unrealizedPnl = this._computeUnrealizedPnl(session, update.cumulativeFundingCost);
+    this.stateStore.updateSession(session.id, {
+      cumulativeFundingCost: update.cumulativeFundingCost,
+      unrealizedPnl,
+    });
+    this.emit('fundingUpdate', {
+      sessionId: session.id,
+      instrument: session.instrument,
+      currentFundingRate: update.currentFundingRate,
+      cumulativeFundingCost: update.cumulativeFundingCost,
+      cumulativeFundingPct: update.cumulativeFundingPct,
+      unrealizedPnl,
+    });
+    if (update.drainTriggered && !this._fundingDrainInProgress && !this._emergencyCloseInProgress) {
+      this._fundingDrainInProgress = true;
+      log.warn(
+        { sessionId: session.id, cumulativeFundingPct: update.cumulativeFundingPct },
+        'FUNDING_DRAIN_EXIT triggered',
+      );
+      this.emit('fundingDrain', session, { cumulativeFundingCost: update.cumulativeFundingCost });
+      const markPrice = session.markPrice ?? session.entryPrice;
+      try {
+        this.closePaperPosition(markPrice, 'FUNDING_DRAIN_EXIT');
+      } finally {
+        this._fundingDrainInProgress = false;
+      }
+    }
   }
 
   // ── Mark price handler ────────────────────────────────────────────────────
