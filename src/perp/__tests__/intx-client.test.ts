@@ -445,6 +445,42 @@ describe('IntxClient WebSocket streaming', () => {
   });
 });
 
+// ── IntxClient.fetchFundingRate() tests ──────────────────────────────
+
+describe('fetchFundingRate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    (MockWSCtor as any)._instances = [];
+  });
+
+  it('returns parsed rate from perpetual_details.funding_rate', async () => {
+    const client = makeClient();
+    (client as any).restClient.getProduct = vi.fn().mockResolvedValue({
+      future_product_details: {
+        perpetual_details: { funding_rate: '0.0001' },
+      },
+    });
+    const rate = await client.fetchFundingRate('BIP-20DEC30-CDE');
+    expect(rate).toBeCloseTo(0.0001);
+  });
+
+  it('returns 0 when perpetual_details is absent', async () => {
+    const client = makeClient();
+    (client as any).restClient.getProduct = vi.fn().mockResolvedValue({
+      future_product_details: {},
+    });
+    const rate = await client.fetchFundingRate('BIP-20DEC30-CDE');
+    expect(rate).toBe(0);
+  });
+
+  it('returns 0 when getProduct throws', async () => {
+    const client = makeClient();
+    (client as any).restClient.getProduct = vi.fn().mockRejectedValue(new Error('network'));
+    const rate = await client.fetchFundingRate('BIP-20DEC30-CDE');
+    expect(rate).toBe(0);
+  });
+});
+
 // ── IntxClient.fetchFeeConfig() tests ────────────────────────────────
 
 describe('IntxClient.fetchFeeConfig()', () => {

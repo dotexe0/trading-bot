@@ -311,6 +311,27 @@ export class IntxClient extends EventEmitter {
   }
 
   /**
+   * Fetch the current perpetual funding rate for a product via REST.
+   *
+   * Calls getProduct and parses future_product_details.perpetual_details.funding_rate.
+   * Returns the rate as a decimal (e.g., 0.0001 = 0.01% per 8h funding period).
+   * Returns 0 on any error or missing field — never throws.
+   */
+  async fetchFundingRate(productId: string): Promise<number> {
+    try {
+      const product = await this.restClient.getProduct({ product_id: productId });
+      const raw = (product as any)?.future_product_details?.perpetual_details?.funding_rate;
+      if (!raw) return 0;
+      const rate = parseFloat(String(raw));
+      return Number.isFinite(rate) ? rate : 0;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      log.warn({ productId, err: message }, 'fetchFundingRate: REST call failed — returning 0');
+      return 0;
+    }
+  }
+
+  /**
    * Place an FCM futures order using the Advanced Trade submitOrder endpoint.
    */
   async placeOrder(params: PlaceOrderParams): Promise<{
