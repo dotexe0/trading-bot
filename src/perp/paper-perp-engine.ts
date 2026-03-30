@@ -693,24 +693,26 @@ export class PaperPerpEngine extends EventEmitter {
     if (rate === 0) return;
 
     const markPrice = session.markPrice ?? session.entryPrice;
-    const notional = parseFloat(session.size) * parseFloat(markPrice);
-    const sign = session.direction === 'long' ? -1 : 1;
-    const payment = sign * rate * notional;
+    const notionalD = d(session.size).mul(d(markPrice));
+    const rateD = d(String(rate));
+    const paymentD = session.direction === 'long'
+      ? rateD.mul(notionalD).negated()
+      : rateD.mul(notionalD);
 
     log.info(
       {
         sessionId: session.id,
         instrument: session.instrument,
         fundingRate: rate,
-        notional: notional.toFixed(2),
-        payment: payment.toFixed(8),
+        notional: notionalD.toFixed(2),
+        payment: paymentD.toFixed(8),
       },
       '[PAPER] Simulated funding payment applied',
     );
 
     this._handleFundingRate({
       instrument: 'FCM',
-      fundingRate: payment.toFixed(8),
+      fundingRate: paymentD.toFixed(8),
       isFinal: true,
       timestamp: Date.now(),
       isStale: false,
