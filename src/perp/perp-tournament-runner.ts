@@ -44,11 +44,46 @@ export interface PerpTournamentOptions {
 }
 
 /**
+ * Build the parameter grid for the perp tournament.
+ *
+ * Returns all strategy + param combinations to evaluate:
+ *  - perp-momentum:      breakoutWindow [10,20,40] × volumeMultiplier [1.2,1.5,2.0] × maxHoldCandles [10,20,40] = 27 combos
+ *  - perp-mean-reversion: period [10,20,40] × threshold [1.0,1.5,2.0] = 9 combos
+ *  - funding-rate-arb:   default only (provider is null in tournament mode) = 1 combo
+ *  - basis-trade:        default only (provider is null in tournament mode) = 1 combo
+ *
+ * Total: 38 combinations.
+ */
+export function buildPerpParamGrid(): Record<string, unknown>[] {
+  const configs: Record<string, unknown>[] = [];
+
+  for (const breakoutWindow of [10, 20, 40]) {
+    for (const volumeMultiplier of [1.2, 1.5, 2.0]) {
+      for (const maxHoldCandles of [10, 20, 40]) {
+        configs.push({ strategy: 'perp-momentum', breakoutWindow, volumeMultiplier, maxHoldCandles });
+      }
+    }
+  }
+
+  for (const period of [10, 20, 40]) {
+    for (const threshold of [1.0, 1.5, 2.0]) {
+      configs.push({ strategy: 'perp-mean-reversion', period, threshold });
+    }
+  }
+
+  configs.push({ strategy: 'funding-rate-arb' });
+  configs.push({ strategy: 'basis-trade' });
+
+  return configs;
+}
+
+/**
  * Run a walk-forward tournament using perp strategies and BTC-USD candles.
  *
  * - Creates a perp-specific registry (tournament mode: fundingRateProvider = () => null)
  * - Loads candles from local SQLite via CandleRepository
  * - Wires BacktestEngine + WalkForwardRunner + TournamentRunner
+ * - Evaluates a full parameter grid (38 combos) via buildPerpParamGrid()
  * - Returns TournamentResult with a ranked perp leaderboard
  */
 export async function runPerpTournament(
@@ -106,6 +141,7 @@ export async function runPerpTournament(
       initialCapital: opts.capital,
       topN: opts.topN,
       activationMode: 'none',
+      strategyConfigs: buildPerpParamGrid(),
       feeTierTaker: opts.feeConfig?.takerFeeRate ?? FCM_FALLBACK_TAKER_RATE,
       feeTierMaker: opts.feeConfig?.makerFeeRate ?? FCM_FALLBACK_MAKER_RATE,
       walkForward: {
