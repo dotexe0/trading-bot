@@ -41,18 +41,22 @@ export interface PerpTournamentOptions {
   /** Optional FeeConfig fetched from Coinbase API at startup. When provided,
    *  overrides the default Zod feeTierTaker (0.0075) with the real FCM rate. */
   feeConfig?: FeeConfig;
+  /** Optional override for the parameter grid. Defaults to buildPerpParamGrid(). */
+  paramGrid?: Record<string, unknown>[];
 }
 
 /**
  * Build the parameter grid for the perp tournament.
  *
  * Returns all strategy + param combinations to evaluate:
- *  - perp-momentum:      breakoutWindow [10,20,40] × volumeMultiplier [1.2,1.5,2.0] × maxHoldCandles [10,20,40] = 27 combos
- *  - perp-mean-reversion: period [10,20,40] × threshold [1.0,1.5,2.0] = 9 combos
- *  - funding-rate-arb:   default only (provider is null in tournament mode) = 1 combo
- *  - basis-trade:        default only (provider is null in tournament mode) = 1 combo
+ *  - perp-momentum:        breakoutWindow [10,20,40] × volumeMultiplier [1.2,1.5,2.0] × maxHoldCandles [10,20,40] = 27 combos
+ *  - perp-mean-reversion:  period [10,20,40] × threshold [1.0,1.5,2.0] = 9 combos
+ *  - funding-rate-arb:     default only (provider is null in tournament mode) = 1 combo
+ *  - basis-trade:          default only (provider is null in tournament mode) = 1 combo
+ *  - perp-vwap-reversion:  vwapPeriod [10,15,20] × zScoreThreshold [1.0,1.5,2.0] × maxHoldCandles [5,8] = 18 combos
+ *  - perp-micro-momentum:  [{fast:5,slow:12},{fast:8,slow:20},{fast:12,slow:26}] × rsiPeriod [7,14] × maxHoldCandles [5,10] = 12 combos
  *
- * Total: 38 combinations.
+ * Total: 68 combinations.
  */
 export function buildPerpParamGrid(): Record<string, unknown>[] {
   const configs: Record<string, unknown>[] = [];
@@ -74,7 +78,47 @@ export function buildPerpParamGrid(): Record<string, unknown>[] {
   configs.push({ strategy: 'funding-rate-arb' });
   configs.push({ strategy: 'basis-trade' });
 
+  // perp-vwap-reversion: vwapPeriod [10,15,20] x zScoreThreshold [1.0,1.5,2.0] x maxHoldCandles [5,8] = 18 combos
+  for (const vwapPeriod of [10, 15, 20]) {
+    for (const zScoreThreshold of [1.0, 1.5, 2.0]) {
+      for (const maxHoldCandles of [5, 8]) {
+        configs.push({ strategy: 'perp-vwap-reversion', vwapPeriod, zScoreThreshold, maxHoldCandles });
+      }
+    }
+  }
+
+  // perp-micro-momentum: paired fast/slow EMA [{5,12},{8,20},{12,26}] x rsiPeriod [7,14] x maxHoldCandles [5,10] = 12 combos
+  // IMPORTANT: each pair must satisfy fastEmaPeriod < slowEmaPeriod (Zod refinement constraint)
+  for (const { fast: fastEmaPeriod, slow: slowEmaPeriod } of [
+    { fast: 5, slow: 12 },
+    { fast: 8, slow: 20 },
+    { fast: 12, slow: 26 },
+  ]) {
+    for (const rsiPeriod of [7, 14]) {
+      for (const maxHoldCandles of [5, 10]) {
+        configs.push({ strategy: 'perp-micro-momentum', fastEmaPeriod, slowEmaPeriod, rsiPeriod, maxHoldCandles });
+      }
+    }
+  }
+
   return configs;
+}
+
+/** Strategy names that require the scalping timeframe (1m/5m) for meaningful evaluation. */
+export const SCALPING_STRATEGY_NAMES = ['perp-vwap-reversion', 'perp-micro-momentum'] as const;
+
+/** Returns only the scalping subset of the perp param grid. */
+export function buildScalpingParamGrid(): Record<string, unknown>[] {
+  return buildPerpParamGrid().filter((c) =>
+    SCALPING_STRATEGY_NAMES.includes(c.strategy as (typeof SCALPING_STRATEGY_NAMES)[number]),
+  );
+}
+
+/** Returns only the non-scalping subset of the perp param grid. */
+export function buildNonScalpingPerpParamGrid(): Record<string, unknown>[] {
+  return buildPerpParamGrid().filter((c) =>
+    !SCALPING_STRATEGY_NAMES.includes(c.strategy as (typeof SCALPING_STRATEGY_NAMES)[number]),
+  );
 }
 
 /**
@@ -141,7 +185,7 @@ export async function runPerpTournament(
       initialCapital: opts.capital,
       topN: opts.topN,
       activationMode: 'none',
-      strategyConfigs: buildPerpParamGrid(),
+      strategyConfigs: opts.paramGrid ?? buildPerpParamGrid(),
       feeTierTaker: opts.feeConfig?.takerFeeRate ?? FCM_FALLBACK_TAKER_RATE,
       feeTierMaker: opts.feeConfig?.makerFeeRate ?? FCM_FALLBACK_MAKER_RATE,
       walkForward: {

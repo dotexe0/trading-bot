@@ -27,7 +27,9 @@ export const fcmConfigSchema = z
     maxRepriceAttempts: z.number().default(20),
     entryOrderTimeoutMs: z.number().default(300000),
     maxLeverageCap: z.number().int().min(1).max(20).default(5),
-    defaultLeverage: z.number().int().min(1).max(10).default(3),
+    defaultLeverage: z.number().int().min(1).max(20).default(3),
+    /** Timeframe for scalping strategy tournament evaluation. Default '5m'. */
+    scalpingTimeframe: z.enum(['1m', '5m']).default('5m'),
     leverageByRegime: z.object({
       VOLATILE: z.number().int().min(1).max(10).default(2),
       TRENDING: z.number().int().min(1).max(20).default(5),

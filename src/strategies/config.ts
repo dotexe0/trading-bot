@@ -128,6 +128,38 @@ const basisTradeSchema = z
   })
   .merge(exitConfigSchema);
 
+// -- Scalping perp strategy schemas ---------------------------------------
+// NOTE: fundingRateProvider is a runtime-injected callback and is NOT part of
+// the Zod schema (not serializable). Only scalar config params are stored here.
+
+const perpVwapReversionSchema = z
+  .object({
+    strategy: z.literal('perp-vwap-reversion'),
+    vwapPeriod: z.number().int().positive().default(15),
+    zScoreThreshold: z.number().positive().default(1.5),
+    maxHoldCandles: z.number().int().positive().default(8),
+    stopLossPct: z.number().positive().max(0.05).default(0.005),
+    fundingThreshold: z.number().positive().default(0.01),
+  })
+  .merge(exitConfigSchema);
+
+const perpMicroMomentumSchema = z
+  .object({
+    strategy: z.literal('perp-micro-momentum'),
+    fastEmaPeriod: z.number().int().positive().default(5),
+    slowEmaPeriod: z.number().int().positive().default(12),
+    rsiPeriod: z.number().int().positive().default(7),
+    volumeWindow: z.number().int().positive().default(5),
+    volumeMultiplier: z.number().positive().default(1.5),
+    maxHoldCandles: z.number().int().positive().default(8),
+    stopLossPct: z.number().positive().max(0.05).default(0.005),
+    fundingThreshold: z.number().positive().default(0.01),
+  })
+  .merge(exitConfigSchema)
+  .refine((d) => d.fastEmaPeriod < d.slowEmaPeriod, {
+    message: 'fastEmaPeriod must be less than slowEmaPeriod',
+  });
+
 // -- Discriminated union --------------------------------------------------
 
 export const strategyConfigSchema = z.discriminatedUnion('strategy', [
@@ -142,6 +174,8 @@ export const strategyConfigSchema = z.discriminatedUnion('strategy', [
   perpMeanReversionSchema,
   fundingRateArbSchema,
   basisTradeSchema,
+  perpVwapReversionSchema,
+  perpMicroMomentumSchema,
 ]);
 
 // -- Inferred type --------------------------------------------------------

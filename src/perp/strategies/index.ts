@@ -19,12 +19,16 @@ import { PerpMomentumStrategy } from './perp-momentum.js';
 import { PerpMeanReversionStrategy } from './perp-mean-reversion.js';
 import { FundingRateArbitrageStrategy } from './funding-rate-arb.js';
 import { BasisTradeStrategy } from './basis-trade.js';
+import { PerpVwapReversionStrategy } from './perp-vwap-reversion.js';
+import { PerpMicroMomentumStrategy } from './perp-micro-momentum.js';
 import type { StrategyConfig } from '../../strategies/config.js';
 
 export { PerpMomentumStrategy } from './perp-momentum.js';
 export { PerpMeanReversionStrategy } from './perp-mean-reversion.js';
 export { FundingRateArbitrageStrategy } from './funding-rate-arb.js';
 export { BasisTradeStrategy } from './basis-trade.js';
+export { PerpVwapReversionStrategy } from './perp-vwap-reversion.js';
+export { PerpMicroMomentumStrategy } from './perp-micro-momentum.js';
 
 /**
  * Create a registry pre-loaded with both perp strategies.
@@ -72,6 +76,33 @@ export function createPerpRegistry(): StrategyRegistry {
       period: cfg.period ?? 20,
       threshold: cfg.threshold ?? 1.5,
       basisProvider: () => null, // no live basis data in tournament
+    });
+  });
+
+  registry.register('perp-vwap-reversion', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'perp-vwap-reversion' }>;
+    return new PerpVwapReversionStrategy({
+      vwapPeriod: cfg.vwapPeriod ?? 15,
+      zScoreThreshold: cfg.zScoreThreshold ?? 1.5,
+      maxHoldCandles: cfg.maxHoldCandles ?? 8,
+      stopLossPct: cfg.stopLossPct ?? 0.005,
+      fundingThreshold: cfg.fundingThreshold ?? 0.01,
+      fundingRateProvider: () => null,
+    });
+  });
+
+  registry.register('perp-micro-momentum', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'perp-micro-momentum' }>;
+    return new PerpMicroMomentumStrategy({
+      fastEmaPeriod: cfg.fastEmaPeriod ?? 5,
+      slowEmaPeriod: cfg.slowEmaPeriod ?? 12,
+      rsiPeriod: cfg.rsiPeriod ?? 7,
+      volumeWindow: cfg.volumeWindow ?? 5,
+      volumeMultiplier: cfg.volumeMultiplier ?? 1.5,
+      maxHoldCandles: cfg.maxHoldCandles ?? 8,
+      stopLossPct: cfg.stopLossPct ?? 0.005,
+      fundingThreshold: cfg.fundingThreshold ?? 0.01,
+      fundingRateProvider: () => null,
     });
   });
 
@@ -137,6 +168,33 @@ export function createLivePerpRegistry(
       period: cfg.period ?? 20,
       threshold: cfg.threshold ?? 1.5,
       basisProvider: () => null, // live basisProvider wired in Phase 40 when ring buffer is implemented
+    });
+  });
+
+  registry.register('perp-vwap-reversion', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'perp-vwap-reversion' }>;
+    return new PerpVwapReversionStrategy({
+      vwapPeriod: cfg.vwapPeriod ?? 15,
+      zScoreThreshold: cfg.zScoreThreshold ?? 1.5,
+      maxHoldCandles: cfg.maxHoldCandles ?? 8,
+      stopLossPct: cfg.stopLossPct ?? 0.005,
+      fundingThreshold: cfg.fundingThreshold ?? 0.01,
+      fundingRateProvider,
+    });
+  });
+
+  registry.register('perp-micro-momentum', (c: StrategyConfig) => {
+    const cfg = c as Extract<StrategyConfig, { strategy: 'perp-micro-momentum' }>;
+    return new PerpMicroMomentumStrategy({
+      fastEmaPeriod: cfg.fastEmaPeriod ?? 5,
+      slowEmaPeriod: cfg.slowEmaPeriod ?? 12,
+      rsiPeriod: cfg.rsiPeriod ?? 7,
+      volumeWindow: cfg.volumeWindow ?? 5,
+      volumeMultiplier: cfg.volumeMultiplier ?? 1.5,
+      maxHoldCandles: cfg.maxHoldCandles ?? 8,
+      stopLossPct: cfg.stopLossPct ?? 0.005,
+      fundingThreshold: cfg.fundingThreshold ?? 0.01,
+      fundingRateProvider,
     });
   });
 

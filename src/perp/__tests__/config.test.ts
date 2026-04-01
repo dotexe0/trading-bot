@@ -2,9 +2,33 @@
  * Tests for fcmConfigSchema perpMode validation (INFRA-01).
  * Verifies that the cross-field refine correctly rejects live/paper
  * modes when FCM is disabled.
+ *
+ * Also validates leverage cap for scalping (SCALP-02):
+ * defaultLeverage max raised to 20, scalpingTimeframe field defaults to '5m'.
  */
 import { describe, it, expect } from 'vitest';
 import { fcmConfigSchema } from '../config.js';
+
+const validBase = {
+  enabled: true,
+  apiKey: 'key',
+  apiSecret: 'secret',
+};
+
+describe('leverage cap for scalping', () => {
+  it('accepts defaultLeverage of 15 (within new max of 20)', () => {
+    expect(() => fcmConfigSchema.parse({ ...validBase, defaultLeverage: 15 })).not.toThrow();
+  });
+
+  it('rejects defaultLeverage of 21 (above max of 20)', () => {
+    expect(() => fcmConfigSchema.parse({ ...validBase, defaultLeverage: 21 })).toThrow();
+  });
+
+  it('defaults scalpingTimeframe to 5m', () => {
+    const cfg = fcmConfigSchema.parse({});
+    expect(cfg.scalpingTimeframe).toBe('5m');
+  });
+});
 
 describe('fcmConfigSchema – maxDailyLossUsd', () => {
   it('defaults maxDailyLossUsd to 500', () => {
