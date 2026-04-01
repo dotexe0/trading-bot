@@ -43,6 +43,8 @@ function makeConfig(): IntxConfig {
     perpMode: 'none',
     orderMaxWaitSeconds: 60,
     orderCloseMaxRetries: 3,
+    maxDailyLossUsd: 500,
+    scalpingTimeframe: '5m' as const,
   };
 }
 
@@ -146,5 +148,93 @@ describe('PerpRiskGate Check 4: FEE_DRAG_EXCESSIVE', () => {
       // Check 4 should be the reject reason (not margin/exposure/maxloss)
       expect(result.rejectReason).toBe('FEE_DRAG_EXCESSIVE');
     });
+  });
+});
+
+describe('Check 5: DAILY_LOSS_CAP_EXCEEDED', () => {
+  const baseParams5 = {
+    instrument: 'BIP-20DEC30-CDE',
+    proposedNotional: '1000',
+    proposedMaxLoss: '10',       // well below perpMaxLossPct * accountValue
+    accountValue: '10000',
+    expectedGain: '50',          // well above fee drag
+  };
+
+  it('approves when daily loss is zero', async () => {
+    const gate = makeGate();
+    const result = await gate.check(baseParams5);
+    expect(result.approved).toBe(true);
+  });
+
+  it('approves when daily loss is below cap', async () => {
+    const gate = makeGate();
+    gate.recordRealizedLoss(200);  // $200 loss, cap is $500
+    const result = await gate.check(baseParams5);
+    expect(result.approved).toBe(true);
+  });
+
+  it('rejects when daily loss equals cap', async () => {
+    const gate = makeGate();
+    gate.recordRealizedLoss(500);  // exactly at cap
+    const result = await gate.check(baseParams5);
+    expect(result.approved).toBe(false);
+    expect(result.rejectReason).toBe('DAILY_LOSS_CAP_EXCEEDED');
+  });
+
+  it('rejects when daily loss exceeds cap', async () => {
+    const gate = makeGate();
+    gate.recordRealizedLoss(300);
+    gate.recordRealizedLoss(250);  // total $550, exceeds $500 cap
+    const result = await gate.check(baseParams5);
+    expect(result.approved).toBe(false);
+    expect(result.rejectReason).toBe('DAILY_LOSS_CAP_EXCEEDED');
+    expect(result.details.dailyLoss).toBe('550.00');
+    expect(result.details.cap).toBe('500');
+  });
+
+  it('accumulates multiple losses correctly', async () => {
+    const gate = makeGate();
+    gate.recordRealizedLoss(100);
+    gate.recordRealizedLoss(150);
+    gate.recordRealizedLoss(200);  // total $450, still below $500
+    const result = await gate.check(baseParams5);
+    expect(result.approved).toBe(true);
+  });
+
+  it('ignores profits (only losses accumulate)', async () => {
+    const gate = makeGate();
+    gate.recordRealizedLoss(-50);  // profit, should be ignored
+    gate.recordRealizedLoss(100);  // loss
+    // daily loss should be $100, not $50
+    const result = await gate.check(baseParams5);
+    expect(result.approved).toBe(true);
+  });
+
+  it('resets daily loss after midnight UTC', async () => {
+    const gate = makeGate();
+    gate.recordRealizedLoss(600);  // over the cap
+
+    // Simulate midnight crossing by advancing Date.now past midnight UTC
+    const tomorrow = new Date();
+    tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
+    tomorrow.setUTCHours(0, 0, 1, 0);
+    vi.spyOn(Date, 'now').mockReturnValue(tomorrow.getTime());
+
+    const result = await gate.check(baseParams5);
+    expect(result.approved).toBe(true);
+
+    vi.restoreAllMocks();
+  });
+
+  it('rejects new entries after accumulated losses from position closes exceed cap', async () => {
+    // End-to-end: simulate what happens when closePaperPosition records losses
+    const gate = makeGate();
+    // Simulate 3 losing trades: $200, $150, $200 = $550 total
+    gate.recordRealizedLoss(200);
+    gate.recordRealizedLoss(150);
+    gate.recordRealizedLoss(200);
+    const result = await gate.check(baseParams5);
+    expect(result.approved).toBe(false);
+    expect(result.rejectReason).toBe('DAILY_LOSS_CAP_EXCEEDED');
   });
 });

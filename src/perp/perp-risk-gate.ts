@@ -57,6 +57,10 @@ export class PerpRiskGate {
   private _cachedBalance: CachedBalance | null = null;
   private _lastBalanceFetchMs = 0;
 
+  // -- Daily loss tracking --
+  private _dailyLossUsd: number = 0;
+  private _dailyLossDateUtc: string = '';  // 'YYYY-MM-DD' format for reset detection
+
   constructor(options: PerpRiskGateOptions) {
     this._intxClient = options.intxClient;
     this._stateStore = options.stateStore;
@@ -108,6 +112,32 @@ export class PerpRiskGate {
     this._lastBalanceFetchMs = now;
 
     return this._cachedBalance;
+  }
+
+  // ── Daily loss tracking ──────────────────────────────────────────────────
+
+  /**
+   * Reset daily loss accumulator if the UTC date has changed since last recording.
+   */
+  private _ensureDailyReset(): void {
+    const todayUtc = new Date(Date.now()).toISOString().slice(0, 10);  // 'YYYY-MM-DD'
+    if (todayUtc !== this._dailyLossDateUtc) {
+      this._dailyLossUsd = 0;
+      this._dailyLossDateUtc = todayUtc;
+    }
+  }
+
+  /**
+   * Record a realized loss from a closed position.
+   * Only positive values (actual losses) accumulate. Profits (negative values) are ignored.
+   * Call this after every position close to track daily drawdown.
+   *
+   * @param lossUsd - The realized loss in USD. Positive = loss, negative = profit (ignored).
+   */
+  recordRealizedLoss(lossUsd: number): void {
+    if (lossUsd <= 0) return;  // Only track actual losses, ignore profits
+    this._ensureDailyReset();
+    this._dailyLossUsd += lossUsd;
   }
 
   // ── Public: check ────────────────────────────────────────────────────────
@@ -233,6 +263,28 @@ export class PerpRiskGate {
         details: {
           expectedGain: params.expectedGain,
           roundTripFee: roundTripFee.toFixed(6),
+        },
+      };
+    }
+
+    // ── Check 5: Daily loss cap ──────────────────────────────────────────────
+    this._ensureDailyReset();
+    const maxDailyLoss = this._config.maxDailyLossUsd;
+    if (maxDailyLoss !== undefined && this._dailyLossUsd >= maxDailyLoss) {
+      log.warn(
+        {
+          dailyLoss: this._dailyLossUsd.toFixed(2),
+          cap: String(maxDailyLoss),
+          instrument: params.instrument,
+        },
+        'DAILY_LOSS_CAP_EXCEEDED: perp entry rejected',
+      );
+      return {
+        approved: false,
+        rejectReason: 'DAILY_LOSS_CAP_EXCEEDED',
+        details: {
+          dailyLoss: this._dailyLossUsd.toFixed(2),
+          cap: String(maxDailyLoss),
         },
       };
     }

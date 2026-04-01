@@ -562,6 +562,12 @@ export class PaperPerpEngine extends EventEmitter {
     this.currentPosition.paperExitPrice = markPrice;
     this.currentPosition.realizedPnl = realizedPnl;
 
+    // Record realized loss to risk gate for daily loss cap tracking (Check 5)
+    if (this._riskGate) {
+      const lossUsd = Math.max(0, -parseFloat(realizedPnl));
+      this._riskGate.recordRealizedLoss(lossUsd);
+    }
+
     this.emit('positionClosed', session);
 
     const closedSession = { ...session };
