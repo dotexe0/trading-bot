@@ -44,6 +44,10 @@ export const fcmConfigSchema = z
 
     /** Max retries for a failed close order before triggering emergency close */
     orderCloseMaxRetries: z.number().int().min(1).max(10).default(3),
+
+    /** Maximum cumulative daily realized loss in USD before blocking new entries.
+     *  Resets at midnight UTC. Default $500 -- appropriate for $1K-$10K accounts. */
+    maxDailyLossUsd: z.number().positive().default(500),
   })
   .refine(
     (data) => !data.enabled || (!!data.apiKey && !!data.apiSecret),

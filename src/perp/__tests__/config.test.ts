@@ -6,6 +6,18 @@
 import { describe, it, expect } from 'vitest';
 import { fcmConfigSchema } from '../config.js';
 
+describe('fcmConfigSchema – maxDailyLossUsd', () => {
+  it('defaults maxDailyLossUsd to 500', () => {
+    const cfg = fcmConfigSchema.parse({});
+    expect(cfg.maxDailyLossUsd).toBe(500);
+  });
+
+  it('accepts custom maxDailyLossUsd', () => {
+    const cfg = fcmConfigSchema.parse({ maxDailyLossUsd: 200 });
+    expect(cfg.maxDailyLossUsd).toBe(200);
+  });
+});
+
 describe('fcmConfigSchema – perpMode validation', () => {
   it('passes when PERP_MODE is none and FCM is disabled (default)', () => {
     const result = fcmConfigSchema.safeParse({ enabled: false });

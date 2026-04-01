@@ -171,7 +171,7 @@ export interface PerpOrderEngineEvents {
 /** Result of a PerpRiskGate check. */
 export interface RiskGateResult {
   approved: boolean;
-  rejectReason?: 'MARGIN_UTILIZATION_EXCEEDED' | 'EXPOSURE_CAP_EXCEEDED' | 'MAX_LOSS_EXCEEDED' | 'FEE_DRAG_EXCESSIVE';
+  rejectReason?: 'MARGIN_UTILIZATION_EXCEEDED' | 'EXPOSURE_CAP_EXCEEDED' | 'MAX_LOSS_EXCEEDED' | 'FEE_DRAG_EXCESSIVE' | 'DAILY_LOSS_CAP_EXCEEDED';
   details: Record<string, string>;
 }
 
