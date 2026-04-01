@@ -35,7 +35,7 @@ import { CorrelationStore } from '../correlation/correlation-store.js';
 import { BacktestStore } from '../backtest/backtest-store.js';
 import { IntxClient, PaperPerpEngine, PerpPositionManager } from '../perp/index.js';
 import { PerpStateStore } from '../perp/perp-state-store.js';
-import { runPerpTournament } from '../perp/perp-tournament-runner.js';
+import { runPerpTournament, buildScalpingParamGrid, buildNonScalpingPerpParamGrid } from '../perp/perp-tournament-runner.js';
 import type { FeeConfig } from '../perp/fee-config.js';
 import { CBAdvancedTradeClient } from 'coinbase-api';
 import type { Candle, TradingPair } from '../core/types.js';
@@ -49,7 +49,7 @@ import {
 } from '../optimizer/index.js';
 import type { OptimizerConfig } from '../optimizer/index.js';
 import { parseBacktestConfig, DEFAULT_FEE_TAKER, DEFAULT_FEE_MAKER } from '../backtest/types.js';
-import type { RegimeLeaderboards } from '../tournament/types.js';
+import type { RegimeLeaderboards, TournamentResult } from '../tournament/types.js';
 import { SpotSignalGate } from '../risk/spot-signal-gate.js';
 import { PreLiveGate } from '../risk/pre-live-gate.js';
 import { FeedHealthMonitor } from '../core/feed-health.js';
@@ -547,6 +547,8 @@ program
       let dashboardFeeConfig: LiveFeeSnapshot | undefined;
       // Hoisted for fee refresh service (assigned inside FCM block when enabled)
       let perpClientForFeeRefresh: import('../perp/intx-client.js').IntxClient | undefined;
+      // Hoisted so dashboard server can expose perp tournament results regardless of perp block scope
+      let perpTournamentResult: TournamentResult | undefined;
       // Mutable live fee snapshots — mutated in-place by FeeRefreshService every 6h
       type LiveFeeSnapshot = import('../core/fee-refresh-service.js').LiveFeeSnapshot;
 
@@ -650,19 +652,68 @@ program
 
         if (!skipPerpTournament) {
           try {
-            const perpResult = await runPerpTournament({
-              pair: 'BTC-USD',
-              timeframe,
-              days,
-              capital,
-              topN,
-              mc: false,
-              dbPath: config.database.path,
-              feeConfig,   // FEES-01: pass fetched fee rate
-            });
+            const scalpingTimeframe = config.intx.scalpingTimeframe ?? '5m';
+
+            // Pass 1: non-scalping strategies at user-configured timeframe
+            const nonScalpingGrid = buildNonScalpingPerpParamGrid();
+            const perpResultNonScalp = nonScalpingGrid.length > 0
+              ? await runPerpTournament({
+                  pair: 'BTC-USD',
+                  timeframe,
+                  days,
+                  capital,
+                  topN,
+                  mc: false,
+                  dbPath: config.database.path,
+                  feeConfig,
+                  paramGrid: nonScalpingGrid,
+                })
+              : null;
+
+            // Pass 2: scalping strategies at scalpingTimeframe (default 5m)
+            const scalpingGrid = buildScalpingParamGrid();
+            const perpResultScalp = scalpingGrid.length > 0
+              ? await runPerpTournament({
+                  pair: 'BTC-USD',
+                  timeframe: scalpingTimeframe,
+                  days,
+                  capital,
+                  topN,
+                  mc: false,
+                  dbPath: config.database.path,
+                  feeConfig,
+                  paramGrid: scalpingGrid,
+                })
+              : null;
+
+            // Merge: combine leaderboards, re-rank by OOS Sharpe, pick overall winner
+            const combinedLeaderboard = [
+              ...(perpResultNonScalp?.leaderboard ?? []),
+              ...(perpResultScalp?.leaderboard ?? []),
+            ].sort((a, b) => b.oosMetrics.sharpeRatio - a.oosMetrics.sharpeRatio);
+
+            const baseResult = perpResultNonScalp ?? perpResultScalp!;
+            const perpResult = {
+              ...baseResult,
+              leaderboard: combinedLeaderboard,
+              strategiesEvaluated:
+                (perpResultNonScalp?.strategiesEvaluated ?? 0) +
+                (perpResultScalp?.strategiesEvaluated ?? 0),
+              regimeLeaderboards:
+                (perpResultNonScalp?.regimeLeaderboards ?? perpResultScalp?.regimeLeaderboards),
+            };
+
+            out.info(
+              `${perpResultNonScalp?.strategiesEvaluated ?? 0} non-scalping perp strategies at ${timeframe}`,
+            );
+            out.info(
+              `${perpResultScalp?.strategiesEvaluated ?? 0} scalping perp strategies at ${scalpingTimeframe}`,
+            );
+
+            perpTournamentResult = perpResult;
             perpRegimeLeaderboards = perpResult.regimeLeaderboards;
             out.info(
-              `${perpResult.strategiesEvaluated} perp strategies evaluated in ${(perpResult.durationMs / 1000).toFixed(1)}s`,
+              `${perpResult.strategiesEvaluated} perp strategies evaluated in total`,
             );
             for (const entry of perpResult.leaderboard.slice(0, topN)) {
               const sharpe = entry.oosMetrics.sharpeRatio.toFixed(4);
@@ -824,6 +875,7 @@ program
         feedHealthMonitor,
         tournamentStore,
         strategyRegistry: registry,
+        perpTournamentResult,
       });
 
       await server.start();

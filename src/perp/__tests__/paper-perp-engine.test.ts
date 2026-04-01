@@ -622,6 +622,75 @@ describe('PaperPerpEngine', () => {
       engine.stop();
     });
   });
+
+  // ── Configurable leverage ──────────────────────────────────────────
+  describe('configurable leverage from config.defaultLeverage', () => {
+    it('strategy-driven entry uses config.defaultLeverage (not hardcoded 5)', async () => {
+      const mockStrategy: IStrategy = {
+        name: 'mock-long',
+        minCandles: 1,
+        requiredIndicators: [],
+        evaluate: () => [{
+          strategyName: 'mock-long',
+          pair: 'BTC-USD',
+          timeframe: '1h' as const,
+          timestamp: Date.now(),
+          direction: 'long' as const,
+          confidence: 1,
+          reasoning: 'test',
+        }],
+      };
+
+      const cfg = makeConfig({ defaultLeverage: 10 });
+      const engine = new PaperPerpEngine({ intxClient, stateStore, config: cfg, initialStrategy: mockStrategy });
+      engine.start();
+
+      engine.onCandle(makeCandle('50000', 0));
+      await new Promise<void>((r) => setTimeout(r, 0));
+
+      expect(stateStore.createSession).toHaveBeenCalledTimes(1);
+      const session = stateStore.createSession.mock.calls[0][0];
+      expect(session.leverage).toBe(10);
+
+      engine.stop();
+    });
+
+    it('mark-price auto-open long uses config.defaultLeverage (not hardcoded 5)', async () => {
+      const cfg = makeConfig({ defaultLeverage: 12 });
+      const engine = new PaperPerpEngine({
+        intxClient, stateStore, config: cfg,
+        onSignal: () => 'open-long',
+      });
+      engine.start();
+
+      intxClient.emit('markPrice', makeMarkPriceEvt(cfg.btcProductId, '50000'));
+      await Promise.resolve();
+
+      expect(stateStore.createSession).toHaveBeenCalledTimes(1);
+      const session = stateStore.createSession.mock.calls[0][0];
+      expect(session.leverage).toBe(12);
+
+      engine.stop();
+    });
+
+    it('mark-price auto-open short uses config.defaultLeverage (not hardcoded 5)', async () => {
+      const cfg = makeConfig({ defaultLeverage: 8 });
+      const engine = new PaperPerpEngine({
+        intxClient, stateStore, config: cfg,
+        onSignal: () => 'open-short',
+      });
+      engine.start();
+
+      intxClient.emit('markPrice', makeMarkPriceEvt(cfg.btcProductId, '50000'));
+      await Promise.resolve();
+
+      expect(stateStore.createSession).toHaveBeenCalledTimes(1);
+      const session = stateStore.createSession.mock.calls[0][0];
+      expect(session.leverage).toBe(8);
+
+      engine.stop();
+    });
+  });
 });
 
 // ── Auto-switch tests ──────────────────────────────────────────────────────

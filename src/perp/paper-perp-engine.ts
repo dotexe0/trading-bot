@@ -393,7 +393,7 @@ export class PaperPerpEngine extends EventEmitter {
           );
           if (this.currentPosition === null) {
             const direction: PerpDirection = signal.direction;
-            this.openPaperPosition(instrument, direction, '0.01', 5, candle.close).catch(
+            this.openPaperPosition(instrument, direction, '0.01', this.config.defaultLeverage ?? 5, candle.close).catch(
               (err) => {
                 log.error(
                   { err: err instanceof Error ? err.message : String(err) },
@@ -814,12 +814,12 @@ export class PaperPerpEngine extends EventEmitter {
       const directive = this.onSignal(evt.instrument, evt.markPrice);
       switch (directive) {
         case 'open-long':
-          this.openPaperPosition(evt.instrument, 'long', '0.01', 5, evt.markPrice).catch((err) => {
+          this.openPaperPosition(evt.instrument, 'long', '0.01', this.config.defaultLeverage ?? 5, evt.markPrice).catch((err) => {
             log.error({ err: err instanceof Error ? err.message : String(err) }, '[PAPER] openPaperPosition failed');
           });
           break;
         case 'open-short':
-          this.openPaperPosition(evt.instrument, 'short', '0.01', 5, evt.markPrice).catch((err) => {
+          this.openPaperPosition(evt.instrument, 'short', '0.01', this.config.defaultLeverage ?? 5, evt.markPrice).catch((err) => {
             log.error({ err: err instanceof Error ? err.message : String(err) }, '[PAPER] openPaperPosition failed');
           });
           break;
