@@ -1103,4 +1103,54 @@ describe('feed health guard', () => {
     // Strategy should be evaluated (no guard)
     expect(strategy.evaluateCallCount).toBeGreaterThan(0);
   });
+
+  // ── preloadBuffer partial-candle guard ────────────────────────────────
+
+  describe('preloadBuffer partial-candle guard', () => {
+    function makeMockCandleRepo(candles: Candle[]) {
+      return {
+        getCandles: vi.fn((_pair: string, _tf: string, _start: number, _end: number) => candles),
+      };
+    }
+
+    it('excludes in-progress candle whose interval has not yet closed', async () => {
+      // 1m candle whose START is 30 s ago → still open (interval ends 30 s from now)
+      const now = Date.now();
+      const inProgressTs = now - 30_000; // started 30s ago, ends 30s from now
+
+      const completedCandle: Candle = makeCandle('50000', 0, {
+        timestamp: now - 120_000, // 2 min ago — fully closed
+        timeframe: '1m',
+      });
+      const inProgressCandle: Candle = makeCandle('50100', 1, {
+        timestamp: inProgressTs,
+        timeframe: '1m',
+      });
+
+      const mockRepo = makeMockCandleRepo([completedCandle, inProgressCandle]);
+      const engine = createEngine({ candleRepo: mockRepo as any });
+      await engine.start();
+
+      // Buffer should only contain the completed candle, NOT the in-progress one
+      const bufSize = engine.getBufferSize('BTC-USD:1m');
+      expect(bufSize).toBe(1);
+    });
+
+    it('includes candle whose interval closed at least 1 ms before start()', async () => {
+      const now = Date.now();
+      // A 1m candle started 61s ago → interval ended 1s ago → fully closed
+      const closedTs = now - 61_000;
+
+      const closedCandle: Candle = makeCandle('50000', 0, {
+        timestamp: closedTs,
+        timeframe: '1m',
+      });
+
+      const mockRepo = makeMockCandleRepo([closedCandle]);
+      const engine = createEngine({ candleRepo: mockRepo as any });
+      await engine.start();
+
+      expect(engine.getBufferSize('BTC-USD:1m')).toBe(1);
+    });
+  });
 });

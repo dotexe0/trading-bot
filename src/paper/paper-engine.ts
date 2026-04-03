@@ -533,6 +533,12 @@ export class PaperTradingEngine extends EventEmitter {
     );
 
     // 4. Signal processing
+    if (signals.length === 0) {
+      log.info(
+        { pair: candle.pair, strategyName: this.strategy.name, regime, bufferLen: buffer.length },
+        'No signals emitted this candle',
+      );
+    }
     for (const signal of signals) {
       // Skip shorts if not allowed
       if (!this.config.allowShorts && signal.direction === 'short') {
@@ -635,10 +641,15 @@ export class PaperTradingEngine extends EventEmitter {
       return;
     }
 
+    // Strip any in-progress candle whose interval has not yet closed.
+    // Candle timestamp marks the START of the interval; the candle is fully
+    // closed only when timestamp + timeframeMs <= now.
+    const complete = historical.filter((c) => c.timestamp + timeframeMs <= now);
+
     // Enforce bufferSize cap (getCandles returns ascending order)
-    const seeded = historical.length > bufferSize
-      ? historical.slice(historical.length - bufferSize)
-      : historical;
+    const seeded = complete.length > bufferSize
+      ? complete.slice(complete.length - bufferSize)
+      : complete;
 
     const key = `${pair}:${timeframe}`;
     this.candleBuffer.set(key, seeded);
