@@ -139,7 +139,11 @@ export async function registerStrategyRoutes(
     }
 
     const activeEngines = deps.activationBridge.getActiveEngines();
-    const activeNames = new Set(activeEngines.keys());
+    // Engine keys are "strategyName:PAIR" (e.g. "sma-crossover:BTC-USD").
+    // Strip the pair suffix so they match the leaderboard's bare strategy names.
+    const activeBaseNames = new Set(
+      Array.from(activeEngines.keys()).map((k) => k.split(':')[0]),
+    );
 
     return {
       runAt: result.runTimestamp,
@@ -154,7 +158,7 @@ export async function registerStrategyRoutes(
         oosWinRate: parseFloat(String(e.oosMetrics.winRate)),
         disqualified: e.disqualified,
         disqualifyReason: e.disqualifyReason,
-        active: activeNames.has(e.strategyName),
+        active: activeBaseNames.has(e.strategyName),
       })),
     };
   });

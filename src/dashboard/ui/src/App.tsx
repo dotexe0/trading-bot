@@ -824,7 +824,7 @@ function App(): React.ReactElement {
                   </div>
                   <div className="panel">
                     <div className="panel-title">Sessions</div>
-                    {sessions.length === 0 ? (
+                    {sessions.length === 0 && perpPositions.length === 0 ? (
                       <div className="empty-state">No active sessions</div>
                     ) : (
                       <table className="data-table">
@@ -844,6 +844,20 @@ function App(): React.ReactElement {
                               <td>{s.mode}</td>
                               <td className={s.status === 'running' ? 'text-green' : 'text-muted'}>
                                 {s.status}
+                              </td>
+                            </tr>
+                          ))}
+                          {perpPositions.map((p) => (
+                            <tr key={p.id}>
+                              <td>
+                                {perpTournament?.leaderboard?.find(
+                                  (e) => !e.disqualified && e.rank === 1,
+                                )?.strategyName ?? 'perp'}
+                              </td>
+                              <td>{p.instrument}</td>
+                              <td>perp</td>
+                              <td className={p.status === 'open' ? 'text-green' : 'text-muted'}>
+                                {p.status === 'open' ? 'running' : p.status}
                               </td>
                             </tr>
                           ))}

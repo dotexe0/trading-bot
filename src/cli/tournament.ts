@@ -124,6 +124,11 @@ program
           if (s === 'z-score-mean-reversion' && overrides.zScoreWindow !== undefined) {
             merged.period = overrides.zScoreWindow;
           }
+          if (s === 'momentum-breakout') {
+            if (overrides.momentumBreakoutWindow !== undefined) merged.breakoutWindow = overrides.momentumBreakoutWindow;
+            if (overrides.momentumVolumeWindow !== undefined) merged.volumeWindow = overrides.momentumVolumeWindow;
+            if (overrides.momentumVolumeMultiplier !== undefined) merged.volumeMultiplier = overrides.momentumVolumeMultiplier;
+          }
           return merged;
         });
       }

@@ -66,8 +66,15 @@ export function StrategiesPanel({
   }
 
   // ── Running strategy names set for O(1) lookup ──────────────────────
+  // Engine keys from /api/strategies are "strategyName:PAIR" (e.g. "sma-crossover:BTC-USD").
+  // Strip the pair suffix so they match the tournament leaderboard's bare strategy names.
   const runningNames = useMemo(
-    () => new Set(strategies.filter((s) => s.status === 'running').map((s) => s.name)),
+    () =>
+      new Set(
+        strategies
+          .filter((s) => s.status === 'running')
+          .map((s) => s.name.split(':')[0]),
+      ),
     [strategies],
   );
 
@@ -289,7 +296,9 @@ export function StrategiesPanel({
                       >
                         DISQUALIFIED
                       </span>
-                    ) : null}
+                    ) : (
+                      <span className="status-badge status-stopped">STOPPED</span>
+                    )}
                   </td>
                 </tr>
               );

@@ -25,6 +25,7 @@ import type { PerpStateStore } from '../../perp/perp-state-store.js';
 import type { FeedHealthMonitor, FeedHealthState } from '../../core/feed-health.js';
 import type { TournamentStore } from '../../tournament/tournament-store.js';
 import type { StrategyRegistry } from '../../strategies/registry.js';
+import type { TournamentResult } from '../../tournament/types.js';
 import {
   toApiSession,
   toApiPaperSession,
@@ -90,6 +91,8 @@ export interface DashboardDeps {
   tournamentStore?: TournamentStore;
   /** All registered strategy names — used by /api/strategies/available endpoint. */
   strategyRegistry?: StrategyRegistry;
+  /** Perp tournament result from the most recent perp tournament run. */
+  perpTournamentResult?: TournamentResult;
 }
 
 export interface RouteDeps {
@@ -111,6 +114,8 @@ export interface RouteDeps {
   tournamentStore?: TournamentStore;
   /** All registered strategy names — used by /api/strategies/available endpoint. */
   strategyRegistry?: StrategyRegistry;
+  /** Perp tournament result from the most recent perp tournament run. */
+  perpTournamentResult?: TournamentResult;
 }
 
 export interface DashboardServer {
@@ -368,6 +373,7 @@ export async function createDashboardServer(
     spotFeeConfig: deps.spotFeeConfig,
     tournamentStore: deps.tournamentStore,
     strategyRegistry: deps.strategyRegistry,
+    perpTournamentResult: deps.perpTournamentResult,
   };
 
   // Register WebSocket handler
