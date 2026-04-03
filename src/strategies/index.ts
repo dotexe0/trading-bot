@@ -1,7 +1,7 @@
 /**
  * Strategy framework barrel export.
  *
- * Re-exports types, config validation, registry, all 7 strategy
+ * Re-exports types, config validation, registry, strategy
  * implementations, and createDefaultRegistry().
  */
 
@@ -65,10 +65,11 @@ export function createDefaultRegistry(): StrategyRegistry {
     return new ZScoreMeanReversionStrategy(cfg);
   });
 
-  registry.register('multi-timeframe-trend', (c: StrategyConfig) => {
-    const cfg = c as Extract<StrategyConfig, { strategy: 'multi-timeframe-trend' }>;
-    return new MultiTimeframeTrendStrategy(cfg);
-  });
+  // NOTE: multi-timeframe-trend is NOT registered here.
+  // It requires additionalCandles (higher-TF data) which no engine currently
+  // provides at runtime. Including it in tournaments produces a guaranteed
+  // 0-trade entry that pollutes the leaderboard. It remains available for
+  // explicit instantiation when multi-TF data is wired up.
 
   registry.register('momentum-breakout', (c: StrategyConfig) => {
     const cfg = c as Extract<StrategyConfig, { strategy: 'momentum-breakout' }>;

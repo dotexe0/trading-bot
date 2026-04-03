@@ -808,7 +808,7 @@ program
               feedHealthMonitor,
             });
 
-            paperPerpEngine.start();
+            await paperPerpEngine.start();
             perpEngineEmitters.push(paperPerpEngine);
 
             perpLiveFeed.on('candle', (candle: Candle) => {
