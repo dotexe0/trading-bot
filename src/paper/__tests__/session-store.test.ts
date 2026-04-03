@@ -242,4 +242,58 @@ describe('SessionStore', () => {
     const result = store.getResult('nonexistent-id');
     expect(result).toBeNull();
   });
+
+  describe('getLastFinalEquity', () => {
+    it('returns null when no prior sessions exist', () => {
+      const result = store.getLastFinalEquity('BTC-USD');
+      expect(result).toBeNull();
+    });
+
+    it('returns null when prior sessions have no final equity', () => {
+      const config = makeConfig({ pair: 'BTC-USD' });
+      store.createSession(config, 'test-strategy');
+      // Session still running — no final equity
+      expect(store.getLastFinalEquity('BTC-USD')).toBeNull();
+    });
+
+    it('returns final equity from the most recent stopped session', () => {
+      const config = makeConfig({ pair: 'BTC-USD' });
+
+      const s1 = store.createSession(config, 'strat-a');
+      store.endSession(s1.id, '10500.25', 'stopped');
+
+      const s2 = store.createSession(config, 'strat-b');
+      store.endSession(s2.id, '10800.75', 'stopped');
+
+      expect(store.getLastFinalEquity('BTC-USD')).toBe('10800.75');
+    });
+
+    it('ignores sessions with error status', () => {
+      const config = makeConfig({ pair: 'BTC-USD' });
+
+      const s1 = store.createSession(config, 'strat-a');
+      store.endSession(s1.id, '9500', 'stopped');
+
+      const s2 = store.createSession(config, 'strat-b');
+      store.endSession(s2.id, '0', 'error');
+
+      // Should return s1's equity, not s2's
+      expect(store.getLastFinalEquity('BTC-USD')).toBe('9500');
+    });
+
+    it('filters by pair', () => {
+      const btcConfig = makeConfig({ pair: 'BTC-USD' });
+      const ethConfig = makeConfig({ pair: 'ETH-USD' });
+
+      const s1 = store.createSession(btcConfig, 'strat-a');
+      store.endSession(s1.id, '10500', 'stopped');
+
+      const s2 = store.createSession(ethConfig, 'strat-b');
+      store.endSession(s2.id, '5000', 'stopped');
+
+      expect(store.getLastFinalEquity('BTC-USD')).toBe('10500');
+      expect(store.getLastFinalEquity('ETH-USD')).toBe('5000');
+      expect(store.getLastFinalEquity('SOL-USD')).toBeNull();
+    });
+  });
 });

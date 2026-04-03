@@ -426,6 +426,11 @@ program
             if (s === 'z-score-mean-reversion' && overrides.zScoreWindow !== undefined) {
               merged.period = overrides.zScoreWindow;
             }
+            if (s === 'momentum-breakout') {
+              if (overrides.momentumBreakoutWindow !== undefined) merged.breakoutWindow = overrides.momentumBreakoutWindow;
+              if (overrides.momentumVolumeWindow !== undefined) merged.volumeWindow = overrides.momentumVolumeWindow;
+              if (overrides.momentumVolumeMultiplier !== undefined) merged.volumeMultiplier = overrides.momentumVolumeMultiplier;
+            }
             return merged;
           });
         }
@@ -470,11 +475,18 @@ program
               feedHealthMonitor.onCandle(candle.pair);
             });
 
+            // Carry forward equity from last completed session (if any)
+            const lastEquity = sessionStore.getLastFinalEquity(tradePair);
+            const effectiveCapital = lastEquity ?? capital;
+            if (lastEquity) {
+              out.info(`${tradePair}: carrying forward equity $${parseFloat(lastEquity).toFixed(2)} from last session`);
+            }
+
             const paperConfig = parsePaperConfig({
               pair: tradePair,
               timeframe,
               strategyConfig: entry.strategyConfig,
-              initialCapital: capital,
+              initialCapital: effectiveCapital,
             });
 
             const engine = new PaperTradingEngine({
@@ -579,11 +591,13 @@ program
           feedHealthMonitor.onCandle(candle.pair);
         });
 
+        const adHocPair = tradingPairs[0]; // default to first configured pair for ad-hoc starts
+        const lastEquityAdHoc = sessionStore.getLastFinalEquity(adHocPair);
         const paperConfig = parsePaperConfig({
-          pair: tradingPairs[0], // default to first configured pair for ad-hoc starts
+          pair: adHocPair,
           timeframe,
           strategyConfig: stratConfig,
-          initialCapital: capital,
+          initialCapital: lastEquityAdHoc ?? capital,
         });
         const engine = new PaperTradingEngine({
           config: paperConfig,

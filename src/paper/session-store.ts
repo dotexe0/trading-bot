@@ -251,6 +251,19 @@ export class SessionStore {
   }
 
   /**
+   * Get the final equity from the most recent completed session for a given pair.
+   * Returns null if no prior session exists or none had a recorded final equity.
+   */
+  getLastFinalEquity(pair: TradingPair): string | null {
+    const row = this.sqlite.prepare(
+      `SELECT final_equity FROM paper_sessions
+       WHERE pair = ? AND status = 'stopped' AND final_equity IS NOT NULL
+       ORDER BY end_time DESC, rowid DESC LIMIT 1`,
+    ).get(pair) as { final_equity: string } | undefined;
+    return row?.final_equity ?? null;
+  }
+
+  /**
    * Delete all paper trading history and optimizer outputs.
    * Returns row counts cleared per table.
    */
