@@ -388,6 +388,31 @@ describe('TournamentRunner regime leaderboards', () => {
       expect(result.leaderboard[1].rank).toBe(2);
     });
 
+    it('disqualifies strategy with 0 OOS trades', async () => {
+      // zero-trade: IS=0, OOS=0, totalTrades=0 → robustness=0 but 0 trades should disqualify
+      // real-strat: IS=2.0, OOS=1.5 → robustness=0.75, qualifies
+      const zeroTradeResult = makeWfResult(0, [0]);
+      zeroTradeResult.aggregateValidateMetrics.totalTrades = 0;
+      mockWfRunner.run
+        .mockReturnValueOnce(zeroTradeResult)           // zero-trade
+        .mockReturnValueOnce(makeWfResult(1.5, [2.0])); // real-strat
+
+      mockRegistry.list.mockReturnValue(['zero-trade', 'real-strat']);
+
+      const config = makeTournamentConfig();
+      const result = await runner.run(config, dummyCandles);
+
+      // real-strat should be rank 1 (qualified), zero-trade should be rank 2 (disqualified)
+      expect(result.leaderboard[0].strategyName).toBe('real-strat');
+      expect(result.leaderboard[0].disqualified).toBe(false);
+      expect(result.leaderboard[0].rank).toBe(1);
+
+      expect(result.leaderboard[1].strategyName).toBe('zero-trade');
+      expect(result.leaderboard[1].disqualified).toBe(true);
+      expect(result.leaderboard[1].disqualifyReason).toMatch(/No OOS trades/);
+      expect(result.leaderboard[1].rank).toBe(2);
+    });
+
     it('falls back to IS Sharpe ranking when all strategies are disqualified', async () => {
       // strat-a: IS=-1.0, OOS=2.0 → robustness=-2.0, disqualified
       // strat-b: IS=-0.5, OOS=1.0 → robustness=-2.0, disqualified but higher IS Sharpe

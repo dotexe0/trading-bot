@@ -184,10 +184,14 @@ export class TournamentRunner {
     // Extract entries from accumulators for sorting
     const entries = accumulators.map((a) => a.entry);
 
-    // Mark disqualified entries: robustness < 0 means IS and OOS point in opposite
-    // directions — the OOS result is a statistical fluke, not genuine edge.
+    // Mark disqualified entries:
+    // 1. robustness < 0 means IS and OOS point in opposite directions — statistical fluke
+    // 2. totalTrades === 0 means strategy never traded — no edge to validate
     for (const entry of entries) {
-      if (entry.robustnessRatio < 0) {
+      if (entry.oosMetrics.totalTrades === 0) {
+        entry.disqualified = true;
+        entry.disqualifyReason = 'No OOS trades — strategy never traded';
+      } else if (entry.robustnessRatio < 0) {
         entry.disqualified = true;
         entry.disqualifyReason =
           `IS/OOS direction mismatch (robustness ${entry.robustnessRatio.toFixed(2)})`;
