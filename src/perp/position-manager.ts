@@ -345,7 +345,14 @@ export class PerpPositionManager extends EventEmitter {
     const { regime } = result;
 
     // Strategy-based signal evaluation — routing to openPosition / closePosition
-    if (this.ctrl.getStrategy()) {
+    if (!this.ctrl.getStrategy()) {
+      log.warn(
+        { pair: candle.pair, regime, bufferLen: this.ctrl.getCandleBuffer().length },
+        'No strategy set — candle processed but no signal evaluation',
+      );
+      return;
+    }
+    {
       const timeframe = candle.timeframe as Timeframe;
       const signals = this.ctrl.getStrategy()!.evaluate(
         this.ctrl.getCandleBuffer(),

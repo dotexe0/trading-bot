@@ -34,6 +34,7 @@ import { parseRiskConfig } from '../risk/config.js';
 import { CorrelationStore } from '../correlation/correlation-store.js';
 import { BacktestStore } from '../backtest/backtest-store.js';
 import { IntxClient, PaperPerpEngine, PerpPositionManager } from '../perp/index.js';
+import { createLivePerpRegistry } from '../perp/strategies/index.js';
 import { PerpStateStore } from '../perp/perp-state-store.js';
 import { runPerpTournament, buildScalpingParamGrid, buildNonScalpingPerpParamGrid } from '../perp/perp-tournament-runner.js';
 import type { FeeConfig } from '../perp/fee-config.js';
@@ -459,7 +460,15 @@ program
         }
 
         if (mode === 'paper') {
-          for (const entry of result.leaderboard.slice(0, topN)) {
+          // Filter out strategies with zero OOS trades — they can't produce signals
+          const activatable = result.leaderboard.filter(
+            (e) => e.oosMetrics.totalTrades > 0,
+          );
+          if (activatable.length === 0) {
+            out.warn(`${tradePair}: all strategies had 0 OOS trades — skipping paper engine activation`);
+          }
+
+          for (const entry of activatable.slice(0, topN)) {
             const liveFeed = new LiveDataFeed({
               apiKey: config.coinbase.apiKeyName,
               apiSecret: config.coinbase.apiKeySecret,
@@ -773,11 +782,28 @@ program
 
           if (config.intx.perpMode === 'paper') {
             // PIPE-02: PaperPerpEngine
+            // Create initial strategy from tournament winner so the engine can
+            // trade immediately rather than waiting for regime classification.
+            const perpLiveRegistry = createLivePerpRegistry(fundingRateProvider);
+            const perpWinner = perpTournamentResult?.leaderboard.find(
+              (e) => e.oosMetrics.totalTrades > 0,
+            );
+            const perpInitialStrategy = perpWinner
+              ? perpLiveRegistry.create(perpWinner.strategyConfig)
+              : undefined;
+            if (perpInitialStrategy) {
+              out.info(`Perp initial strategy: ${perpInitialStrategy.name}`);
+            } else {
+              out.warn('No perp tournament winner with OOS trades — perp engine starts without strategy');
+            }
+
             const paperPerpEngine = new PaperPerpEngine({
               intxClient: perpClient,
               stateStore: perpStateStore!,
               config: config.intx,
               regimeLeaderboards: perpRegimeLeaderboards,
+              initialStrategy: perpInitialStrategy,
+              strategyRegistry: perpLiveRegistry,
               fundingRateProvider,
               feedHealthMonitor,
             });
@@ -802,11 +828,21 @@ program
             out.table('  Activated', 'PaperPerpEngine [BTC-PERP]');
           } else if (config.intx.perpMode === 'live') {
             // PIPE-03: PerpPositionManager
+            const livePerpRegistry = createLivePerpRegistry(fundingRateProvider);
+            const liveWinner = perpTournamentResult?.leaderboard.find(
+              (e) => e.oosMetrics.totalTrades > 0,
+            );
+            const liveInitialStrategy = liveWinner
+              ? livePerpRegistry.create(liveWinner.strategyConfig)
+              : undefined;
+
             const perpManager = new PerpPositionManager({
               intxClient: perpClient,
               stateStore: perpStateStore!,
               config: config.intx,
               regimeLeaderboards: perpRegimeLeaderboards,
+              initialStrategy: liveInitialStrategy,
+              strategyRegistry: livePerpRegistry,
               fundingRateProvider,
               feedHealthMonitor,
             });

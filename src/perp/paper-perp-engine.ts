@@ -314,7 +314,14 @@ export class PaperPerpEngine extends EventEmitter {
     const { regime } = result;
 
     // Strategy-based signal evaluation (only when onSignal is not the signal source)
-    if (this.ctrl.getStrategy() && !this.onSignal) {
+    if (!this.ctrl.getStrategy()) {
+      log.warn(
+        { pair: candle.pair, regime, bufferLen: this.ctrl.getCandleBuffer().length },
+        '[PAPER] No strategy set — candle processed but no signal evaluation',
+      );
+      return;
+    }
+    if (!this.onSignal) {
       const instrument = candle.pair === 'ETH-USD' ? this.config.ethProductId : this.config.btcProductId;
       const timeframe = candle.timeframe as Timeframe;
       const signals = this.ctrl.getStrategy()!.evaluate(
