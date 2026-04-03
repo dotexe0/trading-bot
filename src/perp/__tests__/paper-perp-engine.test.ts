@@ -769,14 +769,15 @@ describe('auto-switch', () => {
     const switchEvents: any[] = [];
     engine.on('strategySwitch', (data) => switchEvents.push(data));
 
-    // Candle 1: classify returns RANGING -> sets currentRegime=RANGING, no switch (no prior regime)
+    // Candle 1: RANGING -> first observation -> sets initial strategy to RANGING winner (stratA)
     engine.onCandle(makeCandle('50000', 0));
-    expect(switchEvents).toHaveLength(0);
-
-    // Candle 2: classify returns TRENDING -> RANGING!=TRENDING, no position -> immediate switch
-    engine.onCandle(makeCandle('50000', 1));
     expect(switchEvents).toHaveLength(1);
-    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-a');
+
+    // Candle 2: TRENDING -> regime change, no position -> immediate switch to TRENDING winner (stratB)
+    engine.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(2);
+    expect(switchEvents[1].newStrategy).toBe('perp-strategy-b');
   });
 
   // PERP-SW-02: Deferred switch executes when position closes ──────────
@@ -823,21 +824,23 @@ describe('auto-switch', () => {
     await engine.openPaperPosition('BTC-USD', 'long', '0.01', 5, '50000');
     expect(engine.isPositionOpen()).toBe(true);
 
-    // Candle 1: RANGING -> sets currentRegime=RANGING; position open but no regime change -> no switch
+    // Candle 1: RANGING -> first observation -> sets initial strategy to RANGING winner (stratA)
+    //           Position is open but executeStrategySwitch only sets this.strategy; no position movement
     engine.onCandle(makeCandle('50000', 0));
-    expect(switchEvents).toHaveLength(0);
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-a');
 
-    // Candle 2: TRENDING -> RANGING!=TRENDING, position open -> pendingSwitch set (deferred)
+    // Candle 2: TRENDING -> regime change, position open -> pendingSwitch set (deferred)
     engine.onCandle(makeCandle('50000', 1));
-    expect(switchEvents).toHaveLength(0); // switch deferred
+    expect(switchEvents).toHaveLength(1); // still 1, deferred
 
     // Close position -> pendingSwitch executes synchronously in closePaperPosition
     engine.closePaperPosition('51000', 'test-close');
     expect(engine.isPositionOpen()).toBe(false);
 
     // Pending switch must have fired
-    expect(switchEvents).toHaveLength(1);
-    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+    expect(switchEvents).toHaveLength(2);
+    expect(switchEvents[1].newStrategy).toBe('perp-strategy-b');
   });
 
   // PERP-SW-03: Empty regime falls back to overall winner ──────────────
@@ -872,14 +875,52 @@ describe('auto-switch', () => {
     const switchEvents: any[] = [];
     engine.on('strategySwitch', (data) => switchEvents.push(data));
 
-    // Candle 1: TRENDING -> sets currentRegime=TRENDING, no switch (no prior regime)
+    // Candle 1: TRENDING -> first observation -> sets initial strategy to TRENDING winner (stratA)
     engine.onCandle(makeCandle('50000', 0));
-    expect(switchEvents).toHaveLength(0);
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-a');
 
-    // Candle 2: VOLATILE -> VOLATILE leaderboard is empty -> fallback to 'perp-strategy-b'
+    // Candle 2: VOLATILE -> regime change, empty VOLATILE -> fallback to overall winner (stratB)
+    engine.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(2);
+    expect(switchEvents[1].newStrategy).toBe('perp-strategy-b');
+  });
+
+  // PERP-SW-04: First regime observation sets strategy immediately ──────
+
+  it('PERP-SW-04: sets initial strategy on first regime observation when strategy is null', () => {
+    const stratA: IStrategy = {
+      name: 'perp-strategy-a',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const stratB: IStrategy = {
+      name: 'perp-strategy-b',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+
+    // TRENDING winner = stratA, RANGING winner = stratB
+    const leaderboards = makeRegimeLeaderboards('perp-strategy-a', 'perp-strategy-b');
+
+    // classify always returns TRENDING (stable regime — never changes)
+    classifySpy = vi.spyOn(RegimeClassifier.prototype, 'classify').mockReturnValue(MarketRegime.TRENDING);
+
+    const { engine } = makeAutoSwitchEngine(stratA, stratB, leaderboards);
+
+    const switchEvents: any[] = [];
+    engine.on('strategySwitch', (data) => switchEvents.push(data));
+
+    // Candle 1: first regime observation -> strategy set immediately to TRENDING winner (stratA)
+    engine.onCandle(makeCandle('50000', 0));
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-a');
+
+    // Candle 2: same regime, strategy no longer null -> no additional switch
     engine.onCandle(makeCandle('50000', 1));
     expect(switchEvents).toHaveLength(1);
-    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
   });
 });
 
@@ -990,7 +1031,7 @@ describe('startup re-hydration', () => {
   let stateStore: ReturnType<typeof makeStateStore>;
   const config = makeConfig();
 
-  function makeOpenSession(overrides: Partial<{ id: string; instrument: string; direction: 'long' | 'short'; entryPrice: string }> = {}) {
+  function makeOpenSession(overrides: Partial<{ id: string; instrument: string; direction: 'long' | 'short'; entryPrice: string; openedAt: number }> = {}) {
     return {
       id: 'session-001',
       instrument: 'BIP-20DEC30-CDE',
@@ -1097,6 +1138,24 @@ describe('startup re-hydration', () => {
       'session-old',
       expect.objectContaining({ status: 'closed', closeReason: 'engine-restart' }),
     );
+
+    engine.stop();
+  });
+
+  it('closes stale session older than 7 days on startup instead of re-adopting it', () => {
+    const eightDaysAgoMs = Date.now() - 8 * 24 * 60 * 60 * 1000;
+    const staleSession = makeOpenSession({ id: 'stale-session', openedAt: eightDaysAgoMs });
+    stateStore.getAllOpenSessions = vi.fn().mockReturnValue([staleSession]);
+
+    const engine = new PaperPerpEngine({ intxClient, stateStore, config });
+    engine.start();
+
+    // Stale session must be closed, not re-adopted
+    expect(stateStore.updateSession).toHaveBeenCalledWith(
+      'stale-session',
+      expect.objectContaining({ status: 'closed', closeReason: 'stale-session-startup' }),
+    );
+    expect(engine.getCurrentSession()).toBeNull();
 
     engine.stop();
   });

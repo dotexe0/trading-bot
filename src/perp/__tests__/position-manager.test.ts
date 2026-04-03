@@ -989,7 +989,7 @@ describe('ORDER-03: close retry with emergency fallback', () => {
     expect(localManager.isPositionOpen()).toBe(true);
 
     // Now trigger close via onCandle with close strategy
-    (localManager as any).strategy = closeStrategy;
+    (localManager as any).ctrl.setStrategy(closeStrategy);
     localManager.onCandle(makeCandle('50000', 0));
 
     // Wait for all retries + backoff to complete
@@ -1037,7 +1037,7 @@ describe('ORDER-03: close retry with emergency fallback', () => {
       requiredIndicators: [],
       evaluate: () => [{ strategyName: 'close-strategy', pair: 'BTC-USD', timeframe: '1h', timestamp: Date.now(), direction: 'close' as const, confidence: 1.0, reasoning: 'test' }],
     };
-    (localManager as any).strategy = closeStrategy;
+    (localManager as any).ctrl.setStrategy(closeStrategy);
     localManager.onCandle(makeCandle('50000', 0));
 
     // Wait for retry + emergency
@@ -1086,7 +1086,7 @@ describe('ORDER-03: close retry with emergency fallback', () => {
       requiredIndicators: [],
       evaluate: () => [{ strategyName: 'close-strategy', pair: 'BTC-USD', timeframe: '1h', timestamp: Date.now(), direction: 'close' as const, confidence: 1.0, reasoning: 'test' }],
     };
-    (localManager as any).strategy = closeStrategy;
+    (localManager as any).ctrl.setStrategy(closeStrategy);
     localManager.onCandle(makeCandle('50000', 0));
 
     // Wait for retry + emergency
@@ -1181,14 +1181,15 @@ describe('auto-switch', () => {
     const switchEvents: any[] = [];
     mgr.on('strategySwitch', (data) => switchEvents.push(data));
 
-    // Candle 1: RANGING -> sets currentRegime=RANGING, no switch (no prior regime)
+    // Candle 1: RANGING -> first observation -> sets initial strategy to RANGING winner (stratA)
     mgr.onCandle(makeCandle('50000', 0));
-    expect(switchEvents).toHaveLength(0);
-
-    // Candle 2: TRENDING -> RANGING!=TRENDING, no session -> immediate switch
-    mgr.onCandle(makeCandle('50000', 1));
     expect(switchEvents).toHaveLength(1);
-    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-a');
+
+    // Candle 2: TRENDING -> regime change, no session -> immediate switch to TRENDING winner (stratB)
+    mgr.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(2);
+    expect(switchEvents[1].newStrategy).toBe('perp-strategy-b');
   });
 
   // PERP-PM-SW-02: Deferred switch executes when session closes ─────────
@@ -1241,21 +1242,23 @@ describe('auto-switch', () => {
     });
     expect(mgr.isPositionOpen()).toBe(true);
 
-    // Candle 1: RANGING -> currentRegime=RANGING; session open but no regime change -> no switch
+    // Candle 1: RANGING -> first observation -> sets initial strategy to RANGING winner (stratA)
+    //           Session is open but initial set only assigns this.strategy; no position movement
     mgr.onCandle(makeCandle('50000', 0));
-    expect(switchEvents).toHaveLength(0);
+    expect(switchEvents).toHaveLength(1);
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-a');
 
-    // Candle 2: TRENDING -> RANGING!=TRENDING, session open -> pendingSwitch set (deferred)
+    // Candle 2: TRENDING -> regime change, session open -> pendingSwitch set (deferred)
     mgr.onCandle(makeCandle('50000', 1));
-    expect(switchEvents).toHaveLength(0); // switch deferred
+    expect(switchEvents).toHaveLength(1); // still 1, deferred
 
     // Close session -> pendingSwitch executes in closePosition() after currentSession=null
     await mgr.closePosition('test-close');
     expect(mgr.isPositionOpen()).toBe(false);
 
     // Pending switch must have fired
-    expect(switchEvents).toHaveLength(1);
-    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+    expect(switchEvents).toHaveLength(2);
+    expect(switchEvents[1].newStrategy).toBe('perp-strategy-b');
   });
 
   // PERP-PM-SW-03: Empty regime falls back to overall winner ────────────
@@ -1290,13 +1293,14 @@ describe('auto-switch', () => {
     const switchEvents: any[] = [];
     mgr.on('strategySwitch', (data) => switchEvents.push(data));
 
-    // Candle 1: TRENDING -> sets currentRegime=TRENDING, no switch (no prior regime)
+    // Candle 1: TRENDING -> first observation -> sets initial strategy to TRENDING winner (stratA)
     mgr.onCandle(makeCandle('50000', 0));
-    expect(switchEvents).toHaveLength(0);
-
-    // Candle 2: VOLATILE -> VOLATILE leaderboard empty -> fallback to 'perp-strategy-b'
-    mgr.onCandle(makeCandle('50000', 1));
     expect(switchEvents).toHaveLength(1);
-    expect(switchEvents[0].newStrategy).toBe('perp-strategy-b');
+    expect(switchEvents[0].newStrategy).toBe('perp-strategy-a');
+
+    // Candle 2: VOLATILE -> regime change, empty VOLATILE -> fallback to overall winner (stratB)
+    mgr.onCandle(makeCandle('50000', 1));
+    expect(switchEvents).toHaveLength(2);
+    expect(switchEvents[1].newStrategy).toBe('perp-strategy-b');
   });
 });

@@ -24,8 +24,7 @@ import crypto from 'node:crypto';
 import { d } from '../core/decimal.js';
 import { createModuleLogger } from '../core/logger.js';
 import { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
-import { RegimeClassifier } from '../regime/classifier.js';
-import { createLivePerpRegistry } from './strategies/index.js';
+import { PerpStrategyController } from './perp-strategy-controller.js';
 import { FundingRateTracker } from './funding-tracker.js';
 import type { IntxClient } from './intx-client.js';
 import type { PerpStateStore } from './perp-state-store.js';
@@ -34,7 +33,6 @@ import type { PerpRiskGate } from './perp-risk-gate.js';
 import type { IStrategy } from '../strategies/types.js';
 import type { StrategyRegistry } from '../strategies/registry.js';
 import type { RegimeLeaderboards } from '../tournament/types.js';
-import type { MarketRegime } from '../regime/types.js';
 import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import type {
   PerpSession,
@@ -46,9 +44,6 @@ import type {
 import type { FeedHealthMonitor } from '../core/feed-health.js';
 
 const log = createModuleLogger('paper-perp-engine');
-
-/** Number of candles to wait after a strategy switch before allowing another switch. */
-const STRATEGY_SWITCH_COOLDOWN_CANDLES = 10;
 
 // ── Internal types ────────────────────────────────────────────────────────────
 
@@ -110,8 +105,8 @@ export interface PaperPerpEngineOptions {
    * Used when building the internal registry via createLivePerpRegistry().
    * If strategyRegistry is provided, this field is ignored.
    *
-   * KEY INVARIANT: strategies created via executeStrategySwitch() must receive a
-   * real fundingRateProvider (not () => null) so funding adjustments fire at runtime.
+   * KEY INVARIANT: strategies built for regime switches must receive a real
+   * fundingRateProvider (not () => null) so funding adjustments fire at runtime.
    */
   fundingRateProvider?: () => number | null;
   /**
@@ -149,24 +144,8 @@ export class PaperPerpEngine extends EventEmitter {
   private _paperFundingTimer: ReturnType<typeof setInterval> | null = null;
   private readonly _paperFundingIntervalMs: number;
 
-  // ── Regime auto-switch state ───────────────────────────────────────────────
-  /** Active strategy for candle-based signal evaluation (null when onSignal is the signal source). */
-  private strategy: IStrategy | null = null;
-  /** Regime leaderboards — null when feature is disabled. */
-  private regimeLeaderboards: RegimeLeaderboards | null;
-  /** Last observed market regime (undefined before first candle classification). */
-  private currentRegime: MarketRegime | undefined = undefined;
-  /** Candles remaining in cooldown after a strategy switch. */
-  private cooldownCandlesRemaining = 0;
-  /** Deferred switch config when a position was open at regime-change time. */
-  private pendingSwitch: { strategyConfig: Record<string, unknown>; regime?: MarketRegime } | null = null;
-  /** Registry used to instantiate new strategies on regime switch. */
-  private strategyRegistry: StrategyRegistry | null;
-  /** Classifies market regime from candle history. */
-  private readonly classifier = new RegimeClassifier();
-  /** Rolling candle buffer — max 100 candles. */
-  private candleBuffer: Candle[] = [];
-  private readonly feedHealthMonitor?: FeedHealthMonitor;
+  // ── Strategy controller (regime auto-switch, candle buffer, feed health) ──
+  private readonly ctrl: PerpStrategyController;
 
   /** Typed emit override — matches PerpPositionManagerEvents interface. */
   override emit<K extends keyof PerpPositionManagerEvents>(
@@ -188,21 +167,16 @@ export class PaperPerpEngine extends EventEmitter {
     this._fundingRateTracker = options.fundingTracker
       ?? new FundingRateTracker({ drainThresholdPct: options.config.fundingDrainThresholdPct });
 
-    // Regime auto-switch wiring
-    this.regimeLeaderboards = options.regimeLeaderboards ?? null;
-    this.strategy = options.initialStrategy ?? null;
-
-    if (options.regimeLeaderboards) {
-      // Callers may supply a pre-built createLivePerpRegistry(provider) result.
-      // If not, build one internally using the supplied fundingRateProvider.
-      // The key invariant: strategies created via executeStrategySwitch() must
-      // receive a real fundingRateProvider so funding adjustments fire at runtime.
-      this.strategyRegistry = options.strategyRegistry
-        ?? createLivePerpRegistry(options.fundingRateProvider ?? (() => null));
-    } else {
-      this.strategyRegistry = options.strategyRegistry ?? null;
-    }
-    this.feedHealthMonitor = options.feedHealthMonitor;
+    // Strategy controller: regime auto-switch, candle buffer, feed health
+    this.ctrl = new PerpStrategyController({
+      regimeLeaderboards: options.regimeLeaderboards,
+      strategyRegistry: options.strategyRegistry,
+      initialStrategy: options.initialStrategy,
+      fundingRateProvider: options.fundingRateProvider,
+      feedHealthMonitor: options.feedHealthMonitor,
+      logPrefix: '[PAPER]',
+      onStrategySwitch: (name) => this.emit('strategySwitch', { newStrategy: name }),
+    });
     this._paperFundingIntervalMs = options.paperFundingIntervalMs ?? 28_800_000;
   }
 
@@ -234,6 +208,8 @@ export class PaperPerpEngine extends EventEmitter {
       // Sort descending by openedAt — keep the most recent, close the rest as orphans
       openSessions.sort((a, b) => b.openedAt - a.openedAt);
 
+      const STALE_SESSION_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
       for (const orphan of openSessions.slice(1)) {
         this.stateStore.updateSession(orphan.id, {
           status: 'closed',
@@ -243,36 +219,53 @@ export class PaperPerpEngine extends EventEmitter {
         log.info({ sessionId: orphan.id, instrument: orphan.instrument }, '[PAPER] Closed orphaned session on restart');
       }
 
-      const session = openSessions[0];
+      // Close the candidate session if it is too stale to be safely re-adopted
+      const candidate = openSessions[0];
+      const ageMs = Date.now() - candidate.openedAt;
+      if (ageMs > STALE_SESSION_AGE_MS) {
+        this.stateStore.updateSession(candidate.id, {
+          status: 'closed',
+          closedAt: Date.now(),
+          closeReason: 'stale-session-startup',
+        });
+        log.warn(
+          { sessionId: candidate.id, instrument: candidate.instrument, ageDays: (ageMs / 86_400_000).toFixed(1) },
+          '[PAPER] Closed stale session on startup (older than 7 days)',
+        );
+        // Fall through — no position to re-hydrate
+      } else {
+        const session = candidate;
 
-      // Correct instrument if session was opened with a raw trading pair (pre-fix bug)
-      let correctedInstrument = session.instrument;
-      if (session.instrument === 'BTC-USD') {
-        correctedInstrument = this.config.btcProductId;
-      } else if (session.instrument === 'ETH-USD') {
-        correctedInstrument = this.config.ethProductId;
+        // Correct instrument if session was opened with a raw trading pair (pre-fix bug)
+        let correctedInstrument = session.instrument;
+        if (session.instrument === 'BTC-USD') {
+          correctedInstrument = this.config.btcProductId;
+        } else if (session.instrument === 'ETH-USD') {
+          correctedInstrument = this.config.ethProductId;
+        }
+        if (correctedInstrument !== session.instrument) {
+          this.stateStore.updateSession(session.id, { instrument: correctedInstrument });
+          session.instrument = correctedInstrument;
+          log.info({ sessionId: session.id, correctedInstrument }, '[PAPER] Corrected session instrument on restart');
+        }
+
+        this.currentPosition = { session, paperEntryPrice: session.entryPrice };
+
+        // Restore strategy position state so exit logic can trigger
+        const currentStrategy = this.ctrl.getStrategy();
+        if (
+          currentStrategy &&
+          typeof (currentStrategy as unknown as Record<string, unknown>)['restorePosition'] === 'function'
+        ) {
+          (currentStrategy as unknown as { restorePosition: (d: 'long' | 'short', e: string) => void })
+            .restorePosition(session.direction, session.entryPrice);
+        }
+
+        log.info(
+          { sessionId: session.id, instrument: session.instrument, direction: session.direction },
+          '[PAPER] Re-hydrated open position from DB on startup',
+        );
       }
-      if (correctedInstrument !== session.instrument) {
-        this.stateStore.updateSession(session.id, { instrument: correctedInstrument });
-        session.instrument = correctedInstrument;
-        log.info({ sessionId: session.id, correctedInstrument }, '[PAPER] Corrected session instrument on restart');
-      }
-
-      this.currentPosition = { session, paperEntryPrice: session.entryPrice };
-
-      // Restore strategy position state so exit logic can trigger
-      if (
-        this.strategy &&
-        typeof (this.strategy as Record<string, unknown>)['restorePosition'] === 'function'
-      ) {
-        (this.strategy as { restorePosition: (d: 'long' | 'short', e: string) => void })
-          .restorePosition(session.direction, session.entryPrice);
-      }
-
-      log.info(
-        { sessionId: session.id, instrument: session.instrument, direction: session.direction },
-        '[PAPER] Re-hydrated open position from DB on startup',
-      );
     }
 
     log.info('PaperPerpEngine started');
@@ -313,70 +306,30 @@ export class PaperPerpEngine extends EventEmitter {
    *   and acts on signals.
    */
   onCandle(candle: Candle): void {
-    // Maintain rolling buffer (max 100 candles)
-    this.candleBuffer.push(candle);
-    if (this.candleBuffer.length > 100) {
-      this.candleBuffer.shift();
-    }
+    // Delegate buffer management, feed health, regime classification, and
+    // auto-switch state machine to the shared controller.
+    const result = this.ctrl.processCandle(candle, this.currentPosition !== null);
+    if (result === null) return; // stale feed — hold position, skip evaluation
 
-    // Feed health guard: skip signal evaluation on stale data (hold existing positions)
-    if (this.feedHealthMonitor?.isStale(candle.pair)) {
-      log.warn(
-        { pair: candle.pair, timestamp: candle.timestamp },
-        'Feed stale — skipping signal evaluation (holding existing positions)',
-      );
-      return;
-    }
-
-    // Classify regime from candle history (only here — never in _handleMarkPrice)
-    const regime = this.classifier.classify(this.candleBuffer);
-
-    // Regime auto-switch logic (mirrors LiveTradingEngine lines 413-439)
-    if (this.regimeLeaderboards) {
-      if (this.cooldownCandlesRemaining > 0) {
-        this.cooldownCandlesRemaining--;
-      }
-      if (
-        regime !== undefined &&
-        this.currentRegime !== undefined &&
-        regime !== this.currentRegime &&
-        this.cooldownCandlesRemaining === 0
-      ) {
-        const winnerConfig = this.resolveRegimeWinner(regime);
-        if (winnerConfig) {
-          if (this.currentPosition === null) {
-            this.executeStrategySwitch(winnerConfig, regime);
-          } else {
-            this.pendingSwitch = { strategyConfig: winnerConfig, regime };
-            log.info(
-              { regime, currentStrategy: this.strategy?.name },
-              '[PAPER] Regime changed with open position -- switch deferred until position closes',
-            );
-          }
-        }
-      }
-      if (regime !== undefined) {
-        this.currentRegime = regime;
-      }
-    }
-
-    // Execute any pending switch now that position may have closed
-    if (this.pendingSwitch && this.currentPosition === null) {
-      this.executeStrategySwitch(this.pendingSwitch.strategyConfig, this.pendingSwitch.regime);
-      this.pendingSwitch = null;
-    }
+    const { regime } = result;
 
     // Strategy-based signal evaluation (only when onSignal is not the signal source)
-    if (this.strategy && !this.onSignal) {
+    if (this.ctrl.getStrategy() && !this.onSignal) {
       const instrument = candle.pair === 'ETH-USD' ? this.config.ethProductId : this.config.btcProductId;
       const timeframe = candle.timeframe as Timeframe;
-      const signals = this.strategy.evaluate(
-        this.candleBuffer,
+      const signals = this.ctrl.getStrategy()!.evaluate(
+        this.ctrl.getCandleBuffer(),
         candle.pair as TradingPair,
         timeframe,
         undefined,
         regime,
       );
+      if (signals.length === 0) {
+        log.info(
+          { pair: candle.pair, strategyName: this.ctrl.getStrategy()!.name, regime, bufferLen: this.ctrl.getCandleBuffer().length },
+          '[PAPER] No signals emitted this candle',
+        );
+      }
       for (const signal of signals) {
         if (signal.direction === 'long' || signal.direction === 'short') {
           log.info(
@@ -575,10 +528,7 @@ export class PaperPerpEngine extends EventEmitter {
     this._fundingRateTracker.reset();
 
     // Execute any pending regime strategy switch now that position is closed
-    if (this.pendingSwitch) {
-      this.executeStrategySwitch(this.pendingSwitch.strategyConfig, this.pendingSwitch.regime);
-      this.pendingSwitch = null;
-    }
+    this.ctrl.firePendingSwitchIfIdle(false);
 
     return closedSession;
   }
@@ -835,36 +785,6 @@ export class PaperPerpEngine extends EventEmitter {
   }
 
   // ── Regime auto-switch helpers ────────────────────────────────────────────
-
-  /**
-   * Resolve the best strategy config for the given regime from the leaderboard.
-   * Returns entries[0].strategyConfig if the regime has at least one entry,
-   * otherwise falls back to fallbackEntry.strategyConfig.
-   */
-  private resolveRegimeWinner(regime: MarketRegime): Record<string, unknown> | null {
-    if (!this.regimeLeaderboards) return null;
-    const entries = this.regimeLeaderboards[regime];
-    if (entries && entries.length > 0) {
-      return entries[0].strategyConfig;
-    }
-    return this.regimeLeaderboards.fallbackEntry.strategyConfig;
-  }
-
-  /**
-   * Instantiate a new strategy from config, assign it, reset cooldown, emit event.
-   */
-  private executeStrategySwitch(strategyConfig: Record<string, unknown>, regime?: MarketRegime): void {
-    this.strategy = this.strategyRegistry!.create(strategyConfig);
-    this.cooldownCandlesRemaining = STRATEGY_SWITCH_COOLDOWN_CANDLES;
-    const logMsg = regime
-      ? `[PAPER] regime ${regime}: switching to ${this.strategy.name}`
-      : '[PAPER] Strategy switched due to regime change';
-    log.info(
-      { newStrategy: this.strategy.name, regime, cooldown: STRATEGY_SWITCH_COOLDOWN_CANDLES },
-      logMsg,
-    );
-    this.emit('strategySwitch', { newStrategy: this.strategy.name });
-  }
 
   // ── Accessors ─────────────────────────────────────────────────────────────
 
