@@ -214,8 +214,8 @@ describe('parseStrategyConfig', () => {
       const cfg = parseStrategyConfig({ strategy: 'momentum-breakout' });
       expect(cfg).toMatchObject({
         strategy: 'momentum-breakout',
-        breakoutWindow: 20,
-        volumeWindow: 20,
+        breakoutWindow: 10,
+        volumeWindow: 10,
         volumeMultiplier: 1.5,
       });
     });
@@ -328,9 +328,9 @@ describe('registry integration - momentum-breakout', () => {
     expect(registry.has('momentum-breakout')).toBe(true);
     const strategy = registry.create({ strategy: 'momentum-breakout' });
     expect(strategy.name).toBe('momentum-breakout');
-    // defaults: breakoutWindow=20, volumeWindow=20 -> minCandles = Math.max(20,20) + 1 = 21
-    expect(strategy.minCandles).toBe(21);
-    expect(strategy.requiredIndicators).toContainEqual({ name: 'Highest', period: 20 });
-    expect(strategy.requiredIndicators).toContainEqual({ name: 'Lowest', period: 20 });
+    // defaults: breakoutWindow=10, volumeWindow=10 -> minCandles = Math.max(10,10) + 1 = 11
+    expect(strategy.minCandles).toBe(11);
+    expect(strategy.requiredIndicators).toContainEqual({ name: 'Highest', period: 10 });
+    expect(strategy.requiredIndicators).toContainEqual({ name: 'Lowest', period: 10 });
   });
 });

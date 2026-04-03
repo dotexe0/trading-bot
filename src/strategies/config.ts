@@ -78,8 +78,8 @@ const multiTimeframeTrendSchema = z
 const momentumBreakoutSchema = z
   .object({
     strategy: z.literal('momentum-breakout'),
-    breakoutWindow: z.number().int().positive().default(20),
-    volumeWindow: z.number().int().positive().default(20),
+    breakoutWindow: z.number().int().positive().default(10),
+    volumeWindow: z.number().int().positive().default(10),
     volumeMultiplier: z.number().positive().default(1.5),
   })
   .merge(exitConfigSchema);

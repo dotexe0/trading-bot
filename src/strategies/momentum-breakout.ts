@@ -90,9 +90,11 @@ export class MomentumBreakoutStrategy implements IStrategy {
     const supportLevel = lowestValues[lowestValues.length - 1];
 
     // 7. Volume SMA inline (DO NOT use engine.compute('SMA') — it uses extractCloses)
+    // Use prior candles only for avg — exclude current candle to avoid self-dilution
+    // when current volume is abnormally high or low (partial in-progress candle).
     const volumes = extractVolumes(candles);
-    const recentVolumes = volumes.slice(-this.volumeWindow);
-    const avgVolume = recentVolumes.reduce((sum, v) => sum + v, 0) / recentVolumes.length;
+    const priorVolumes = volumes.slice(-(this.volumeWindow + 1), -1);
+    const avgVolume = priorVolumes.reduce((sum, v) => sum + v, 0) / priorVolumes.length;
     const currentVolume = volumes[volumes.length - 1];
     const volumeConfirmed = currentVolume >= avgVolume * this.volumeMultiplier;
     if (!volumeConfirmed) return [];

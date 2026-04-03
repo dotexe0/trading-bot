@@ -164,8 +164,8 @@ describe('MomentumBreakoutStrategy', () => {
 
     it('returns signal when last volume exceeds threshold', () => {
       // volumes=[100,100,100,100,100,100,100,200]
-      // recentVolumes (last 5) = [100,100,100,100,200], avgVolume=120
-      // currentVolume=200, 200 >= 120*1.5=180 is true
+      // priorVolumes (5 candles before last) = [100,100,100,100,100], avgVolume=100
+      // currentVolume=200, 200 >= 100*1.5=150 is true
       const closes = Array(8).fill(100) as number[];
       const highs = Array(8).fill(101) as number[];
       const lows = Array(8).fill(99) as number[];
@@ -178,8 +178,8 @@ describe('MomentumBreakoutStrategy', () => {
 
     it('returns empty when last volume is just below threshold', () => {
       // volumes=[100,100,100,100,100,100,100,149]
-      // recentVolumes (last 5) = [100,100,100,100,149], avgVolume=109.8
-      // currentVolume=149, 149 >= 109.8*1.5=164.7 is false
+      // priorVolumes (5 candles before last) = [100,100,100,100,100], avgVolume=100
+      // currentVolume=149, 149 >= 100*1.5=150 is false
       const closes = Array(8).fill(100) as number[];
       const highs = Array(8).fill(101) as number[];
       const lows = Array(8).fill(99) as number[];
@@ -188,6 +188,21 @@ describe('MomentumBreakoutStrategy', () => {
       const candles = makeCandles({ closes, highs, lows, volumes });
       const signals = strategy.evaluate(candles, 'BTC-USD', '1h', undefined, MarketRegime.TRENDING);
       expect(signals).toEqual([]);
+    });
+
+    it('volume self-dilution: 1.6x spike should pass but bug blocks it', () => {
+      // Prior 5 candles all have volume=100; last candle has volume=160 (1.6x avg → should pass 1.5x gate)
+      // BUG: recentVolumes includes current candle → avg inflates to 112, threshold=168 > 160 → blocked
+      // FIX: avgVolume computed from prior candles only → avg=100, threshold=150 ≤ 160 → passes
+      const closes = Array(8).fill(100) as number[];
+      const highs = Array(8).fill(101) as number[];
+      const lows = Array(8).fill(99) as number[];
+      const volumes = [100, 100, 100, 100, 100, 100, 100, 160];
+      highs[7] = 130; // price breakout
+      const candles = makeCandles({ closes, highs, lows, volumes });
+      const signals = strategy.evaluate(candles, 'BTC-USD', '1h', undefined, MarketRegime.TRENDING);
+      // 160 is 1.6× prior average (100) so the volume gate should pass
+      expect(signals.length).toBeGreaterThanOrEqual(1);
     });
   });
 
