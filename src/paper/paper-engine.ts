@@ -170,9 +170,11 @@ export class PaperTradingEngine extends EventEmitter {
 
     // Wire live feed events
     this.liveFeed.on('candle', (candle: Candle) => this.onCandle(candle));
-    this.liveFeed.on('error', (err: Error) => {
-      log.error({ err, sessionId: this.session?.id }, 'LiveDataFeed error');
-      this.emit('error', err);
+    this.liveFeed.on('wsError', (err: Error) => {
+      // WS errors are transient — the client reconnects automatically and REST
+      // polling continues as fallback. Log but do NOT re-emit as 'error' which
+      // is fatal in Node.js when no listener is registered on this engine.
+      log.warn({ err: err.message, sessionId: this.session?.id }, 'LiveDataFeed WebSocket error (transient, REST fallback active)');
     });
 
     // Start live feed
