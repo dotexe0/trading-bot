@@ -56,7 +56,7 @@ export interface ISpotStateStore {
   createSession(config: any, strategyName: string): { id: string; [k: string]: any };
   endSession(sessionId: string, finalEquity: string, status: string): void;
   recordEquityPoint(sessionId: string, timestamp: number, equity: any): void;
-  recordTrade(sessionId: string, trade: any): void;
+  recordTrade(sessionId: string, trade: any, metadata?: any): void;
   getSession(sessionId: string): any;
   getSessionTrades(sessionId: string): any[];
   getResult?(sessionId: string): any;
@@ -1004,6 +1004,24 @@ export class SpotTradingEngine extends EventEmitter {
   ): void {
     if (!this.session) return;
 
+    // Derive exit reason from purpose and exit signal name
+    let exitReason: string;
+    if (purpose === 'STOP_LOSS') {
+      exitReason = 'STOP_LOSS';
+    } else if (purpose === 'PARTIAL_EXIT') {
+      exitReason = 'PARTIAL_EXIT';
+    } else if (exitSignal.strategyName.startsWith('__exit-logic-')) {
+      exitReason = exitSignal.strategyName.replace('__exit-logic-', '');
+    } else {
+      exitReason = 'SIGNAL';
+    }
+
+    const tradeMetadata = {
+      strategyName: this.strategy.name,
+      regimeAtEntry: this.currentRegime ?? undefined,
+      exitReason,
+    };
+
     if (this.mode === 'paper') {
       // Paper: Trade type with SimulatedFill objects
       const entrySimFill: SimulatedFill = {
@@ -1029,7 +1047,7 @@ export class SpotTradingEngine extends EventEmitter {
         pnlPct,
         holdingPeriodMs,
       };
-      this.stateStore.recordTrade(this.session.id, trade);
+      this.stateStore.recordTrade(this.session.id, trade, tradeMetadata);
     } else {
       // Live: LiveTrade with flat string fields + slippage
       const entrySlippageBps = position.entrySignalPrice
@@ -1060,6 +1078,9 @@ export class SpotTradingEngine extends EventEmitter {
         exitSignalPrice: this.exitSignalPrice?.toFixed(8),
         entrySlippageBps: entrySlippageBps?.toFixed(4),
         exitSlippageBps: exitSlippageBps?.toFixed(4),
+        strategyName: tradeMetadata.strategyName,
+        regimeAtEntry: tradeMetadata.regimeAtEntry,
+        exitReason: tradeMetadata.exitReason,
       });
     }
   }

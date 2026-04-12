@@ -42,6 +42,15 @@ export class LiveStateStore {
     this.db = conn.db;
     this.sqlite = conn.sqlite;
     initializeSchema(conn.sqlite);
+
+    // v3.1 migration: add trade journal columns to live_trades
+    for (const col of ['strategy_name', 'regime_at_entry', 'exit_reason']) {
+      try {
+        this.sqlite.exec(`ALTER TABLE live_trades ADD COLUMN ${col} TEXT`);
+      } catch {
+        // Column already exists — ignore
+      }
+    }
   }
 
   // ── Session CRUD ──────────────────────────────────────────────────
@@ -289,6 +298,9 @@ export class LiveStateStore {
       exitSignalPrice: trade.exitSignalPrice ?? null,
       entrySlippageBps: trade.entrySlippageBps ?? null,
       exitSlippageBps: trade.exitSlippageBps ?? null,
+      strategyName: trade.strategyName ?? null,
+      regimeAtEntry: trade.regimeAtEntry ?? null,
+      exitReason: trade.exitReason ?? null,
     }).run();
   }
 
@@ -411,6 +423,9 @@ export class LiveStateStore {
       exitSignalPrice: row.exitSignalPrice ?? undefined,
       entrySlippageBps: row.entrySlippageBps ?? undefined,
       exitSlippageBps: row.exitSlippageBps ?? undefined,
+      strategyName: row.strategyName ?? undefined,
+      regimeAtEntry: row.regimeAtEntry ?? undefined,
+      exitReason: row.exitReason ?? undefined,
     };
   }
 }

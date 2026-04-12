@@ -143,6 +143,12 @@ export interface LiveTrade {
   entrySlippageBps?: string;
   /** Exit slippage in basis points (positive = unfavorable) */
   exitSlippageBps?: string;
+  /** Strategy name at time of trade */
+  strategyName?: string;
+  /** Market regime at time of entry */
+  regimeAtEntry?: string;
+  /** Reason for exit (SIGNAL, STOP_LOSS, trailing_profit, etc.) */
+  exitReason?: string;
 }
 
 // ── Reconciliation Report ───────────────────────────────────────────
@@ -181,7 +187,7 @@ export type ShutdownState =
 
 // ── Live Engine Events ──────────────────────────────────────────────
 
-/** Typed events for the LiveTradingEngine EventEmitter. */
+/** Typed events for the SpotTradingEngine (live mode) EventEmitter. */
 export interface LiveEngineEvents {
   orderSubmitted: [LiveOrder];
   orderFilled: [LiveOrder];

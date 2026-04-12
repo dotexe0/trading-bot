@@ -100,6 +100,10 @@ export interface Trade {
   pnlPct: Decimal;
   /** Time held in milliseconds */
   holdingPeriodMs: number;
+  /** Trade journal metadata (populated from DB, not set during backtest) */
+  strategyName?: string;
+  regimeAtEntry?: string;
+  exitReason?: string;
 }
 
 /** A point on the equity curve. */

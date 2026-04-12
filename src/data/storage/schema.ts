@@ -75,6 +75,9 @@ export const paperTrades = sqliteTable(
     pnl: text('pnl'),
     pnlPct: text('pnl_pct'),
     holdingPeriodMs: integer('holding_period_ms'),
+    strategyName: text('strategy_name'),
+    regimeAtEntry: text('regime_at_entry'),
+    exitReason: text('exit_reason'),
   },
   (table) => [index('idx_paper_trades_session').on(table.sessionId)],
 );
@@ -162,6 +165,9 @@ export const liveTrades = sqliteTable(
     exitSignalPrice: text('exit_signal_price'),
     entrySlippageBps: text('entry_slippage_bps'),
     exitSlippageBps: text('exit_slippage_bps'),
+    strategyName: text('strategy_name'),
+    regimeAtEntry: text('regime_at_entry'),
+    exitReason: text('exit_reason'),
   },
   (table) => [index('idx_live_trades_session').on(table.sessionId)],
 );
@@ -379,6 +385,8 @@ export const perpTrades = sqliteTable(
     openedAt: integer('opened_at').notNull(),
     closedAt: integer('closed_at').notNull(),
     closeReason: text('close_reason'),
+    strategyName: text('strategy_name'),
+    regimeAtEntry: text('regime_at_entry'),
   },
   (table) => [index('idx_perp_trades_session').on(table.sessionId)],
 );

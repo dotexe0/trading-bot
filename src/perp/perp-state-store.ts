@@ -32,6 +32,8 @@ export interface PerpTradeRecord {
   openedAt: number;
   closedAt: number;
   closeReason?: string;
+  strategyName?: string;
+  regimeAtEntry?: string;
 }
 import type { BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
 import type * as schema from '../data/storage/schema.js';
@@ -64,6 +66,15 @@ export class PerpStateStore {
       conn.sqlite.prepare('ALTER TABLE perp_sessions ADD COLUMN cumulative_funding_cost TEXT').run();
     } catch {
       // column already exists — no action needed
+    }
+
+    // v3.1 migration: add trade journal columns to perp_trades
+    for (const col of ['strategy_name', 'regime_at_entry']) {
+      try {
+        conn.sqlite.prepare(`ALTER TABLE perp_trades ADD COLUMN ${col} TEXT`).run();
+      } catch {
+        // column already exists — no action needed
+      }
     }
   }
 
@@ -272,6 +283,8 @@ export class PerpStateStore {
         openedAt: record.openedAt,
         closedAt: record.closedAt,
         closeReason: record.closeReason ?? null,
+        strategyName: record.strategyName ?? null,
+        regimeAtEntry: record.regimeAtEntry ?? null,
       })
       .run();
 
@@ -374,6 +387,8 @@ export class PerpStateStore {
       openedAt: row.openedAt,
       closedAt: row.closedAt,
       closeReason: row.closeReason ?? undefined,
+      strategyName: row.strategyName ?? undefined,
+      regimeAtEntry: row.regimeAtEntry ?? undefined,
     };
   }
 }

@@ -36,6 +36,15 @@ export class SessionStore {
     this.db = conn.db;
     this.sqlite = conn.sqlite;
     initializeSchema(conn.sqlite);
+
+    // v3.1 migration: add trade journal columns
+    for (const col of ['strategy_name', 'regime_at_entry', 'exit_reason']) {
+      try {
+        this.sqlite.exec(`ALTER TABLE paper_trades ADD COLUMN ${col} TEXT`);
+      } catch {
+        // Column already exists — ignore
+      }
+    }
   }
 
   // ── Session CRUD ──────────────────────────────────────────────────
@@ -103,7 +112,11 @@ export class SessionStore {
    * Record a completed trade for a session.
    * Serializes Decimal fields to string and Signal to JSON.
    */
-  recordTrade(sessionId: string, trade: Trade): void {
+  recordTrade(
+    sessionId: string,
+    trade: Trade,
+    metadata?: { strategyName?: string; regimeAtEntry?: string; exitReason?: string },
+  ): void {
     this.db.insert(paperTrades).values({
       sessionId,
       entryTimestamp: trade.entryFill.fillTimestamp,
@@ -121,6 +134,9 @@ export class SessionStore {
       pnl: trade.pnl.toString(),
       pnlPct: trade.pnlPct.toString(),
       holdingPeriodMs: trade.holdingPeriodMs,
+      strategyName: metadata?.strategyName ?? null,
+      regimeAtEntry: metadata?.regimeAtEntry ?? null,
+      exitReason: metadata?.exitReason ?? null,
     }).run();
   }
 
@@ -344,6 +360,9 @@ export class SessionStore {
       pnl: d(row.pnl ?? '0'),
       pnlPct: d(row.pnlPct ?? '0'),
       holdingPeriodMs: row.holdingPeriodMs ?? 0,
+      strategyName: row.strategyName ?? undefined,
+      regimeAtEntry: row.regimeAtEntry ?? undefined,
+      exitReason: row.exitReason ?? undefined,
     };
   }
 }

@@ -3,6 +3,7 @@ import type { TradeData } from '../types.js';
 
 type SortField = 'entryTimestamp' | 'pnl' | 'pnlPct' | 'pair' | 'holdingPeriodMs';
 type SortDir = 'asc' | 'desc';
+type ModeFilter = 'All' | 'spot' | 'perp';
 type PairFilter = 'All' | 'BTC-USD' | 'ETH-USD';
 
 const PAGE_SIZE = 25;
@@ -64,6 +65,7 @@ interface TradeHistoryProps {
  */
 export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement {
   const [pairFilter, setPairFilter] = useState<PairFilter>('All');
+  const [modeFilter, setModeFilter] = useState<ModeFilter>('All');
   const [sortField, setSortField] = useState<SortField>('entryTimestamp');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [page, setPage] = useState(0);
@@ -83,13 +85,20 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
     setPage(0);
   };
 
+  const handleModeFilter = (f: ModeFilter): void => {
+    setModeFilter(f);
+    setPage(0);
+  };
+
   const filtered = useMemo(() => {
     let result = [...trades];
 
+    // Filter by mode (spot/perp)
+    if (modeFilter !== 'All') {
+      result = result.filter((t) => (t.mode ?? 'spot') === modeFilter);
+    }
+
     // Filter by pair
-    // Note: TradeData doesn't have a direct pair field; sessionId may encode the pair.
-    // Best-effort filter: when a specific pair is selected, include trades whose sessionId
-    // contains the pair string. When 'All' is selected, no filtering is applied.
     if (pairFilter !== 'All') {
       result = result.filter((t) => t.sessionId.includes(pairFilter));
     }
@@ -127,7 +136,7 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
     });
 
     return result;
-  }, [trades, pairFilter, sortField, sortDir]);
+  }, [trades, pairFilter, modeFilter, sortField, sortDir]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageData = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
@@ -140,6 +149,16 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
     <div>
       {/* Controls */}
       <div className="table-controls">
+        <label style={{ fontSize: 12, color: '#6b7280' }}>Mode:</label>
+        <select
+          className="filter-select"
+          value={modeFilter}
+          onChange={(e) => handleModeFilter(e.target.value as ModeFilter)}
+        >
+          <option value="All">All</option>
+          <option value="spot">Spot</option>
+          <option value="perp">Perp</option>
+        </select>
         <label style={{ fontSize: 12, color: '#6b7280' }}>Pair:</label>
         <select
           className="filter-select"
@@ -160,6 +179,7 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
         <table className="data-table">
           <thead>
             <tr>
+              <th>Mode</th>
               <SortableHeader
                 label="Time"
                 field="entryTimestamp"
@@ -167,6 +187,8 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
                 direction={sortDir}
                 onSort={handleSort}
               />
+              <th>Strategy</th>
+              <th>Regime</th>
               <th>Side</th>
               <th>Entry</th>
               <th>Exit</th>
@@ -187,6 +209,7 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
               />
               <th>Fees</th>
               <th>Slip</th>
+              <th>Exit</th>
               <SortableHeader
                 label="Hold"
                 field="holdingPeriodMs"
@@ -206,7 +229,12 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
 
               return (
                 <tr key={`${trade.sessionId}-${trade.entryTimestamp}-${i}`}>
+                  <td style={{ color: (trade.mode ?? 'spot') === 'perp' ? '#a78bfa' : '#60a5fa', fontSize: 11 }}>
+                    {(trade.mode ?? 'spot').toUpperCase()}
+                  </td>
                   <td className="text-muted">{formatTime(trade.entryTimestamp)}</td>
+                  <td className="text-muted" style={{ fontSize: 11 }}>{trade.strategyName ?? '\u2014'}</td>
+                  <td className="text-muted" style={{ fontSize: 11 }}>{trade.regimeAtEntry ?? '\u2014'}</td>
                   <td className={trade.entrySide === 'buy' ? 'text-green' : 'text-red'}>
                     {trade.entrySide.toUpperCase()}
                   </td>
@@ -234,6 +262,7 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
                       ? '\u2014'
                       : `${(parseFloat(trade.entrySlippageBps ?? '0') + parseFloat(trade.exitSlippageBps ?? '0')).toFixed(1)} bps`}
                   </td>
+                  <td className="text-muted" style={{ fontSize: 11 }}>{trade.exitReason ?? '\u2014'}</td>
                   <td className="text-muted">
                     {formatHoldingPeriod(trade.holdingPeriodMs)}
                   </td>

@@ -8,6 +8,7 @@
 import type { LiveSession, LiveOrder, LiveTrade } from '../../live/types.js';
 import type { PaperSession } from '../../paper/types.js';
 import type { Trade } from '../../backtest/types.js';
+import type { PerpTradeRecord } from '../../perp/perp-state-store.js';
 
 // ── WebSocket Message Types ──────────────────────────────────────────
 
@@ -77,10 +78,13 @@ export interface ApiTrade {
   pnlPct?: string;
   holdingPeriodMs?: number;
   strategyName?: string;
+  regimeAtEntry?: string;
+  exitReason?: string;
   signalPrice?: string;
   exitSignalPrice?: string;
   entrySlippageBps?: string;
   exitSlippageBps?: string;
+  mode?: 'spot' | 'perp';
 }
 
 export interface ApiOrder {
@@ -245,6 +249,10 @@ export function toApiTrade(trade: LiveTrade): ApiTrade {
     exitSignalPrice: trade.exitSignalPrice,
     entrySlippageBps: trade.entrySlippageBps,
     exitSlippageBps: trade.exitSlippageBps,
+    strategyName: trade.strategyName,
+    regimeAtEntry: trade.regimeAtEntry,
+    exitReason: trade.exitReason,
+    mode: 'spot',
   };
 }
 
@@ -266,7 +274,40 @@ export function toApiPaperTrade(sessionId: string, trade: Trade): ApiTrade {
     pnl: trade.pnl.toString(),
     pnlPct: trade.pnlPct.toString(),
     holdingPeriodMs: trade.holdingPeriodMs,
-    strategyName,
+    strategyName: trade.strategyName ?? strategyName,
+    regimeAtEntry: trade.regimeAtEntry,
+    exitReason: trade.exitReason,
+    mode: 'spot',
+  };
+}
+
+/** Convert a PerpTradeRecord to a JSON-safe API trade. */
+export function toApiPerpTrade(record: PerpTradeRecord): ApiTrade {
+  const holdingPeriodMs = record.closedAt - record.openedAt;
+  const entryPrice = parseFloat(record.entryPrice);
+  const exitPrice = parseFloat(record.exitPrice);
+  const size = parseFloat(record.size);
+  const cost = entryPrice * size;
+  const pnlPct = cost > 0 ? (parseFloat(record.realizedPnl) / cost) * 100 : 0;
+  return {
+    sessionId: record.sessionId,
+    entryTimestamp: record.openedAt,
+    entryPrice: record.entryPrice,
+    entryFee: record.cumulativeFundingCost,
+    entrySide: record.direction === 'long' ? 'BUY' : 'SELL',
+    entryQuantity: record.size,
+    exitTimestamp: record.closedAt,
+    exitPrice: record.exitPrice,
+    exitFee: '0',
+    exitSide: record.direction === 'long' ? 'SELL' : 'BUY',
+    exitQuantity: record.size,
+    pnl: record.realizedPnl,
+    pnlPct: pnlPct.toFixed(4),
+    holdingPeriodMs,
+    strategyName: record.strategyName ?? record.instrument,
+    regimeAtEntry: record.regimeAtEntry,
+    exitReason: record.closeReason,
+    mode: 'perp',
   };
 }
 

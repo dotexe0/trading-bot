@@ -73,10 +73,13 @@ export interface TradeData {
   pnlPct?: string;
   holdingPeriodMs?: number;
   strategyName?: string;
+  regimeAtEntry?: string;
+  exitReason?: string;
   signalPrice?: string;
   exitSignalPrice?: string;
   entrySlippageBps?: string;
   exitSlippageBps?: string;
+  mode?: 'spot' | 'perp';
 }
 
 export interface EquityPoint {
