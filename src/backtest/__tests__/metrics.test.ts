@@ -355,8 +355,10 @@ describe('MetricsCalculator', () => {
       expect(metrics.avgTradeReturn).toBeInstanceOf(Decimal);
       expect(metrics.bestTrade).toBeInstanceOf(Decimal);
       expect(metrics.worstTrade).toBeInstanceOf(Decimal);
-      // Sharpe is number, not Decimal
+      // Sharpe, Sortino, Calmar are number, not Decimal
       expect(typeof metrics.sharpeRatio).toBe('number');
+      expect(typeof metrics.sortinoRatio).toBe('number');
+      expect(typeof metrics.calmarRatio).toBe('number');
     });
   });
 });
@@ -384,5 +386,136 @@ describe('fundingCost — FEES-03', () => {
     const result = makeResult({ fundingCost: d('7.5') });
     const metrics = calc.calculate(result, '10000');
     expect(metrics.fundingCost).toBeInstanceOf(Decimal);
+  });
+});
+
+// ── Sortino Ratio ─────────────────────────────────────────────────────
+
+describe('Sortino Ratio', () => {
+  const calc = new MetricsCalculator();
+
+  it('Sortino > Sharpe when mixed returns (downside dev < total stddev)', () => {
+    // Create 10 days of hourly data with mixed returns: mostly up, some down
+    // Day progression: 10000, 10200(+2%), 10098(-1%), 10300(+2%), 10197(-1%),
+    //                  10401(+2%), 10297(-1%), 10503(+2%), 10398(-1%), 10606(+2%)
+    const dayEndValues = [10000, 10200, 10098, 10300, 10197, 10401, 10297, 10503, 10398, 10606];
+    const hourlyValues: number[] = [];
+    const startTs = Date.UTC(2024, 0, 1, 0, 0, 0);
+
+    for (let day = 0; day < dayEndValues.length; day++) {
+      for (let hour = 0; hour < 24; hour++) {
+        // Fill each day with the end-of-previous-day value, last hour gets the actual value
+        if (hour < 23) {
+          hourlyValues.push(day === 0 ? 10000 : dayEndValues[day - 1]);
+        } else {
+          hourlyValues.push(dayEndValues[day]);
+        }
+      }
+    }
+
+    const equityCurve = makeEquityCurve(hourlyValues, startTs, 3600000);
+    const result = makeResult({
+      equityCurve,
+      finalEquity: d(10606),
+      startTimestamp: startTs,
+      endTimestamp: startTs + 10 * DAY_MS,
+    });
+    const metrics = calc.calculate(result, '10000');
+
+    // With mixed positive/negative returns, downside dev < total stddev
+    // so Sortino should be > Sharpe (both should be positive since mean return > 0)
+    expect(metrics.sortinoRatio).toBeGreaterThan(0);
+    expect(metrics.sharpeRatio).toBeGreaterThan(0);
+    expect(metrics.sortinoRatio).toBeGreaterThan(metrics.sharpeRatio);
+  });
+
+  it('Sortino = 0 when no downside deviation (all positive returns)', () => {
+    // Monotonically increasing equity over 5 days
+    const dayEndValues = [10000, 10100, 10201, 10303, 10406];
+    const hourlyValues: number[] = [];
+    const startTs = Date.UTC(2024, 0, 1, 0, 0, 0);
+
+    for (let day = 0; day < dayEndValues.length; day++) {
+      for (let hour = 0; hour < 24; hour++) {
+        if (hour < 23) {
+          hourlyValues.push(day === 0 ? 10000 : dayEndValues[day - 1]);
+        } else {
+          hourlyValues.push(dayEndValues[day]);
+        }
+      }
+    }
+
+    const equityCurve = makeEquityCurve(hourlyValues, startTs, 3600000);
+    const result = makeResult({
+      equityCurve,
+      finalEquity: d(10406),
+      startTimestamp: startTs,
+      endTimestamp: startTs + 5 * DAY_MS,
+    });
+    const metrics = calc.calculate(result, '10000');
+
+    // No negative returns means downsideSquared = 0 -> Sortino = 0
+    expect(metrics.sortinoRatio).toBe(0);
+  });
+
+  it('Sortino = 0 with fewer than 2 equity points', () => {
+    const equityCurve = makeEquityCurve([10000]);
+    const result = makeResult({ equityCurve });
+    const metrics = calc.calculate(result, '10000');
+    expect(metrics.sortinoRatio).toBe(0);
+  });
+});
+
+// ── Calmar Ratio ──────────────────────────────────────────────────────
+
+describe('Calmar Ratio', () => {
+  const calc = new MetricsCalculator();
+
+  it('Calmar > 0 when there is both return and drawdown', () => {
+    // Equity: 10000 -> 12000 -> 10800 -> 11500 over ~365 days
+    // This has a drawdown (12000 -> 10800 = 10%) and positive CAGR
+    const startTs = 1700000000000;
+    const endTs = startTs + 365 * DAY_MS;
+
+    // Create a curve with a drawdown in the middle
+    const values: number[] = [];
+    for (let i = 0; i < 240; i++) {
+      if (i < 80) {
+        values.push(10000 + i * 25); // rise to 12000
+      } else if (i < 160) {
+        values.push(12000 - (i - 80) * 15); // drop to 10800
+      } else {
+        values.push(10800 + (i - 160) * 8.75); // rise to 11500
+      }
+    }
+
+    const equityCurve = makeEquityCurve(values, startTs, 3600000);
+    const result = makeResult({
+      equityCurve,
+      finalEquity: d(11500),
+      startTimestamp: startTs,
+      endTimestamp: endTs,
+    });
+    const metrics = calc.calculate(result, '10000');
+
+    expect(metrics.calmarRatio).toBeGreaterThan(0);
+    // CAGR is positive (15% return over 365 days) and maxDD is non-zero
+    expect(metrics.cagr.toNumber()).toBeGreaterThan(0);
+    expect(metrics.maxDrawdownPct.toNumber()).toBeGreaterThan(0);
+  });
+
+  it('Calmar = 0 when maxDrawdownPct is zero (monotonically increasing equity)', () => {
+    const equityCurve = makeEquityCurve([100, 110, 120, 130]);
+    const result = makeResult({
+      equityCurve,
+      finalEquity: d(130),
+      startTimestamp: 1700000000000,
+      endTimestamp: 1700000000000 + 365 * DAY_MS,
+    });
+    const metrics = calc.calculate(result, '100');
+
+    // No drawdown -> maxDrawdownPct = 0 -> Calmar = 0
+    expect(metrics.maxDrawdownPct.toNumber()).toBe(0);
+    expect(metrics.calmarRatio).toBe(0);
   });
 });

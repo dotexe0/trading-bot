@@ -20,6 +20,10 @@ export interface PerformanceMetrics {
   cagr: Decimal;
   /** Annualized Sharpe ratio using sqrt(365) for 24/7 crypto */
   sharpeRatio: number;
+  /** Annualized Sortino ratio using only downside deviation, sqrt(365) */
+  sortinoRatio: number;
+  /** Calmar ratio: |CAGR| / maxDrawdownPct */
+  calmarRatio: number;
   /** Peak-to-trough absolute decline */
   maxDrawdown: Decimal;
   /** Max drawdown as percentage of peak */
@@ -60,6 +64,11 @@ export class MetricsCalculator {
       totalReturn: this.calcTotalReturn(finalEquity, capital),
       cagr: this.calcCAGR(finalEquity, capital, result.startTimestamp, result.endTimestamp),
       sharpeRatio: this.calcSharpeRatio(equityCurve),
+      sortinoRatio: this.calcSortinoRatio(equityCurve),
+      calmarRatio: this.calcCalmarRatio(
+        this.calcCAGR(finalEquity, capital, result.startTimestamp, result.endTimestamp),
+        this.calcMaxDrawdown(equityCurve).percentage,
+      ),
       maxDrawdown: this.calcMaxDrawdown(equityCurve).absolute,
       maxDrawdownPct: this.calcMaxDrawdown(equityCurve).percentage,
       winRate: this.calcWinRate(trades),
@@ -127,6 +136,41 @@ export class MetricsCalculator {
 
     // Annualize with sqrt(365) for 24/7 crypto markets
     return (mean / stdDev) * Math.sqrt(365);
+  }
+
+  private calcSortinoRatio(equityCurve: EquityPoint[]): number {
+    if (equityCurve.length < 2) return 0;
+
+    const dailyEquity = this.resampleDaily(equityCurve);
+    if (dailyEquity.length < 2) return 0;
+
+    const dailyReturns: number[] = [];
+    for (let i = 1; i < dailyEquity.length; i++) {
+      const prev = dailyEquity[i - 1];
+      const curr = dailyEquity[i];
+      if (prev === 0) continue;
+      dailyReturns.push((curr - prev) / prev);
+    }
+
+    if (dailyReturns.length < 2) return 0;
+
+    const mean = dailyReturns.reduce((a, b) => a + b, 0) / dailyReturns.length;
+
+    // Downside deviation: only negative returns contribute
+    const downsideSquared = dailyReturns
+      .filter(r => r < 0)
+      .reduce((acc, r) => acc + r * r, 0);
+
+    if (downsideSquared === 0) return 0;
+
+    const downsideDev = Math.sqrt(downsideSquared / (dailyReturns.length - 1));
+
+    return (mean / downsideDev) * Math.sqrt(365);
+  }
+
+  private calcCalmarRatio(cagr: Decimal, maxDrawdownPct: Decimal): number {
+    if (maxDrawdownPct.isZero()) return 0;
+    return cagr.abs().div(maxDrawdownPct).toNumber();
   }
 
   private calcMaxDrawdown(equityCurve: EquityPoint[]): {

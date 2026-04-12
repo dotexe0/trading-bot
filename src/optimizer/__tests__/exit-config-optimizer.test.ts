@@ -20,6 +20,8 @@ function makeMetrics(pf: number, totalTrades: number): PerformanceMetrics {
     totalReturn: ZERO,
     cagr: ZERO,
     sharpeRatio: 0,
+    sortinoRatio: 0,
+    calmarRatio: 0,
     maxDrawdown: ZERO,
     maxDrawdownPct: ZERO,
     winRate: ZERO,

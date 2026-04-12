@@ -17,6 +17,8 @@ function makeMetrics(overrides: Partial<PerformanceMetrics> = {}): PerformanceMe
     totalReturn: d('0.15'),
     cagr: d('0.08'),
     sharpeRatio: 1.8,
+    sortinoRatio: 0,
+    calmarRatio: 0,
     maxDrawdown: d('200'),
     maxDrawdownPct: d('0.02'),
     winRate: d('0.65'),
