@@ -24,6 +24,7 @@ import type { IndicatorEngine } from '../indicators/engine.js';
 import type { RiskManager } from '../risk/risk-manager.js';
 import { PositionSizer } from '../risk/position-sizer.js';
 import { StopLossTracker } from '../risk/stop-loss.js';
+import { DriftDetector } from '../risk/drift-detector.js';
 import type { RiskContext, StrategyStats } from '../risk/types.js';
 import type { LiveDataFeed } from '../paper/live-data-feed.js';
 import type { ISpotOrderExecutor, SpotFillResult } from './order-executor.js';
@@ -159,6 +160,9 @@ export class SpotTradingEngine extends EventEmitter {
   private readonly orderManager?: OrderManager;
   private readonly resumeSessionId?: string;
 
+  // Drift detection
+  private driftDetector: DriftDetector | null = null;
+
   // Strategy state
   private strategy!: IStrategy;
   private positionSizer?: PositionSizer;
@@ -240,6 +244,14 @@ export class SpotTradingEngine extends EventEmitter {
         dbPath: options.correlationDbPath,
       });
     }
+
+    if (this.config.riskConfig?.driftDetection?.enabled) {
+      this.driftDetector = new DriftDetector({
+        windowSize: this.config.riskConfig.driftDetection.windowSize,
+        sharpeThreshold: this.config.riskConfig.driftDetection.sharpeThreshold,
+        winRateTolerance: this.config.riskConfig.driftDetection.winRateTolerance,
+      });
+    }
   }
 
   // ── Public API ─────────────────────────────────────────────────────
@@ -258,6 +270,9 @@ export class SpotTradingEngine extends EventEmitter {
     if (this.riskManager && this.config.riskConfig) {
       this.positionSizer = new PositionSizer(this.config.riskConfig);
     }
+
+    // Set drift detection baseline from tournament data
+    this.updateDriftBaseline();
 
     // Initialize cash
     this.cashBalance = d(this.config.initialCapital);
@@ -898,6 +913,21 @@ export class SpotTradingEngine extends EventEmitter {
     // Record trade (mode-specific format)
     this.recordTrade(position, fill, pnl, pnlPct, holdingPeriodMs, closeSignal, purpose);
 
+    // Drift detection
+    if (this.driftDetector) {
+      this.driftDetector.recordTrade(pnlPct.toNumber());
+      const drift = this.driftDetector.checkDrift();
+      if (drift) {
+        this.emit('strategyDrift', {
+          type: drift.type,
+          rolling: drift.rolling,
+          baseline: drift.baseline,
+          threshold: drift.threshold,
+          strategyName: this.strategy.name,
+        });
+      }
+    }
+
     // Emit events
     this.emit('orderFilled', {
       purpose,
@@ -1192,11 +1222,34 @@ export class SpotTradingEngine extends EventEmitter {
     this.exitManager = null;
     this.stopLossTrackers.clear();
     this.cooldownCandlesRemaining = STRATEGY_SWITCH_COOLDOWN_CANDLES;
+    this.updateDriftBaseline();
     log.info(
       { newStrategy: this.strategy.name, cooldown: STRATEGY_SWITCH_COOLDOWN_CANDLES },
       'Strategy switched due to regime change',
     );
     this.emit('strategySwitch', { newStrategy: this.strategy.name });
+  }
+
+  private updateDriftBaseline(): void {
+    if (!this.driftDetector || !this.regimeLeaderboards) return;
+    // Try current regime's leaderboard first
+    if (this.currentRegime) {
+      const entries = this.regimeLeaderboards[this.currentRegime];
+      if (entries && entries.length > 0) {
+        const entry = entries.find(e => e.strategyName === this.strategy.name) ?? entries[0];
+        this.driftDetector.setBaseline({
+          sharpeRatio: entry.regimeSharpeRatio,
+          winRate: entry.regimeWinRate,
+        });
+        return;
+      }
+    }
+    // Fallback to overall OOS metrics
+    const fb = this.regimeLeaderboards.fallbackEntry;
+    this.driftDetector.setBaseline({
+      sharpeRatio: fb.oosMetrics.sharpeRatio,
+      winRate: fb.oosMetrics.winRate.toNumber(),
+    });
   }
 
   private checkAndExecutePendingSwitch(): void {

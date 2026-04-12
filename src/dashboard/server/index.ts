@@ -20,7 +20,7 @@ import type { RiskManager } from '../../risk/risk-manager.js';
 import type { BacktestStore } from '../../backtest/backtest-store.js';
 import type { CorrelationStore } from '../../correlation/correlation-store.js';
 import type { CandleRepository } from '../../data/storage/candle-repo.js';
-import type { PaperTradingEngine } from '../../paper/paper-engine.js';
+import type { SpotTradingEngine } from '../../spot/spot-trading-engine.js';
 import type { PerpStateStore } from '../../perp/perp-state-store.js';
 import type { FeedHealthMonitor, FeedHealthState } from '../../core/feed-health.js';
 import type { TournamentStore } from '../../tournament/tournament-store.js';
@@ -31,6 +31,7 @@ import {
   toApiPaperSession,
   toApiTrade,
   toApiPaperTrade,
+  toApiPerpTrade,
 } from './types.js';
 import type { ApiTrade, ApiEquityPoint, ApiStrategyInfo, WsCommand, SystemHealthPayload } from './types.js';
 import { WsBroadcaster } from './ws/broadcaster.js';
@@ -78,8 +79,8 @@ export interface DashboardDeps {
   correlationStore?: CorrelationStore;
   repo?: CandleRepository;
   /** Live reference to all active paper engines — used by positions endpoint. */
-  paperEngines?: PaperTradingEngine[];
-  /** Optional perp engine event emitters (PerpPositionManager instances) for real-time perp broadcasting. */
+  paperEngines?: SpotTradingEngine[];
+  /** Optional perp engine event emitters for real-time perp broadcasting. */
   perpEngines?: EventEmitter[];
   perpStateStore?: PerpStateStore;
   gateConfig?: { minTrades: number; minNetPnl: number; lookbackTrades?: number };
@@ -105,7 +106,7 @@ export interface RouteDeps {
   correlationStore?: CorrelationStore;
   repo?: CandleRepository;
   /** Live reference to all active paper engines — used by positions endpoint. */
-  paperEngines?: PaperTradingEngine[];
+  paperEngines?: SpotTradingEngine[];
   perpStateStore?: PerpStateStore;
   gateConfig?: { minTrades: number; minNetPnl: number; lookbackTrades?: number };
   feeConfig?: { takerFeeRate: number; makerFeeRate: number; source: string };
@@ -141,6 +142,8 @@ const ENGINE_EVENT_MAP: Record<string, string> = {
   equityUpdate: 'equityUpdate',
   circuitBreaker: 'circuitBreaker',
   riskUpdate: 'riskUpdate',
+  strategyDrift: 'strategyDrift',
+  strategySwitch: 'strategySwitch',
 };
 
 // ── Server Factory ───────────────────────────────────────────────────
@@ -230,7 +233,7 @@ export async function createDashboardServer(
     }
   }
 
-  // Recovery state tracking — spot engines only (PerpPositionManager does not emit reconciliation/started)
+  // Recovery state tracking — spot engines only (PerpTradingEngine does not emit reconciliation/started)
   for (const engine of deps.engines) {
     engine.on('reconciliation', () => {
       lastReconciliationAt = Date.now();
@@ -454,17 +457,30 @@ function buildSnapshot(
 
   let trades: ApiTrade[] = [];
   let equity: ApiEquityPoint[] = [];
+  // Aggregate trades from ALL running sessions (not just the first)
+  for (const session of sessions) {
+    if (session.mode === 'live') {
+      trades.push(...deps.liveStateStore.getSessionTrades(session.id).map(toApiTrade));
+    } else {
+      trades.push(...deps.sessionStore.getSessionTrades(session.id).map((t) => toApiPaperTrade(session.id, t)));
+    }
+  }
+  // Include perp closed trades
+  if (deps.perpStateStore) {
+    trades.push(...deps.perpStateStore.listClosedTrades().map(toApiPerpTrade));
+  }
+  // Sort all trades by entry time descending
+  trades.sort((a, b) => b.entryTimestamp - a.entryTimestamp);
+  // Equity: use first session (primary) for equity curve
   if (sessions.length > 0) {
     const activeId = sessions[0].id;
     const activeMode = sessions[0].mode;
     if (activeMode === 'live') {
-      trades = deps.liveStateStore.getSessionTrades(activeId).map(toApiTrade);
       equity = deps.liveStateStore.getSessionEquity(activeId).map((ep) => ({
         timestamp: ep.timestamp,
         equity: ep.equity.toString(),
       }));
     } else {
-      trades = deps.sessionStore.getSessionTrades(activeId).map((t) => toApiPaperTrade(activeId, t));
       equity = deps.sessionStore.getSessionEquity(activeId).map((ep) => ({
         timestamp: ep.timestamp,
         equity: ep.equity.toString(),

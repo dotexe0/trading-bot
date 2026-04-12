@@ -19,6 +19,7 @@ interface StrategiesPanelProps {
   tournament: TournamentLeaderboard | null;
   availableStrategies: string[];
   onStop: (name: string) => Promise<void>;
+  driftWarning?: string | null;
 }
 
 interface StopRowState {
@@ -32,6 +33,7 @@ export function StrategiesPanel({
   tournament,
   availableStrategies,
   onStop,
+  driftWarning,
 }: StrategiesPanelProps): React.ReactElement {
   const [stopStates, setStopStates] = useState<Record<string, StopRowState>>({});
 
@@ -193,6 +195,12 @@ export function StrategiesPanel({
   return (
     <div className="panel">
       <div className="panel-title">Strategies</div>
+
+      {driftWarning && (
+        <div style={{ background: 'rgba(234, 179, 8, 0.15)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: 4, padding: '6px 10px', marginBottom: 8, color: '#eab308', fontSize: 12 }}>
+          {driftWarning}
+        </div>
+      )}
 
       {/* ── Tournament Leaderboard ─────────────────────────────────── */}
       {tournament && (

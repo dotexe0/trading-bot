@@ -146,4 +146,11 @@ export interface RiskConfig {
   atrStopMultiple?: number;
   /** Enable exponential drawdown recovery scaling. Default false. */
   drawdownRecoveryScaling?: boolean;
+  /** Drift detection config. */
+  driftDetection?: {
+    enabled: boolean;
+    windowSize: number;
+    sharpeThreshold: number;
+    winRateTolerance: number;
+  };
 }

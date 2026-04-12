@@ -95,6 +95,7 @@ function App(): React.ReactElement {
   const [tournament, setTournament] = useState<TournamentLeaderboard | null>(null);
   const [availableStrategies, setAvailableStrategies] = useState<string[]>([]);
   const [perpTournament, setPerpTournament] = useState<PerpTournamentLeaderboard | null>(null);
+  const [driftWarning, setDriftWarning] = useState<string | null>(null);
   const [activeSection, setActiveSection] = useState<string>('overview');
 
   // ── Chart refs for imperative updates ────────────────────────────
@@ -173,7 +174,7 @@ function App(): React.ReactElement {
           const sessData = (await sessRes.json()) as SessionData[];
           setSessions(sessData);
 
-          // Use the first running or most recent session for initial data
+          // Use the first running or most recent session for equity curve
           const active =
             sessData.find((s) => s.status === 'running') ?? sessData[0];
 
@@ -184,14 +185,22 @@ function App(): React.ReactElement {
               const eqData = (await eqRes.json()) as EquityPoint[];
               setEquity(eqData);
             }
-
-            // Fetch trades for active session
-            const trRes = await fetch(`/api/sessions/${active.id}/trades`);
-            if (trRes.ok) {
-              const trData = (await trRes.json()) as TradeData[];
-              setTrades(trData);
-            }
           }
+
+          // Fetch trades from ALL running sessions + perp trades
+          const runningSessions = sessData.filter((s) => s.status === 'running');
+          const sessionTradePromises = runningSessions.map((s) =>
+            fetch(`/api/sessions/${s.id}/trades`)
+              .then((r) => (r.ok ? r.json() as Promise<TradeData[]> : []))
+              .then((trades) => trades.map((t) => ({ ...t, mode: t.mode ?? 'spot' as const })))
+              .catch(() => [] as TradeData[]),
+          );
+          const perpTradePromise = fetch('/api/perp/trades')
+            .then((r) => (r.ok ? r.json() as Promise<TradeData[]> : []))
+            .catch(() => [] as TradeData[]);
+          const allTradeArrays = await Promise.all([...sessionTradePromises, perpTradePromise]);
+          const allTrades = allTradeArrays.flat().sort((a, b) => b.entryTimestamp - a.entryTimestamp);
+          setTrades(allTrades);
         }
 
         // Fetch open positions
@@ -309,23 +318,28 @@ function App(): React.ReactElement {
             .then((r) => r.json())
             .then((data) => setPositions(data as PositionData[]))
             .catch(() => undefined);
-          // Always fetch fresh sessions before fetching trades — never rely on
-          // stale React state here. The sessions state may not yet reflect the
-          // running paper session if orderFilled fires before the engineStarted
-          // /api/sessions fetch has resolved and React has re-rendered.
+          // Fetch trades from ALL running sessions + perp trades
           void fetch('/api/sessions')
             .then((r) => r.json())
-            .then((sessData) => {
+            .then(async (sessData) => {
               const updatedSessions = sessData as SessionData[];
               setSessions(updatedSessions);
-              const active = updatedSessions.find((s) => s.status === 'running');
-              if (active) {
-                return fetch(`/api/sessions/${active.id}/trades`);
-              }
-              return null;
+              const running = updatedSessions.filter((s) => s.status === 'running');
+              const sessionTradeArrays = await Promise.all(
+                running.map((s) =>
+                  fetch(`/api/sessions/${s.id}/trades`)
+                    .then((r) => (r.ok ? r.json() as Promise<TradeData[]> : []))
+                    .then((trades) => trades.map((t) => ({ ...t, mode: t.mode ?? 'spot' as const })))
+                    .catch(() => [] as TradeData[]),
+                ),
+              );
+              const perpTrades = await fetch('/api/perp/trades')
+                .then((r) => (r.ok ? r.json() as Promise<TradeData[]> : []))
+                .catch(() => [] as TradeData[]);
+              const all = [...sessionTradeArrays.flat(), ...perpTrades]
+                .sort((a, b) => b.entryTimestamp - a.entryTimestamp);
+              setTrades(all);
             })
-            .then((r) => (r ? r.json() : null))
-            .then((data) => { if (data) setTrades(data as TradeData[]); })
             .catch(() => undefined);
           // Also refresh gate status when trades update
           void fetch('/api/gate/status')
@@ -545,6 +559,20 @@ function App(): React.ReactElement {
 
         case 'systemHealth': {
           setSystemHealth(payload as SystemHealthPayload);
+          break;
+        }
+
+        case 'strategyDrift': {
+          const d = payload as { type: string; rolling: number; baseline: number; threshold: number; strategyName: string };
+          const label = d.type === 'sharpe' ? 'Sharpe' : 'Win Rate';
+          setDriftWarning(
+            `Drift detected on ${d.strategyName}: rolling ${label} (${d.rolling.toFixed(2)}) below threshold (${d.threshold.toFixed(2)}, baseline ${d.baseline.toFixed(2)})`,
+          );
+          break;
+        }
+
+        case 'strategySwitch': {
+          setDriftWarning(null);
           break;
         }
 
@@ -814,6 +842,7 @@ function App(): React.ReactElement {
                     tournament={tournament}
                     availableStrategies={availableStrategies}
                     onStop={handleStrategyStop}
+                    driftWarning={driftWarning}
                   />
                   <PerpStrategiesPanel tournament={perpTournament} />
                 </div>

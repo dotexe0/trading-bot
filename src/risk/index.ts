@@ -26,6 +26,14 @@ export { StopLossTracker } from './stop-loss.js';
 export { RiskManager } from './risk-manager.js';
 export type { RiskEvent } from './risk-manager.js';
 
+// Cross-asset
+export { CrossAssetSignalBus } from './cross-asset-signal-bus.js';
+export type { CrossAssetSignalBusOptions } from './cross-asset-signal-bus.js';
+
+// Drift detection
+export { DriftDetector } from './drift-detector.js';
+export type { DriftConfig, DriftBaseline, DriftResult } from './drift-detector.js';
+
 // Individual rules
 export { MaxPositionSizeRule } from './rules/max-position-size.js';
 export { MaxDrawdownRule } from './rules/max-drawdown.js';

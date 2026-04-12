@@ -63,6 +63,15 @@ export const riskConfigSchema = z.object({
   atrStopMultiple: z.number().min(0.5).max(5.0).default(2.0),
   /** Gradually reduce position size as drawdown deepens. scale = 1 - (dd/maxDD)^2. */
   drawdownRecoveryScaling: z.boolean().default(false),
+  /** Rolling performance drift detection. */
+  driftDetection: z
+    .object({
+      enabled: z.boolean().default(false),
+      windowSize: z.number().int().min(5).max(100).default(20),
+      sharpeThreshold: z.number().min(0).max(1).default(0.5),
+      winRateTolerance: z.number().min(0).max(0.5).default(0.15),
+    })
+    .optional(),
 });
 
 // ── Parse function ───────────────────────────────────────────────────
