@@ -61,6 +61,8 @@ export const riskConfigSchema = z.object({
   riskPerTradePct: z.number().min(0.001).max(0.1).default(0.01),
   /** ATR multiple for stop distance in volatility sizing. */
   atrStopMultiple: z.number().min(0.5).max(5.0).default(2.0),
+  /** Gradually reduce position size as drawdown deepens. scale = 1 - (dd/maxDD)^2. */
+  drawdownRecoveryScaling: z.boolean().default(false),
 });
 
 // ── Parse function ───────────────────────────────────────────────────

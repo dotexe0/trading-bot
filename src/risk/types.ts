@@ -144,4 +144,6 @@ export interface RiskConfig {
   riskPerTradePct?: number;
   /** ATR multiple for stop distance calculation. Default 2.0. */
   atrStopMultiple?: number;
+  /** Enable exponential drawdown recovery scaling. Default false. */
+  drawdownRecoveryScaling?: boolean;
 }

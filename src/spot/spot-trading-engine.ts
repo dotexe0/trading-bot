@@ -735,6 +735,13 @@ export class SpotTradingEngine extends EventEmitter {
         return;
       }
       quantity = decision.finalQuantity;
+
+      // Apply drawdown recovery scaling
+      const recoveryScale = this.riskManager.getDrawdownRecoveryScale();
+      if (recoveryScale < 1.0) {
+        quantity = quantity.mul(d(recoveryScale));
+        log.info({ recoveryScale: recoveryScale.toFixed(4) }, 'Drawdown recovery scaling applied');
+      }
     } else {
       quantity = equity.mul(d(DEFAULT_POSITION_SIZE_PCT)).div(currentPrice);
       if (quantity.lte(ZERO)) return;

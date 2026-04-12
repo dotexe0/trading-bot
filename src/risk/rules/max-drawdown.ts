@@ -108,4 +108,19 @@ export class MaxDrawdownRule implements RiskRule {
     this.tripped = false;
     this.tripTimestamp = 0;
   }
+
+  /**
+   * Get exponential recovery scale based on current drawdown.
+   * scale = 1 - (currentDD / maxDD)^2, clamped to [0, 1].
+   * Returns 1.0 if feature is disabled.
+   */
+  getRecoveryScale(maxDrawdownPct: number, enabled: boolean): number {
+    if (!enabled) return 1.0;
+    if (maxDrawdownPct <= 0) return 1.0;
+
+    const ddPct = this.lastDrawdownPct / 100; // lastDrawdownPct is stored as e.g. 5.23 for 5.23%
+    const ratio = ddPct / maxDrawdownPct;
+    const scale = 1 - ratio * ratio;
+    return Math.max(0, Math.min(1, scale));
+  }
 }

@@ -159,6 +159,14 @@ export class RiskManager {
     return [...this.riskEvents];
   }
 
+  /** Get drawdown recovery scale (0-1). Returns 1.0 if feature disabled. */
+  getDrawdownRecoveryScale(): number {
+    return this.maxDrawdown.getRecoveryScale(
+      this.config.maxDrawdownPct,
+      this.config.drawdownRecoveryScaling ?? false,
+    );
+  }
+
   getCurrentRiskState(): {
     circuitBreakerTripped: boolean;
     currentDrawdownPct: number;

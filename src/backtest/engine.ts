@@ -347,6 +347,12 @@ export class BacktestEngine {
             }
 
             quantity = decision.finalQuantity;
+
+            // Apply drawdown recovery scaling
+            const recoveryScale = this.riskManager!.getDrawdownRecoveryScale();
+            if (recoveryScale < 1.0) {
+              quantity = quantity.mul(d(recoveryScale));
+            }
           } else {
             // Legacy path: fixed percentage sizing
             const equity = portfolio.equity(currentPrice);
