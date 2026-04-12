@@ -435,4 +435,123 @@ describe('TournamentRunner regime leaderboards', () => {
       expect(result.leaderboard[1].disqualified).toBe(true);
     });
   });
+
+  describe('quality filter disqualification', () => {
+    it('disqualifies strategy with low profitFactor', async () => {
+      const wfResult = makeWfResult(1.5, [1.5]);
+      wfResult.aggregateValidateMetrics = makeMetrics({
+        sharpeRatio: 1.5,
+        profitFactor: d('0.9'),
+        sortinoRatio: 1.0,
+        calmarRatio: 1.0,
+      });
+      mockWfRunner.run.mockReturnValue(wfResult);
+      mockRegistry.list.mockReturnValue(['low-pf-strat']);
+
+      const config = makeTournamentConfig({
+        qualityFilters: { minProfitFactor: 1.1, minSortino: 0, minCalmar: 0 },
+      });
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(true);
+      expect(result.leaderboard[0].disqualifyReason).toContain('Profit factor');
+    });
+
+    it('disqualifies strategy with negative Sortino', async () => {
+      const wfResult = makeWfResult(1.5, [1.5]);
+      wfResult.aggregateValidateMetrics = makeMetrics({
+        sharpeRatio: 1.5,
+        sortinoRatio: -0.5,
+        calmarRatio: 1.0,
+        profitFactor: d('2.0'),
+      });
+      mockWfRunner.run.mockReturnValue(wfResult);
+      mockRegistry.list.mockReturnValue(['neg-sortino-strat']);
+
+      const config = makeTournamentConfig({
+        qualityFilters: { minSortino: 0.1, minCalmar: 0, minProfitFactor: 0 },
+      });
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(true);
+      expect(result.leaderboard[0].disqualifyReason).toContain('Sortino');
+    });
+
+    it('disqualifies strategy with low Calmar', async () => {
+      const wfResult = makeWfResult(1.5, [1.5]);
+      wfResult.aggregateValidateMetrics = makeMetrics({
+        sharpeRatio: 1.5,
+        calmarRatio: 0.3,
+        sortinoRatio: 1.0,
+        profitFactor: d('2.0'),
+      });
+      mockWfRunner.run.mockReturnValue(wfResult);
+      mockRegistry.list.mockReturnValue(['low-calmar-strat']);
+
+      const config = makeTournamentConfig({
+        qualityFilters: { minCalmar: 0.5, minSortino: 0, minProfitFactor: 0 },
+      });
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(true);
+      expect(result.leaderboard[0].disqualifyReason).toContain('Calmar');
+    });
+
+    it('does not disqualify strategy meeting all thresholds', async () => {
+      const wfResult = makeWfResult(1.5, [1.5]);
+      wfResult.aggregateValidateMetrics = makeMetrics({
+        sharpeRatio: 1.5,
+        profitFactor: d('1.5'),
+        sortinoRatio: 1.0,
+        calmarRatio: 1.0,
+      });
+      mockWfRunner.run.mockReturnValue(wfResult);
+      mockRegistry.list.mockReturnValue(['good-strat']);
+
+      const config = makeTournamentConfig({
+        qualityFilters: { minProfitFactor: 1.1, minSortino: 0.1, minCalmar: 0.5 },
+      });
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(false);
+    });
+
+    it('all-zero thresholds disable filtering', async () => {
+      const wfResult = makeWfResult(1.5, [1.5]);
+      wfResult.aggregateValidateMetrics = makeMetrics({
+        sharpeRatio: 1.5,
+        profitFactor: d('0.5'),
+        sortinoRatio: -2.0,
+        calmarRatio: -1.0,
+      });
+      mockWfRunner.run.mockReturnValue(wfResult);
+      mockRegistry.list.mockReturnValue(['terrible-strat']);
+
+      const config = makeTournamentConfig({
+        qualityFilters: { minSortino: 0, minCalmar: 0, minProfitFactor: 0 },
+      });
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(false);
+    });
+
+    it('omitted qualityFilters means no quality filtering', async () => {
+      const wfResult = makeWfResult(1.5, [1.5]);
+      wfResult.aggregateValidateMetrics = makeMetrics({
+        sharpeRatio: 1.5,
+        profitFactor: d('0.5'),
+        sortinoRatio: -2.0,
+        calmarRatio: -1.0,
+      });
+      mockWfRunner.run.mockReturnValue(wfResult);
+      mockRegistry.list.mockReturnValue(['terrible-strat']);
+
+      // No qualityFilters in config
+      const config = makeTournamentConfig();
+      const result = await runner.run(config, dummyCandles);
+
+      // Should not be disqualified by quality filters (robustness is fine: 1.5/1.5 = 1.0)
+      expect(result.leaderboard[0].disqualified).toBe(false);
+    });
+  });
 });

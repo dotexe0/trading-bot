@@ -47,6 +47,17 @@ export const tournamentConfigSchema = z
         rankingWeight: z.number().min(0).max(1).default(0.3),
       })
       .optional(),
+    /** Quality filter thresholds -- strategies below any threshold are disqualified */
+    qualityFilters: z
+      .object({
+        /** Minimum OOS Sortino ratio. Default 0 (non-negative). */
+        minSortino: z.number().default(0),
+        /** Minimum OOS Calmar ratio. Default 0.5. */
+        minCalmar: z.number().min(0).default(0.5),
+        /** Minimum OOS profit factor. Default 1.1. */
+        minProfitFactor: z.number().min(0).default(1.1),
+      })
+      .optional(),
   })
   .refine((d) => d.startMs < d.endMs, {
     message: 'startMs must be less than endMs',

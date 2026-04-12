@@ -201,6 +201,25 @@ export class TournamentRunner {
       }
     }
 
+    // Quality filter: disqualify strategies below metric thresholds
+    const qf = config.qualityFilters;
+    if (qf) {
+      for (const entry of entries) {
+        if (entry.disqualified) continue; // already disqualified by robustness
+
+        if (qf.minSortino > 0 && entry.oosMetrics.sortinoRatio < qf.minSortino) {
+          entry.disqualified = true;
+          entry.disqualifyReason = `Sortino ${entry.oosMetrics.sortinoRatio.toFixed(2)} below min ${qf.minSortino}`;
+        } else if (qf.minCalmar > 0 && entry.oosMetrics.calmarRatio < qf.minCalmar) {
+          entry.disqualified = true;
+          entry.disqualifyReason = `Calmar ${entry.oosMetrics.calmarRatio.toFixed(2)} below min ${qf.minCalmar}`;
+        } else if (qf.minProfitFactor > 0 && entry.oosMetrics.profitFactor.toNumber() < qf.minProfitFactor) {
+          entry.disqualified = true;
+          entry.disqualifyReason = `Profit factor ${entry.oosMetrics.profitFactor.toFixed(2)} below min ${qf.minProfitFactor}`;
+        }
+      }
+    }
+
     const qualified = entries.filter((e) => !e.disqualified);
     const disqualifiedEntries = entries.filter((e) => e.disqualified);
 
