@@ -50,6 +50,17 @@ export const riskConfigSchema = z.object({
 
   /** Cooldown period after circuit breaker triggers (ms) */
   circuitBreakerCooldownMs: z.number().int().min(0).default(0),
+
+  /** Minimum confidence scaling factor (0-1). At confidence=0, position gets
+   *  floor * baseSize. At confidence=1, no scaling. Set to 1.0 to disable. */
+  confidenceFloor: z.number().min(0).max(1).default(0.3),
+
+  /** Enable ATR-based volatility-targeted sizing. */
+  volatilitySizing: z.boolean().default(false),
+  /** Risk per trade as fraction of equity. Only used when volatilitySizing is true. */
+  riskPerTradePct: z.number().min(0.001).max(0.1).default(0.01),
+  /** ATR multiple for stop distance in volatility sizing. */
+  atrStopMultiple: z.number().min(0.5).max(5.0).default(2.0),
 });
 
 // ── Parse function ───────────────────────────────────────────────────

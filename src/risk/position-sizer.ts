@@ -29,9 +29,15 @@ export class PositionSizer {
    * @param price - Expected fill price
    * @param stats - Strategy statistics (null if no history)
    * @param correlationScalar - Optional correlation discount in [0, 1].
-   *   Applied AFTER all other sizing caps. When < 1, reduces the position
+   *   Applied AFTER confidence scaling. When < 1, reduces the position
    *   by multiplying appliedPct by the scalar. When undefined or >= 1,
    *   behavior is identical to v1.0 (zero regression).
+   * @param confidence - Optional signal confidence in [0, 1].
+   *   Scales position size: appliedPct *= floor + (1 - floor) * confidence.
+   *   Applied AFTER Kelly/fixed-fraction, BEFORE correlation discount.
+   * @param atr - Optional ATR value for volatility-targeted sizing.
+   *   When volatilitySizing is enabled and ATR is provided, base size is
+   *   computed as (equity * riskPct) / (ATR * atrMultiple).
    * @returns Position size result with method, percentages, and quantity
    */
   calculate(
@@ -39,10 +45,36 @@ export class PositionSizer {
     price: Decimal,
     stats: StrategyStats | null,
     correlationScalar?: Decimal,
+    confidence?: number,
+    atr?: Decimal,
   ): PositionSizeResult {
     let baseResult: PositionSizeResult;
 
-    if (this.config.sizingMethod === 'fixed-fraction') {
+    // Volatility-targeted sizing: risk a fixed % of equity per trade
+    // Position size = (equity * riskPct) / (ATR * atrMultiple)
+    if (this.config.volatilitySizing && atr && atr.gt(ZERO)) {
+      const riskPct = d(this.config.riskPerTradePct ?? 0.01);
+      const atrMultiple = d(this.config.atrStopMultiple ?? 2.0);
+      const stopDistance = atr.mul(atrMultiple);
+      const riskAmount = equity.mul(riskPct);
+      let quantity = riskAmount.div(stopDistance);
+      let appliedPct = quantity.mul(price).div(equity);
+      let cappedBy: string | undefined;
+
+      if (appliedPct.gt(this.maxPositionPct)) {
+        appliedPct = this.maxPositionPct;
+        quantity = equity.mul(appliedPct).div(price);
+        cappedBy = 'maxPositionPct';
+      }
+
+      baseResult = {
+        method: 'fixed-fraction',
+        rawKellyPct: ZERO,
+        appliedPct,
+        quantity,
+        cappedBy,
+      };
+    } else if (this.config.sizingMethod === 'fixed-fraction') {
       baseResult = this.fixedFraction(equity, price);
     } else if (!this.canUseKelly(stats)) {
       // Kelly or half-kelly -- fall back when insufficient stats
@@ -52,7 +84,25 @@ export class PositionSizer {
       baseResult = this.kelly(equity, price, stats!);
     }
 
-    // Apply correlation discount AFTER all other sizing caps.
+    // Apply confidence scaling AFTER Kelly/fixed-fraction, BEFORE correlation.
+    // Scale formula: appliedPct *= floor + (1 - floor) * confidence
+    // At confidence=1.0, scale=1.0 (no reduction). At confidence=0, scale=floor.
+    if (confidence !== undefined && confidence >= 0 && confidence <= 1) {
+      const floor = this.config.confidenceFloor ?? 0.3;
+      if (floor < 1) {
+        const scale = d(floor + (1 - floor) * confidence);
+        const appliedPct = baseResult.appliedPct.mul(scale);
+        const quantity = equity.mul(appliedPct).div(price);
+        baseResult = {
+          ...baseResult,
+          appliedPct,
+          quantity,
+          cappedBy: baseResult.cappedBy ?? 'confidenceScaled',
+        };
+      }
+    }
+
+    // Apply correlation discount AFTER confidence scaling.
     // Only fires when scalar is provided AND strictly less than 1.
     if (
       correlationScalar !== undefined &&

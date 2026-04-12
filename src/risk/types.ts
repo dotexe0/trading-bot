@@ -135,4 +135,13 @@ export interface RiskConfig {
   maxExposurePct: number;
   maxPositionCount: number;
   circuitBreakerCooldownMs: number;
+  /** Minimum confidence scaling factor (0-1). At confidence=0, position size is
+   *  multiplied by this floor. At confidence=1, no scaling. Default 0.3. */
+  confidenceFloor: number;
+  /** Enable ATR-based volatility-targeted position sizing. Default false. */
+  volatilitySizing?: boolean;
+  /** Risk per trade as fraction of equity (e.g., 0.01 = 1%). Used when volatilitySizing is true. */
+  riskPerTradePct?: number;
+  /** ATR multiple for stop distance calculation. Default 2.0. */
+  atrStopMultiple?: number;
 }

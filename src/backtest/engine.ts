@@ -302,10 +302,21 @@ export class BacktestEngine {
           if (hasRisk && positionSizer && this.riskManager) {
             // Use PositionSizer for sizing
             const equity = portfolio.equity(currentPrice);
+
+            // Get current ATR for volatility sizing
+            const atrForSizing = (() => {
+              const visCandles = candles.slice(0, i + 1);
+              const atrOutput = this.indicatorEngine.compute({ name: 'ATR', period: 14 }, visCandles);
+              return atrOutput.values.length > 0 ? d(atrOutput.values[atrOutput.values.length - 1] as number) : undefined;
+            })();
+
             const sizeResult = positionSizer.calculate(
               equity,
               nextOpen,
               strategyStats ?? null,
+              undefined,
+              signal.confidence,
+              atrForSizing,
             );
             quantity = sizeResult.quantity;
 
@@ -365,6 +376,7 @@ export class BacktestEngine {
               fill.fillPrice,
               direction,
               entryAtr,
+              regime,
             );
           } else if (hasRisk && this.riskConfig) {
             const direction = signal.direction as 'long' | 'short';

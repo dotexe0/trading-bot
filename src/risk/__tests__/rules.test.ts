@@ -43,6 +43,10 @@ function makeRiskConfig(overrides: Partial<RiskConfig> = {}): RiskConfig {
     maxExposurePct: 0.95,
     maxPositionCount: 4,
     circuitBreakerCooldownMs: 0,
+    confidenceFloor: 0.3,
+    volatilitySizing: false,
+    riskPerTradePct: 0.01,
+    atrStopMultiple: 2.0,
     ...overrides,
   };
 }
