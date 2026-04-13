@@ -40,7 +40,7 @@ import { PerpStateStore } from '../perp/perp-state-store.js';
 import { runPerpTournament, buildScalpingParamGrid, buildNonScalpingPerpParamGrid } from '../perp/perp-tournament-runner.js';
 import type { FeeConfig } from '../perp/fee-config.js';
 import { CBAdvancedTradeClient } from 'coinbase-api';
-import type { Candle, TradingPair } from '../core/types.js';
+import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import { TIMEFRAME_MS } from '../core/types.js';
 import type { EventEmitter } from 'node:events';
 import {
@@ -55,6 +55,7 @@ import type { RegimeLeaderboards, TournamentResult } from '../tournament/types.j
 import { SpotSignalGate } from '../risk/spot-signal-gate.js';
 import { PreLiveGate } from '../risk/pre-live-gate.js';
 import { FeedHealthMonitor } from '../core/feed-health.js';
+import { CrossAssetSignalBus } from '../risk/cross-asset-signal-bus.js';
 
 // ── Resource tracking ──────────────────────────────────────────────
 
@@ -264,6 +265,15 @@ program
         driftDetection: { enabled: true, windowSize: 20, sharpeThreshold: 0.5, winRateTolerance: 0.15 },
       });
       const riskManager = new RiskManager(riskConfig);
+
+      // Cross-asset signal bus: BTC/ETH same-direction boost, opposing dampen
+      const crossAssetBus = new CrossAssetSignalBus();
+
+      // Multi-timeframe confirmation: map primary TF to a higher confirmation TF
+      const confirmationTfMap: Partial<Record<Timeframe, Timeframe>> = {
+        '1m': '15m', '5m': '1h', '15m': '1h', '1h': '4h',
+      };
+      const confirmationTimeframe = confirmationTfMap[timeframe];
 
       // Feed health monitoring for all instruments.
       // expectedIntervalMs = REST poll interval (60s) for non-5m timeframes — health is
@@ -507,6 +517,15 @@ program
               initialCapital: effectiveCapital,
             });
 
+            // Multi-TF confirmation feed (e.g. 4h when primary is 1h)
+            const spotConfirmFeed = confirmationTimeframe
+              ? new LiveDataFeed({
+                  apiKey: config.coinbase.apiKeyName,
+                  apiSecret: config.coinbase.apiKeySecret,
+                  timeframe: confirmationTimeframe,
+                })
+              : undefined;
+
             const engine = new SpotTradingEngine({
               mode: 'paper',
               executor: new PaperSpotOrderExecutor(new FillSimulator({
@@ -525,6 +544,9 @@ program
               regimeLeaderboards: result.regimeLeaderboards,
               spotSignalGate,
               feedHealthMonitor,
+              crossAssetBus,
+              confirmationFeed: spotConfirmFeed,
+              confirmationTimeframe,
             });
 
             const session = await engine.start();
@@ -624,6 +646,14 @@ program
           strategyConfig: stratConfig,
           initialCapital: lastEquityAdHoc ?? capital,
         });
+        const adHocConfirmFeed = confirmationTimeframe
+          ? new LiveDataFeed({
+              apiKey: config.coinbase.apiKeyName,
+              apiSecret: config.coinbase.apiKeySecret,
+              timeframe: confirmationTimeframe,
+            })
+          : undefined;
+
         const engine = new SpotTradingEngine({
           mode: 'paper',
           executor: new PaperSpotOrderExecutor(new FillSimulator({
@@ -641,6 +671,9 @@ program
           candleRepo: repo,
           spotSignalGate,
           feedHealthMonitor,
+          crossAssetBus,
+          confirmationFeed: adHocConfirmFeed,
+          confirmationTimeframe,
         });
         const session = await engine.start();
         paperEngines.push(engine);
@@ -822,6 +855,14 @@ program
                 out.warn(`Perp ${perpPair}: no tournament winner with OOS trades — starts without strategy`);
               }
 
+              const perpConfirmFeed = confirmationTimeframe
+                ? new LiveDataFeed({
+                    apiKey: config.coinbase.apiKeyName,
+                    apiSecret: config.coinbase.apiKeySecret,
+                    timeframe: confirmationTimeframe,
+                  })
+                : undefined;
+
               const perpEngine = new PerpTradingEngine({
                 mode: 'paper',
                 executor: new PaperPerpOrderExecutor(),
@@ -836,6 +877,9 @@ program
                 strategyRegistry: perpLiveRegistry,
                 fundingRateProvider,
                 feedHealthMonitor,
+                crossAssetBus,
+                confirmationFeed: perpConfirmFeed,
+                confirmationTimeframe,
               });
 
               perpEngine.start();
@@ -873,6 +917,14 @@ program
                 ? livePerpRegistry.create(liveWinner.strategyConfig)
                 : undefined;
 
+              const livePerpConfirmFeed = confirmationTimeframe
+                ? new LiveDataFeed({
+                    apiKey: config.coinbase.apiKeyName,
+                    apiSecret: config.coinbase.apiKeySecret,
+                    timeframe: confirmationTimeframe,
+                  })
+                : undefined;
+
               const perpEngine = new PerpTradingEngine({
                 mode: 'live',
                 executor: new LivePerpOrderExecutor({
@@ -890,6 +942,9 @@ program
                 strategyRegistry: livePerpRegistry,
                 fundingRateProvider,
                 feedHealthMonitor,
+                crossAssetBus,
+                confirmationFeed: livePerpConfirmFeed,
+                confirmationTimeframe,
               });
 
               // recoverFromRestart() BEFORE start() — live only
