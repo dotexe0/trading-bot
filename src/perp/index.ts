@@ -6,11 +6,12 @@
  */
 
 export { IntxClient } from './intx-client.js';
-export { PaperPerpEngine } from './paper-perp-engine.js';
-export type { PaperPerpEngineOptions } from './paper-perp-engine.js';
+export { PerpTradingEngine } from './perp-trading-engine.js';
+export type { PerpTradingEngineOptions } from './perp-trading-engine.js';
+export { PaperPerpOrderExecutor, LivePerpOrderExecutor } from './order-executor.js';
+export type { IPerpOrderExecutor, PerpOpenParams, PerpCloseParams, PerpFillResult } from './order-executor.js';
 export type { IntxConfig } from './config.js';
 export { intxConfigSchema } from './config.js';
-export { PerpPositionManager } from './position-manager.js';
 export { PerpStateStore } from './perp-state-store.js';
 export { calcLiquidationPrice, calcLiquidationDistance } from './liquidation-calc.js';
 export { PerpOrderEngine } from './order-engine.js';
@@ -34,7 +35,7 @@ export type {
   PerpOrder,
   PerpDirection,
   PerpSessionStatus,
-  PerpPositionManagerEvents,
+  PerpEngineEvents,
   FcmOrderFillEvent,
   PerpOrderEngineEvents,
   RiskGateResult,

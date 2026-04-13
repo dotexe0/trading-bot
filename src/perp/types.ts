@@ -137,8 +137,8 @@ export interface PerpOrder {
   updatedAt: number;
 }
 
-/** Typed event map for PerpPositionManager. */
-export interface PerpPositionManagerEvents {
+/** Typed event map for PerpTradingEngine. */
+export interface PerpEngineEvents {
   positionOpened: [PerpSession];
   positionClosed: [PerpSession];
   emergencyClose: [PerpSession, { markPrice: string; distancePct: string }];

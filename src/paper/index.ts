@@ -19,6 +19,5 @@ export { paperConfigSchema, parsePaperConfig } from './config.js';
 
 // Core components
 export { LiveDataFeed } from './live-data-feed.js';
-export { PaperTradingEngine } from './paper-engine.js';
 export { SessionStore } from './session-store.js';
 export { SandboxValidator } from './sandbox-validator.js';

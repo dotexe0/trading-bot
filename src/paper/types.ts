@@ -67,7 +67,7 @@ export interface LiveDataFeedEvents {
   /** Fires on every successful REST poll per pair — even when the candle is deduplicated.
    *  Used by FeedHealthMonitor to track pipeline liveness independent of candle cadence. */
   polled: [TradingPair];
-  error: [Error];
+  wsError: [Error];
   connected: [];
   disconnected: [];
   reconnected: [];

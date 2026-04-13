@@ -313,7 +313,7 @@ export class PerpOrderEngine extends EventEmitter {
         entryPrice: fillResult.avgFillPrice,
         size,
         leverage: 1, // caller can override via a separate param in future plans
-        liquidationPrice: '0', // computed by PerpPositionManager
+        liquidationPrice: '0', // computed by PerpTradingEngine
         maintenanceMarginRate: this.config.defaultMaintenanceMarginRate,
         status: 'open',
         openedAt: Date.now(),
@@ -645,7 +645,7 @@ export class PerpOrderEngine extends EventEmitter {
   /**
    * Cancel all tracked post-fill orders (TP + stop) and clean up state.
    *
-   * Called by PerpPositionManager on all close paths before marking the session closed.
+   * Called by PerpTradingEngine on all close paths before marking the session closed.
    * Does NOT throw — logs warn on partial failure and continues cleanup.
    *
    * Steps:
