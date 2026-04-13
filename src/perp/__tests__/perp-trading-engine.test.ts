@@ -703,4 +703,40 @@ describe('PerpTradingEngine onCandle strategy signals', () => {
     expect(strategy.evaluate).not.toHaveBeenCalled();
     engine.stop();
   });
+
+  it('scales position size by signal confidence', async () => {
+    const strategy: IStrategy = {
+      name: 'test-conf',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => {
+        return [{ direction: 'long' as const, strategyName: 'test', pair: 'BTC-USD' as const, timeframe: '1h' as const, confidence: 0.5, timestamp: Date.now(), reasoning: 'test' }];
+      },
+    };
+
+    const conf = makeMockConfig({ basePositionSize: 0.01, confidenceFloor: 0.3 });
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config: conf,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+      initialStrategy: strategy,
+    });
+
+    const opened = vi.fn();
+    engine.on('positionOpened', opened);
+    engine.start();
+    engine.onCandle(makeCandle());
+
+    await vi.waitFor(() => expect(opened).toHaveBeenCalled());
+
+    // confidence=0.5, floor=0.3 → scale = 0.3 + 0.7*0.5 = 0.65 → size = 0.01*0.65 = 0.0065
+    const session = opened.mock.calls[0][0];
+    expect(parseFloat(session.size)).toBeCloseTo(0.0065, 4);
+
+    engine.stop();
+  });
 });

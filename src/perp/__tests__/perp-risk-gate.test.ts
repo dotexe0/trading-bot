@@ -44,6 +44,8 @@ function makeConfig(): IntxConfig {
     orderMaxWaitSeconds: 60,
     orderCloseMaxRetries: 3,
     maxDailyLossUsd: 500,
+    basePositionSize: 0.01,
+    confidenceFloor: 0.3,
     scalpingTimeframe: '5m' as const,
   };
 }

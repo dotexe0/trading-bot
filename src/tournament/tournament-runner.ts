@@ -6,7 +6,7 @@
 
 import crypto from 'node:crypto';
 import { createModuleLogger } from '../core/logger.js';
-import type { Candle } from '../core/types.js';
+import type { Candle, Timeframe } from '../core/types.js';
 import type { BacktestConfig, Trade } from '../backtest/types.js';
 import type { WalkForwardRunner, WalkForwardResult } from '../backtest/walk-forward.js';
 import type { StrategyRegistry } from '../strategies/registry.js';
@@ -49,6 +49,7 @@ export class TournamentRunner {
   async run(
     config: TournamentConfig,
     candles: Candle[],
+    additionalCandlesMap?: Map<Timeframe, Candle[]>,
   ): Promise<TournamentResult> {
     const strategyConfigs = config.strategyConfigs
       ? config.strategyConfigs
@@ -93,7 +94,7 @@ export class TournamentRunner {
         backtestConfig,
         config.walkForward,
         candles,
-        undefined,
+        additionalCandlesMap,
         precomputedRegimes,
       );
 

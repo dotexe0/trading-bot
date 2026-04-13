@@ -554,4 +554,26 @@ describe('TournamentRunner regime leaderboards', () => {
       expect(result.leaderboard[0].disqualified).toBe(false);
     });
   });
+
+  it('forwards additionalCandlesMap to walk-forward runner', async () => {
+    mockWfRunner.run.mockReturnValue(makeWfResult(1.5, [1.5]));
+    mockRegistry.list.mockReturnValue(['test-strategy']);
+
+    const htfCandles: Candle[] = [
+      { pair: 'BTC-USD', timeframe: '4h', timestamp: 1000, open: '100', high: '110', low: '90', close: '105', volume: '10' },
+    ];
+    const additionalCandles = new Map([['4h' as const, htfCandles]]);
+
+    const config = makeTournamentConfig();
+    await runner.run(config, dummyCandles, additionalCandles);
+
+    // Verify additionalCandlesMap was passed (4th argument to walkForwardRunner.run)
+    expect(mockWfRunner.run).toHaveBeenCalledWith(
+      expect.any(Object),  // backtestConfig
+      expect.any(Object),  // walkForward
+      dummyCandles,        // candles
+      additionalCandles,   // additionalCandlesMap — NOT undefined
+      expect.any(Object),  // precomputedRegimes
+    );
+  });
 });

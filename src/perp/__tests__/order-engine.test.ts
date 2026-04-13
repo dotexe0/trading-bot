@@ -66,6 +66,8 @@ function makeMockConfig(overrides: Partial<FcmConfig> = {}): FcmConfig {
     orderCloseMaxRetries: 3,
     scalpingTimeframe: '5m',
     maxDailyLossUsd: 500,
+    basePositionSize: 0.01,
+    confidenceFloor: 0.3,
     ...overrides,
   };
 }

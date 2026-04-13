@@ -467,7 +467,17 @@ program
           qualityFilters: { minSortino: 0, minCalmar: 0.5, minProfitFactor: 1.1 },
         });
 
-        const result = await runner.run(tournamentConfig, candles);
+        // Load higher-TF candles for multi-timeframe strategies in tournament
+        let tournamentAdditionalCandles: Map<import('../core/types.js').Timeframe, Candle[]> | undefined;
+        if (confirmationTimeframe) {
+          const htfCandles = repo.getCandles(tradePair, confirmationTimeframe, startMs, endMs);
+          if (htfCandles.length > 0) {
+            tournamentAdditionalCandles = new Map([[confirmationTimeframe, htfCandles]]);
+            out.info(`${htfCandles.length} ${confirmationTimeframe} candles loaded for multi-TF tournament`);
+          }
+        }
+
+        const result = await runner.run(tournamentConfig, candles, tournamentAdditionalCandles);
         tournamentStore.saveTournament(result);
 
         out.info(

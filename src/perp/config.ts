@@ -50,6 +50,11 @@ export const fcmConfigSchema = z
     /** Maximum cumulative daily realized loss in USD before blocking new entries.
      *  Resets at midnight UTC. Default $500 -- appropriate for $1K-$10K accounts. */
     maxDailyLossUsd: z.number().positive().default(500),
+
+    /** Base position size in contracts (e.g. 0.01 BTC). Scaled by signal confidence. */
+    basePositionSize: z.number().positive().default(0.01),
+    /** Minimum confidence floor for position size scaling (0-1). At floor, size = floor * base. */
+    confidenceFloor: z.number().min(0).max(1).default(0.3),
   })
   .refine(
     (data) => !data.enabled || (!!data.apiKey && !!data.apiSecret),

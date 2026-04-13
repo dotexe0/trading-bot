@@ -105,7 +105,7 @@ export class MacdMomentumStrategy implements IStrategy {
     }
     const rawConfidence =
       maxAbsHistogram === 0
-        ? 0.5
+        ? 0.3
         : Math.abs(curr.histogram ?? 0) / maxAbsHistogram;
     const confidence = Math.round(Math.min(Math.max(rawConfidence, 0), 1) * 100) / 100;
 

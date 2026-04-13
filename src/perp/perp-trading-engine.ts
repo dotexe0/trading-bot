@@ -547,7 +547,12 @@ export class PerpTradingEngine extends EventEmitter {
           const leverage = (regime !== undefined && this.config.leverageByRegime)
             ? computeLeverage(regime as MarketRegime, effectiveConfidence, this.config as any)
             : (this.config.defaultLeverage ?? 5);
-          this.openPosition(instrument, direction, '0.01', leverage, candle.close).catch(
+          // Scale position size by confidence: size = base * (floor + (1-floor) * confidence)
+          const base = this.config.basePositionSize ?? 0.01;
+          const floor = this.config.confidenceFloor ?? 0.3;
+          const sizeScale = floor + (1 - floor) * effectiveConfidence;
+          const scaledSize = (base * sizeScale).toFixed(8);
+          this.openPosition(instrument, direction, scaledSize, leverage, candle.close).catch(
             (err) => {
               log.error(
                 { err: err instanceof Error ? err.message : String(err) },
