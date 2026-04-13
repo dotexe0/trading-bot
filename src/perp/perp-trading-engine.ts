@@ -76,6 +76,8 @@ export interface PerpTradingEngineOptions {
   confirmationTimeframe?: Timeframe;
   /** Optional cross-asset signal bus for BTC/ETH confirmation. */
   crossAssetBus?: import('../risk/cross-asset-signal-bus.js').CrossAssetSignalBus;
+  /** Optional RiskManager for drawdown recovery scaling. */
+  riskManager?: import('../risk/risk-manager.js').RiskManager;
   /**
    * Paper-only: interval between simulated funding payments (default 8h).
    * Ignored in live mode (real funding events from WebSocket).
@@ -125,6 +127,9 @@ export class PerpTradingEngine extends EventEmitter {
   // Cross-asset signal confirmation
   private readonly crossAssetBus?: import('../risk/cross-asset-signal-bus.js').CrossAssetSignalBus;
 
+  // Drawdown recovery scaling
+  private readonly riskManager?: import('../risk/risk-manager.js').RiskManager;
+
   private readonly ctrl: PerpStrategyController;
 
   /** Typed emit override — matches PerpEngineEvents interface. */
@@ -157,6 +162,7 @@ export class PerpTradingEngine extends EventEmitter {
     this.confirmationFeed = options.confirmationFeed;
     this.confirmationTimeframe = options.confirmationTimeframe;
     this.crossAssetBus = options.crossAssetBus;
+    this.riskManager = options.riskManager;
 
     this.ctrl = new PerpStrategyController({
       regimeLeaderboards: options.regimeLeaderboards,
@@ -551,7 +557,9 @@ export class PerpTradingEngine extends EventEmitter {
           const base = this.config.basePositionSize ?? 0.01;
           const floor = this.config.confidenceFloor ?? 0.3;
           const sizeScale = floor + (1 - floor) * effectiveConfidence;
-          const scaledSize = (base * sizeScale).toFixed(8);
+          // Apply drawdown recovery scaling (reduces size during drawdowns)
+          const recoveryScale = this.riskManager?.getDrawdownRecoveryScale() ?? 1.0;
+          const scaledSize = (base * sizeScale * recoveryScale).toFixed(8);
           this.openPosition(instrument, direction, scaledSize, leverage, candle.close).catch(
             (err) => {
               log.error(

@@ -890,6 +890,7 @@ program
                 crossAssetBus,
                 confirmationFeed: perpConfirmFeed,
                 confirmationTimeframe,
+                riskManager,
               });
 
               perpEngine.start();
@@ -955,6 +956,7 @@ program
                 crossAssetBus,
                 confirmationFeed: livePerpConfirmFeed,
                 confirmationTimeframe,
+                riskManager,
               });
 
               // recoverFromRestart() BEFORE start() — live only
