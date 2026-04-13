@@ -83,6 +83,14 @@ export interface SubmitStopLimitOrderParams {
   purpose?: LiveOrder['purpose'];
 }
 
+export interface SubmitLimitGtcOrderParams {
+  pair: string;
+  side: OrderSide;
+  baseSize: string;
+  limitPrice: string;
+  purpose?: LiveOrder['purpose'];
+}
+
 // ── OrderManager Events ──────────────────────────────────────────────
 
 export interface OrderManagerEvents {
@@ -414,6 +422,104 @@ export class OrderManager extends EventEmitter {
         isRetryable: true,
       });
     }
+  }
+
+  // ── Limit GTC Order ──────────────────────────────────────────────
+
+  /**
+   * Submit a limit GTC order (used for limit entry orders).
+   */
+  async submitLimitGtcOrder(
+    params: SubmitLimitGtcOrderParams,
+  ): Promise<LiveOrder> {
+    const clientOrderId = crypto.randomUUID();
+    const now = Date.now();
+
+    const order: LiveOrder = {
+      orderId: clientOrderId,
+      clientOrderId,
+      sessionId: this.sessionId,
+      productId: params.pair,
+      side: params.side,
+      orderType: 'LIMIT' as any,
+      status: 'PENDING',
+      baseSize: params.baseSize,
+      limitPrice: params.limitPrice,
+      filledSize: '0',
+      filledValue: '0',
+      totalFees: '0',
+      createdAt: now,
+      updatedAt: now,
+      purpose: params.purpose ?? 'ENTRY',
+    };
+
+    this.stateStore.persistOrder(order);
+    this.trackedOrders.set(order.orderId, order);
+
+    log.info(
+      { clientOrderId, pair: params.pair, side: params.side, limitPrice: params.limitPrice },
+      'Submitting limit GTC order',
+    );
+
+    try {
+      await this.rateLimiter.acquire();
+
+      const response = await this.restClient.submitOrder({
+        client_order_id: clientOrderId,
+        product_id: params.pair,
+        side: params.side,
+        order_configuration: {
+          limit_limit_gtc: {
+            base_size: params.baseSize,
+            limit_price: params.limitPrice,
+          },
+        },
+      });
+
+      if (response.success && response.success_response) {
+        const exchangeOrderId = response.success_response.order_id;
+
+        this.trackedOrders.delete(order.orderId);
+        order.orderId = exchangeOrderId;
+        order.status = 'OPEN';
+        order.updatedAt = Date.now();
+        this.trackedOrders.set(exchangeOrderId, order);
+
+        this.stateStore.persistOrder(order);
+        this.emit('orderSubmitted', order);
+        log.info(
+          { clientOrderId, exchangeOrderId },
+          'Limit GTC order submitted successfully',
+        );
+        return order;
+      }
+
+      order.status = 'FAILED';
+      order.updatedAt = Date.now();
+      this.stateStore.persistOrder(order);
+
+      const errorMsg = response.error_response?.message ?? 'Unknown order submission error';
+      throw new OrderError({
+        message: errorMsg,
+        orderId: order.orderId,
+        isRetryable: false,
+      });
+    } catch (err) {
+      if (err instanceof OrderError) throw err;
+      log.error({ err, clientOrderId }, 'Network error submitting limit GTC order');
+      throw new OrderError({
+        message: err instanceof Error ? err.message : 'Unknown error',
+        orderId: order.orderId,
+        isRetryable: true,
+      });
+    }
+  }
+
+  /**
+   * Get the current status of a tracked order.
+   */
+  getOrderStatus(orderId: string): LiveOrder['status'] | undefined {
+    return this.trackedOrders.get(orderId)?.status;
   }
 
   // ── Order Cancellation ───────────────────────────────────────────

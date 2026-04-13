@@ -26,6 +26,8 @@ interface HeaderProps {
 export function Header({ status, isMuted, onMuteToggle }: HeaderProps): React.ReactElement {
   const [killSwitchOpen, setKillSwitchOpen] = useState(false);
   const [killSwitchLoading, setKillSwitchLoading] = useState(false);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const dotClass = `connection-dot ${status}`;
@@ -52,6 +54,26 @@ export function Header({ status, isMuted, onMuteToggle }: HeaderProps): React.Re
     } finally {
       setKillSwitchLoading(false);
       // Auto-dismiss toast after 4s
+      setTimeout(() => setToast(null), 4000);
+    }
+  }
+
+  async function handleResetConfirm() {
+    setResetLoading(true);
+    try {
+      const res = await fetch('/api/reset-paper', { method: 'POST' });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        throw new Error(data.error ?? 'Reset failed');
+      }
+      setResetOpen(false);
+      setToast({ message: 'Paper history cleared — reloading...', type: 'success' });
+      // Reload after short delay so toast is visible
+      setTimeout(() => window.location.reload(), 1200);
+    } catch (err) {
+      setToast({ message: err instanceof Error ? err.message : 'Reset failed', type: 'error' });
+    } finally {
+      setResetLoading(false);
       setTimeout(() => setToast(null), 4000);
     }
   }
@@ -85,6 +107,15 @@ export function Header({ status, isMuted, onMuteToggle }: HeaderProps): React.Re
             )}
           </button>
 
+          {/* Reset paper history */}
+          <button
+            className="reset-paper-btn"
+            onClick={() => setResetOpen(true)}
+            aria-label="Reset paper history"
+          >
+            RESET HISTORY
+          </button>
+
           {/* Kill switch always visible */}
           <button
             className="kill-switch-btn"
@@ -109,6 +140,45 @@ export function Header({ status, isMuted, onMuteToggle }: HeaderProps): React.Re
         onCancel={() => setKillSwitchOpen(false)}
         isLoading={killSwitchLoading}
       />
+
+      {/* Reset paper history confirmation dialog */}
+      {resetOpen && (
+        <div className="modal-overlay" onClick={!resetLoading ? () => setResetOpen(false) : undefined} role="dialog" aria-modal="true" aria-labelledby="reset-title">
+          <div className="modal-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <span className="modal-icon modal-icon-warn">!</span>
+              <h2 id="reset-title" className="modal-title">Reset Paper History</h2>
+            </div>
+
+            <p className="modal-body">Delete all paper trading history and start fresh?</p>
+            <p className="modal-warning">This will clear all trades, equity snapshots, sessions, tournament results, exit optimizations, regime history, and correlation snapshots. This cannot be undone.</p>
+
+            <div className="modal-actions">
+              <button
+                className="btn-secondary"
+                onClick={() => setResetOpen(false)}
+                disabled={resetLoading}
+              >
+                Cancel
+              </button>
+              <button
+                className="btn-warn reset-confirm-btn"
+                onClick={handleResetConfirm}
+                disabled={resetLoading}
+              >
+                {resetLoading ? (
+                  <span className="btn-spinner">
+                    <span className="spinner" />
+                    Resetting...
+                  </span>
+                ) : (
+                  'Confirm Reset'
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

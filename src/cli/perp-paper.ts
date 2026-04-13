@@ -12,7 +12,7 @@
  */
 
 import { loadConfig } from '../core/config.js';
-import { IntxClient, PaperPerpEngine, PerpStateStore } from '../perp/index.js';
+import { IntxClient, PerpTradingEngine, PaperPerpOrderExecutor, PerpStateStore } from '../perp/index.js';
 import { createModuleLogger } from '../core/logger.js';
 
 const log = createModuleLogger('perp-paper');
@@ -34,7 +34,15 @@ if (!config.intx.enabled) {
 
 const intxClient = new IntxClient(config.intx);
 const stateStore = new PerpStateStore({ dbPath: config.perpDatabase.path });
-const paperEngine = new PaperPerpEngine({ intxClient, stateStore, config: config.intx });
+const paperEngine = new PerpTradingEngine({
+  mode: 'paper',
+  executor: new PaperPerpOrderExecutor(),
+  intxClient,
+  stateStore,
+  config: config.intx,
+  tradingPair: 'BTC-USD',
+  timeframe: '1h',
+});
 
 // Wire up event listeners before starting
 intxClient.on('markPrice', (evt) => {

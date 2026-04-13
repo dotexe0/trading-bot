@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { ExitLogicManager } from '../manager.js';
 import { d } from '../../../core/decimal.js';
+import { MarketRegime } from '../../../regime/types.js';
 import type { ExitConfig } from '../types.js';
 
 /** Helper to build a fully-disabled ExitConfig and override specific exits. */
@@ -279,6 +280,54 @@ describe('ExitLogicManager', () => {
       expect(result2.type).toBe('full_exit');
       expect(result2.reason).toBe('atr_stop');
       expect(result2.fillPrice.toNumber()).toBe(100); // fills at breakeven, not ATR stop of 90
+    });
+  });
+
+  describe('regime-scaled ATR stop', () => {
+    const regimeConfig = makeConfig({
+      atrStop: {
+        enabled: true,
+        atrPeriod: 14,
+        atrMultiple: 2.0,
+        atrMultipleByRegime: {
+          TRENDING: 3.0,
+          RANGING: 1.5,
+          VOLATILE: 2.5,
+        },
+      },
+    });
+
+    it('TRENDING regime selects 3.0x multiple (wider stop)', () => {
+      // entry=100, ATR=5, TRENDING multiple=3.0 → stop=100-15=85
+      const mgr = new ExitLogicManager(regimeConfig, d(100), 'long', d(5), MarketRegime.TRENDING);
+      expect(mgr.getCurrentStopPrice().toNumber()).toBe(85);
+    });
+
+    it('RANGING regime selects 1.5x multiple (tighter stop)', () => {
+      // entry=100, ATR=5, RANGING multiple=1.5 → stop=100-7.5=92.5
+      const mgr = new ExitLogicManager(regimeConfig, d(100), 'long', d(5), MarketRegime.RANGING);
+      expect(mgr.getCurrentStopPrice().toNumber()).toBe(92.5);
+    });
+
+    it('VOLATILE regime selects 2.5x multiple', () => {
+      // entry=100, ATR=5, VOLATILE multiple=2.5 → stop=100-12.5=87.5
+      const mgr = new ExitLogicManager(regimeConfig, d(100), 'long', d(5), MarketRegime.VOLATILE);
+      expect(mgr.getCurrentStopPrice().toNumber()).toBe(87.5);
+    });
+
+    it('undefined regime falls back to base atrMultiple (2.0x)', () => {
+      // entry=100, ATR=5, base multiple=2.0 → stop=100-10=90
+      const mgr = new ExitLogicManager(regimeConfig, d(100), 'long', d(5), undefined);
+      expect(mgr.getCurrentStopPrice().toNumber()).toBe(90);
+    });
+
+    it('missing atrMultipleByRegime falls back to base atrMultiple', () => {
+      const noRegimeConfig = makeConfig({
+        atrStop: { enabled: true, atrPeriod: 14, atrMultiple: 2.0 },
+      });
+      // entry=100, ATR=5, base multiple=2.0 → stop=90
+      const mgr = new ExitLogicManager(noRegimeConfig, d(100), 'long', d(5), MarketRegime.TRENDING);
+      expect(mgr.getCurrentStopPrice().toNumber()).toBe(90);
     });
   });
 });

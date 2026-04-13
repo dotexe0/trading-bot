@@ -79,8 +79,14 @@ export interface AtrStopConfig {
   enabled: boolean;
   /** ATR indicator period */
   atrPeriod: number;
-  /** Stop distance as ATR multiple */
+  /** Stop distance as ATR multiple (base/fallback) */
   atrMultiple: number;
+  /** Per-regime ATR multiples (overrides atrMultiple when regime is known) */
+  atrMultipleByRegime?: {
+    TRENDING?: number;
+    RANGING?: number;
+    VOLATILE?: number;
+  };
 }
 
 /** Complete exit configuration with all four exit types. */

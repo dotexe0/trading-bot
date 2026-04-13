@@ -10,7 +10,8 @@
 import { Command } from 'commander';
 import { bootstrap } from './shared/bootstrap.js';
 import { out } from './shared/output.js';
-import { PaperTradingEngine } from '../paper/paper-engine.js';
+import { SpotTradingEngine, PaperSpotOrderExecutor } from '../spot/index.js';
+import { FillSimulator } from '../backtest/fill-simulator.js';
 import { SessionStore } from '../paper/session-store.js';
 import { LiveDataFeed } from '../paper/live-data-feed.js';
 import { parsePaperConfig } from '../paper/config.js';
@@ -62,10 +63,17 @@ program
         }
       }
 
-      const engine = new PaperTradingEngine({
+      const engine = new SpotTradingEngine({
+        mode: 'paper',
+        executor: new PaperSpotOrderExecutor(new FillSimulator({
+          slippageBps: paperConfig.slippageBps,
+          feeTierMaker: paperConfig.feeTierMaker,
+          feeTierTaker: paperConfig.feeTierTaker,
+          assumeTaker: paperConfig.assumeTaker,
+        })),
         config: paperConfig,
         liveFeed,
-        sessionStore,
+        stateStore: sessionStore,
         strategyRegistry: registry,
         indicatorEngine,
         candleRepo: repo,
@@ -79,10 +87,13 @@ program
         stopping = true;
         out.info('Shutting down paper trading...');
         try {
-          const result = await engine.stop();
+          const session = engine.getSession();
+          await engine.stop();
           out.banner('Paper Trading Summary');
-          out.table('Trades', String(result.trades.length));
-          out.table('Final Equity', `$${result.finalEquity.toString()}`);
+          if (session) {
+            const trades = sessionStore.getSessionTrades(session.id);
+            out.table('Trades', String(trades.length));
+          }
           out.success('Paper trading stopped');
         } catch (err) {
           out.error(err instanceof Error ? err.message : String(err));

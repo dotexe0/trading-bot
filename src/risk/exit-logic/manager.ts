@@ -13,7 +13,8 @@
  */
 
 import { d, Decimal, ZERO } from '../../core/decimal.js';
-import type { ExitConfig, ExitAction } from './types.js';
+import type { ExitConfig, ExitAction, AtrStopConfig } from './types.js';
+import type { MarketRegime } from '../../regime/types.js';
 import { TrailingProfitExit } from './trailing.js';
 import { PartialPositionExit } from './partial.js';
 import { AtrDynamicStop } from './atr-stop.js';
@@ -41,6 +42,7 @@ export class ExitLogicManager {
     entryPrice: Decimal,
     direction: 'long' | 'short',
     entryAtr: Decimal | null,
+    regime?: MarketRegime,
   ) {
     this.entryPrice = entryPrice;
     this.direction = direction;
@@ -54,13 +56,30 @@ export class ExitLogicManager {
       ? new PartialPositionExit(config.exits.partial, entryPrice, direction)
       : null;
 
+    // Resolve effective ATR multiple: regime-specific override > base atrMultiple
+    const resolvedAtrConfig = this.resolveAtrConfig(config.exits.atrStop, regime);
+
     this.atrStop = config.exits.atrStop.enabled
-      ? new AtrDynamicStop(config.exits.atrStop, entryPrice, direction, entryAtr)
+      ? new AtrDynamicStop(resolvedAtrConfig, entryPrice, direction, entryAtr)
       : null;
 
     this.timeExit = config.exits.time.enabled
       ? new TimeBasedExit(config.exits.time)
       : null;
+  }
+
+  /**
+   * Resolve the effective ATR config by applying regime-specific multiple.
+   * Falls back to base atrMultiple when regime is unknown or not configured.
+   */
+  private resolveAtrConfig(
+    baseConfig: AtrStopConfig,
+    regime?: MarketRegime,
+  ): AtrStopConfig {
+    if (!regime || !baseConfig.atrMultipleByRegime) return baseConfig;
+    const regimeMultiple = baseConfig.atrMultipleByRegime[regime];
+    if (regimeMultiple === undefined) return baseConfig;
+    return { ...baseConfig, atrMultiple: regimeMultiple };
   }
 
   /**

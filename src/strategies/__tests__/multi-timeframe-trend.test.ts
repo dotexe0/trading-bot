@@ -172,27 +172,27 @@ describe('MultiTimeframeTrendStrategy', () => {
 });
 
 describe('createDefaultRegistry', () => {
-  it('should register all 6 runtime strategies (multi-timeframe-trend excluded)', () => {
+  it('should register all 7 strategies including multi-timeframe-trend', () => {
     const registry = createDefaultRegistry();
     const list = registry.list();
-    expect(list).toHaveLength(6);
+    expect(list).toHaveLength(7);
     expect(list).toContain('sma-crossover');
     expect(list).toContain('rsi-mean-reversion');
     expect(list).toContain('macd-momentum');
     expect(list).toContain('bollinger-breakout');
     expect(list).toContain('z-score-mean-reversion');
-    expect(list).not.toContain('multi-timeframe-trend');
+    expect(list).toContain('multi-timeframe-trend');
     expect(list).toContain('momentum-breakout');
   });
 
-  it('should have all 6 runtime strategies via has()', () => {
+  it('should have all 7 strategies via has()', () => {
     const registry = createDefaultRegistry();
     expect(registry.has('sma-crossover')).toBe(true);
     expect(registry.has('rsi-mean-reversion')).toBe(true);
     expect(registry.has('macd-momentum')).toBe(true);
     expect(registry.has('bollinger-breakout')).toBe(true);
     expect(registry.has('z-score-mean-reversion')).toBe(true);
-    expect(registry.has('multi-timeframe-trend')).toBe(false);
+    expect(registry.has('multi-timeframe-trend')).toBe(true);
     expect(registry.has('momentum-breakout')).toBe(true);
   });
 
@@ -220,9 +220,11 @@ describe('createDefaultRegistry', () => {
     expect(strategy.name).toBe('bollinger-breakout');
   });
 
-  it('multi-timeframe-trend is not in default registry (requires additionalCandles)', () => {
+  it('multi-timeframe-trend is registered in the default registry', () => {
     const registry = createDefaultRegistry();
-    expect(registry.has('multi-timeframe-trend')).toBe(false);
+    expect(registry.has('multi-timeframe-trend')).toBe(true);
+    const strategy = registry.create({ strategy: 'multi-timeframe-trend' });
+    expect(strategy.name).toBe('multi-timeframe-trend');
   });
 
   it('should create momentum-breakout strategy from config', () => {

@@ -4,7 +4,7 @@
  * via an injected engine factory, and persists activation records.
  *
  * The engineFactory callback keeps this module decoupled from concrete
- * engine types (PaperTradingEngine, LiveTradingEngine). The caller
+ * engine types (SpotTradingEngine paper/live). The caller
  * provides the factory that knows how to construct the right engine.
  */
 

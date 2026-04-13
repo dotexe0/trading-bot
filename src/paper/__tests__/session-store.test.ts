@@ -293,7 +293,7 @@ describe('SessionStore', () => {
 
       expect(store.getLastFinalEquity('BTC-USD')).toBe('10500');
       expect(store.getLastFinalEquity('ETH-USD')).toBe('5000');
-      expect(store.getLastFinalEquity('SOL-USD')).toBeNull();
+      expect(store.getLastFinalEquity('SOL-USD' as any)).toBeNull();
     });
   });
 });

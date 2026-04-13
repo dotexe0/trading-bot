@@ -63,11 +63,20 @@ const timeExitSchema = z
   })
   .default(TIME_DEFAULTS);
 
+const atrMultipleByRegimeSchema = z
+  .object({
+    TRENDING: z.number().positive().optional(),
+    RANGING: z.number().positive().optional(),
+    VOLATILE: z.number().positive().optional(),
+  })
+  .optional();
+
 const atrStopSchema = z
   .object({
     enabled: z.boolean().default(ATR_STOP_DEFAULTS.enabled),
     atrPeriod: z.number().int().positive().default(ATR_STOP_DEFAULTS.atrPeriod),
     atrMultiple: z.number().positive().default(ATR_STOP_DEFAULTS.atrMultiple),
+    atrMultipleByRegime: atrMultipleByRegimeSchema,
   })
   .default(ATR_STOP_DEFAULTS);
 

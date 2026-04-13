@@ -4,6 +4,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { PerpStateStore } from '../../../perp/perp-state-store.js';
 import type { TournamentResult } from '../../../tournament/types.js';
+import { toApiPerpTrade } from '../types.js';
 
 export interface PerpRouteDeps {
   perpStateStore?: PerpStateStore;
@@ -17,6 +18,11 @@ export async function registerPerpRoutes(
   app.get('/api/perp/positions', async () => {
     if (!deps.perpStateStore) return [];
     return deps.perpStateStore.getAllOpenSessions();
+  });
+
+  app.get('/api/perp/trades', async () => {
+    if (!deps.perpStateStore) return [];
+    return deps.perpStateStore.listClosedTrades().map(toApiPerpTrade);
   });
 
   app.get('/api/perp/tournament/latest', async (_request, reply) => {

@@ -60,17 +60,17 @@ export class MetricsCalculator {
     const trades = result.trades;
     const equityCurve = result.equityCurve;
 
+    const cagr = this.calcCAGR(finalEquity, capital, result.startTimestamp, result.endTimestamp);
+    const dd = this.calcMaxDrawdown(equityCurve);
+
     return {
       totalReturn: this.calcTotalReturn(finalEquity, capital),
-      cagr: this.calcCAGR(finalEquity, capital, result.startTimestamp, result.endTimestamp),
+      cagr,
       sharpeRatio: this.calcSharpeRatio(equityCurve),
       sortinoRatio: this.calcSortinoRatio(equityCurve),
-      calmarRatio: this.calcCalmarRatio(
-        this.calcCAGR(finalEquity, capital, result.startTimestamp, result.endTimestamp),
-        this.calcMaxDrawdown(equityCurve).percentage,
-      ),
-      maxDrawdown: this.calcMaxDrawdown(equityCurve).absolute,
-      maxDrawdownPct: this.calcMaxDrawdown(equityCurve).percentage,
+      calmarRatio: this.calcCalmarRatio(cagr, dd.percentage),
+      maxDrawdown: dd.absolute,
+      maxDrawdownPct: dd.percentage,
       winRate: this.calcWinRate(trades),
       profitFactor: this.calcProfitFactor(trades),
       totalTrades: trades.length,

@@ -207,15 +207,19 @@ export class TournamentRunner {
       for (const entry of entries) {
         if (entry.disqualified) continue; // already disqualified by robustness
 
+        const reasons: string[] = [];
         if (qf.minSortino > 0 && entry.oosMetrics.sortinoRatio < qf.minSortino) {
+          reasons.push(`Sortino ${entry.oosMetrics.sortinoRatio.toFixed(2)} < ${qf.minSortino}`);
+        }
+        if (qf.minCalmar > 0 && entry.oosMetrics.calmarRatio < qf.minCalmar) {
+          reasons.push(`Calmar ${entry.oosMetrics.calmarRatio.toFixed(2)} < ${qf.minCalmar}`);
+        }
+        if (qf.minProfitFactor > 0 && entry.oosMetrics.profitFactor.toNumber() < qf.minProfitFactor) {
+          reasons.push(`PF ${entry.oosMetrics.profitFactor.toFixed(2)} < ${qf.minProfitFactor}`);
+        }
+        if (reasons.length > 0) {
           entry.disqualified = true;
-          entry.disqualifyReason = `Sortino ${entry.oosMetrics.sortinoRatio.toFixed(2)} below min ${qf.minSortino}`;
-        } else if (qf.minCalmar > 0 && entry.oosMetrics.calmarRatio < qf.minCalmar) {
-          entry.disqualified = true;
-          entry.disqualifyReason = `Calmar ${entry.oosMetrics.calmarRatio.toFixed(2)} below min ${qf.minCalmar}`;
-        } else if (qf.minProfitFactor > 0 && entry.oosMetrics.profitFactor.toNumber() < qf.minProfitFactor) {
-          entry.disqualified = true;
-          entry.disqualifyReason = `Profit factor ${entry.oosMetrics.profitFactor.toFixed(2)} below min ${qf.minProfitFactor}`;
+          entry.disqualifyReason = reasons.join('; ');
         }
       }
     }

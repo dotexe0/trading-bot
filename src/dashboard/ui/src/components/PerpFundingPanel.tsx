@@ -7,7 +7,7 @@ interface PerpFundingPanelProps {
   lastUpdatedAt?: number;
 }
 
-/** FCM product IDs as emitted by PerpPositionManager fundingUpdate events. */
+/** FCM product IDs as emitted by PerpTradingEngine fundingUpdate events. */
 const INSTRUMENTS = ['BIP-20DEC30-CDE', 'ETP-20DEC30-CDE'] as const;
 
 /** Human-readable display names for FCM product IDs. */

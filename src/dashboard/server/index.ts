@@ -420,6 +420,11 @@ export async function createDashboardServer(
     if (liveSessions.length > 0) {
       return reply.code(403).send({ error: 'Cannot reset while live sessions are running' });
     }
+    // Guard: refuse if any paper session is still running (FK constraint would fail)
+    const paperSessions = deps.sessionStore.listSessions('running');
+    if (paperSessions.length > 0) {
+      return reply.code(403).send({ error: 'Cannot reset while paper sessions are running — stop engines first' });
+    }
     const spotCounts = deps.sessionStore.resetPaperHistory();
     const perpCounts = deps.perpStateStore?.resetHistory() ?? {};
     return { cleared: { ...spotCounts, ...perpCounts } };

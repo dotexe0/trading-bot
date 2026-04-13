@@ -1,8 +1,8 @@
 /**
  * PerpStrategyController
  *
- * Shared regime auto-switch logic extracted from PaperPerpEngine and
- * PerpPositionManager. Eliminates duplication of:
+ * Shared regime auto-switch logic extracted into PerpTradingEngine.
+ * Eliminates duplication of:
  *  - Rolling candle buffer management
  *  - Feed health staleness guard
  *  - Regime classification and leaderboard lookup
@@ -109,6 +109,17 @@ export class PerpStrategyController {
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
+
+  /**
+   * Seed the candle buffer with historical data for immediate signal readiness.
+   * Called during engine startup before live candles arrive.
+   */
+  seedBuffer(candles: Candle[]): void {
+    // Replace buffer with seeded data, respecting max size
+    this.candleBuffer = candles.length > 100
+      ? candles.slice(candles.length - 100)
+      : [...candles];
+  }
 
   /**
    * Process a completed candle. Returns null if the feed is stale (caller

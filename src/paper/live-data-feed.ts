@@ -164,7 +164,10 @@ export class LiveDataFeed extends EventEmitter {
 
     this.ws.on('exception', (err: unknown) => {
       log.error({ err }, 'WebSocket exception');
-      this.emit('error', err instanceof Error ? err : new Error(String(err)));
+      // Emit as 'wsError' — not 'error', which is fatal in Node when unhandled.
+      // The WS client handles reconnection internally; callers can optionally
+      // listen for 'wsError' to track connection health.
+      this.emit('wsError', err instanceof Error ? err : new Error(String(err)));
     });
 
     // Subscribe to candle channel (for WS health + 5m data when applicable)

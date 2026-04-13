@@ -216,7 +216,7 @@ export class PerpVwapReversionStrategy implements IStrategy {
 
   /**
    * Restore in-memory position state after an engine restart.
-   * Called by PaperPerpEngine.start() when re-hydrating an open session from DB.
+   * Called by PerpTradingEngine.start() when re-hydrating an open session from DB.
    * _candlesHeld resets to 0 — gives the restored position the full maxHoldCandles window.
    */
   restorePosition(direction: 'long' | 'short', entryPrice: string): void {

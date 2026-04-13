@@ -64,6 +64,8 @@ function makeMockConfig(overrides: Partial<FcmConfig> = {}): FcmConfig {
     perpMode: 'none',
     orderMaxWaitSeconds: 60,
     orderCloseMaxRetries: 3,
+    scalpingTimeframe: '5m',
+    maxDailyLossUsd: 500,
     ...overrides,
   };
 }

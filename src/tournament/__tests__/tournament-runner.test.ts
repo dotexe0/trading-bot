@@ -454,7 +454,7 @@ describe('TournamentRunner regime leaderboards', () => {
       const result = await runner.run(config, dummyCandles);
 
       expect(result.leaderboard[0].disqualified).toBe(true);
-      expect(result.leaderboard[0].disqualifyReason).toContain('Profit factor');
+      expect(result.leaderboard[0].disqualifyReason).toContain('PF');
     });
 
     it('disqualifies strategy with negative Sortino', async () => {

@@ -92,56 +92,69 @@ describe('start.ts – PIPE-01: perp tournament call', () => {
   });
 });
 
-describe('start.ts – PIPE-02: PaperPerpEngine activation', () => {
-  it('instantiates PaperPerpEngine', () => {
-    expect(src).toMatch(/new PaperPerpEngine\s*\(/);
+describe('start.ts – PIPE-02: PerpTradingEngine activation (paper)', () => {
+  it('instantiates PerpTradingEngine for paper mode', () => {
+    expect(src).toMatch(/new PerpTradingEngine\s*\(/);
   });
 
-  it('pushes PaperPerpEngine emitter to perpEngineEmitters before createDashboardServer call', () => {
-    const enginePushLine = lineOf(/perpEngineEmitters\.push\(paperPerpEngine\)/);
+  it('pushes PerpTradingEngine emitter to perpEngineEmitters before createDashboardServer call', () => {
+    const enginePushLine = lineOf(/perpEngineEmitters\.push\(perpEngine\)/);
     // Match the actual invocation (await createDashboardServer(...)), not the import line
     const dashboardCreateLine = lineOf(/await createDashboardServer\s*\(/);
     expect(enginePushLine).toBeLessThan(dashboardCreateLine);
   });
 
   it('engine resource (paper or live) is pushed before perp-intx-client', () => {
-    const paperLine = lineOf(/name:\s*['"]paper-perp-engine['"]/);
-    const liveLine = lineOf(/name:\s*['"]perp-position-manager['"]/);
+    const engineLine = lineOf(/name:\s*[`'"]perp-engine/);
     const clientLine = lineOf(/name:\s*['"]perp-intx-client['"]/);
-    // Both engine resource pushes appear before perp-intx-client
-    expect(Math.min(paperLine, liveLine)).toBeLessThan(clientLine);
+    expect(engineLine).toBeLessThan(clientLine);
   });
 });
 
-describe('start.ts – PIPE-03: PerpPositionManager activation', () => {
-  it('instantiates PerpPositionManager', () => {
-    expect(src).toMatch(/new PerpPositionManager\s*\(/);
+describe('start.ts – PIPE-03: PerpTradingEngine activation (live)', () => {
+  it('instantiates PerpTradingEngine for live mode', () => {
+    // Both paper and live use PerpTradingEngine now
+    const matches = src.match(/new PerpTradingEngine\s*\(/g);
+    expect(matches?.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('calls recoverFromRestart before perpManager.start()', () => {
+  it('calls recoverFromRestart before perpEngine.start() in live block', () => {
     const recoverLine = lineOf(/recoverFromRestart\s*\(\)/);
-    const startLine = lineOf(/perpManager\.start\s*\(\)/);
-    expect(recoverLine).toBeLessThan(startLine);
+    // Find the SECOND perpEngine.start() — the one in the live block (first is paper)
+    const allStartIndices = lines
+      .map((l, i) => /perpEngine\.start\s*\(\)/.test(l) ? i : -1)
+      .filter((i) => i !== -1);
+    expect(allStartIndices.length).toBeGreaterThanOrEqual(2);
+    const liveStartLine = allStartIndices[1]; // second occurrence = live block
+    expect(recoverLine).toBeLessThan(liveStartLine);
   });
 
-  it('perp-position-manager resource is pushed before perp-intx-client', () => {
-    const managerResourceLine = lineOf(/name:\s*['"]perp-position-manager['"]/);
+  it('perp-engine resource is pushed before perp-intx-client', () => {
+    const engineResourceLine = lineOf(/name:\s*[`'"]perp-engine/);
     const clientResourceLine = lineOf(/name:\s*['"]perp-intx-client['"]/);
-    expect(managerResourceLine).toBeLessThan(clientResourceLine);
+    expect(engineResourceLine).toBeLessThan(clientResourceLine);
   });
 });
 
 describe('start.ts – PIPE-01/02/03: regimeLeaderboards pass-through', () => {
-  it('passes perpRegimeLeaderboards to PaperPerpEngine constructor', () => {
-    const paperPerpLine = lineOf(/new PaperPerpEngine\s*\(/);
-    // Search within 15 lines after the constructor call for the regimeLeaderboards option
-    const nearbyLines = lines.slice(paperPerpLine, paperPerpLine + 15).join('\n');
+  it('passes perpRegimeLeaderboards to PerpTradingEngine constructor (paper)', () => {
+    // Find the PerpTradingEngine constructor lines (not SpotTradingEngine)
+    const allPerpEngineLines = lines
+      .map((l, i) => /new PerpTradingEngine\s*\(/.test(l) ? i : -1)
+      .filter((i) => i !== -1);
+    expect(allPerpEngineLines.length).toBeGreaterThanOrEqual(2);
+    // First PerpTradingEngine = paper mode
+    const nearbyLines = lines.slice(allPerpEngineLines[0], allPerpEngineLines[0] + 20).join('\n');
     expect(nearbyLines).toMatch(/regimeLeaderboards:\s*perpRegimeLeaderboards/);
   });
 
-  it('passes perpRegimeLeaderboards to PerpPositionManager constructor', () => {
-    const perpManagerLine = lineOf(/new PerpPositionManager\s*\(/);
-    const nearbyLines = lines.slice(perpManagerLine, perpManagerLine + 15).join('\n');
+  it('passes perpRegimeLeaderboards to PerpTradingEngine constructor (live)', () => {
+    // Second PerpTradingEngine = live mode
+    const allPerpEngineLines = lines
+      .map((l, i) => /new PerpTradingEngine\s*\(/.test(l) ? i : -1)
+      .filter((i) => i !== -1);
+    expect(allPerpEngineLines.length).toBeGreaterThanOrEqual(2);
+    const nearbyLines = lines.slice(allPerpEngineLines[1], allPerpEngineLines[1] + 20).join('\n');
     expect(nearbyLines).toMatch(/regimeLeaderboards:\s*perpRegimeLeaderboards/);
   });
 });

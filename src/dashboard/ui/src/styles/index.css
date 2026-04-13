@@ -459,6 +459,53 @@ body {
   background: rgba(242, 64, 96, 0.28);
 }
 
+/* ── Reset Paper History Button ───────────────────────────────────── */
+.reset-paper-btn {
+  background: rgba(234, 179, 8, 0.1);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.3);
+  border-radius: var(--r);
+  padding: 0.3rem 0.75rem;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: var(--font);
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s, border-color 0.15s;
+}
+
+.reset-paper-btn:hover {
+  background: rgba(234, 179, 8, 0.2);
+  border-color: rgba(234, 179, 8, 0.55);
+  box-shadow: 0 0 10px rgba(234, 179, 8, 0.18);
+}
+
+.reset-paper-btn:active {
+  background: rgba(234, 179, 8, 0.28);
+}
+
+/* ── Warning Button (reset confirm) ──────────────────────────────── */
+.btn-warn {
+  background: rgba(234, 179, 8, 0.15);
+  color: #eab308;
+  border: 1px solid rgba(234, 179, 8, 0.4);
+  border-radius: var(--r);
+  padding: 0.5rem 1.2rem;
+  font-weight: 600;
+  font-family: var(--font);
+  cursor: pointer;
+  transition: background 0.15s, box-shadow 0.15s;
+}
+
+.btn-warn:hover:not(:disabled) {
+  background: rgba(234, 179, 8, 0.25);
+  box-shadow: 0 0 12px rgba(234, 179, 8, 0.2);
+}
+
+.btn-warn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.modal-icon-warn { color: #eab308; }
+
 /* ── Mute Toggle Button ───────────────────────────────────────────── */
 .mute-btn {
   background: transparent;

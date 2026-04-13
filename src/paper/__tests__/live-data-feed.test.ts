@@ -6,7 +6,7 @@
  * multi-pair independence, and event forwarding.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ── Mock coinbase-api ────────────────────────────────────────────────
 
@@ -185,9 +185,9 @@ describe('LiveDataFeed', () => {
     expect(events).toContain('reconnected');
   });
 
-  it('emits error events from WebSocket exceptions', () => {
+  it('emits wsError events from WebSocket exceptions', () => {
     const errors: Error[] = [];
-    feed.on('error', (err) => errors.push(err));
+    feed.on('wsError', (err) => errors.push(err));
 
     const testError = new Error('WebSocket connection failed');
     wsHandlers['exception']?.(testError);

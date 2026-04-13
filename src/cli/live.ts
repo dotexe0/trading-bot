@@ -14,7 +14,7 @@ import { Command } from 'commander';
 import { CBAdvancedTradeClient, WebsocketClient } from 'coinbase-api';
 import { bootstrap } from './shared/bootstrap.js';
 import { out } from './shared/output.js';
-import { LiveTradingEngine } from '../live/live-engine.js';
+import { SpotTradingEngine, LiveSpotOrderExecutor } from '../spot/index.js';
 import { LiveStateStore } from '../live/state-store.js';
 import { LiveDataFeed } from '../paper/live-data-feed.js';
 import { OrderManager } from '../live/order-manager.js';
@@ -112,14 +112,16 @@ program
         }
       }
 
-      const engine = new LiveTradingEngine({
+      const engine = new SpotTradingEngine({
+        mode: 'live',
+        executor: new LiveSpotOrderExecutor(orderManager),
         config: liveConfig,
         liveFeed,
-        orderManager,
         stateStore,
         strategyRegistry: registry,
         indicatorEngine,
         riskManager,
+        orderManager,
         regimeLeaderboards,
         spotSignalGate,
       });
