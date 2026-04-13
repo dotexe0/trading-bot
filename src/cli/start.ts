@@ -22,7 +22,8 @@ import { TournamentRunner } from '../tournament/tournament-runner.js';
 import { parseTournamentConfig } from '../tournament/config.js';
 import { TournamentStore } from '../tournament/tournament-store.js';
 import { ActivationBridge } from '../tournament/activation-bridge.js';
-import { PaperTradingEngine } from '../paper/paper-engine.js';
+import { SpotTradingEngine, PaperSpotOrderExecutor } from '../spot/index.js';
+import { FillSimulator } from '../backtest/fill-simulator.js';
 import { parsePaperConfig } from '../paper/config.js';
 import { SessionStore } from '../paper/session-store.js';
 import { LiveDataFeed } from '../paper/live-data-feed.js';
@@ -33,7 +34,7 @@ import { RiskManager } from '../risk/risk-manager.js';
 import { parseRiskConfig } from '../risk/config.js';
 import { CorrelationStore } from '../correlation/correlation-store.js';
 import { BacktestStore } from '../backtest/backtest-store.js';
-import { IntxClient, PaperPerpEngine, PerpPositionManager } from '../perp/index.js';
+import { IntxClient, PerpTradingEngine, PaperPerpOrderExecutor, LivePerpOrderExecutor } from '../perp/index.js';
 import { createLivePerpRegistry } from '../perp/strategies/index.js';
 import { PerpStateStore } from '../perp/perp-state-store.js';
 import { runPerpTournament, buildScalpingParamGrid, buildNonScalpingPerpParamGrid } from '../perp/perp-tournament-runner.js';
@@ -158,7 +159,7 @@ program
     const totalSteps = 4;
     const endMs = Date.now();
     const startMs = endMs - days * 86_400_000;
-    const paperEngines: PaperTradingEngine[] = [];
+    const paperEngines: SpotTradingEngine[] = [];
 
     try {
       // ── Step 1: Data Sync ──────────────────────────────────────
@@ -255,7 +256,13 @@ program
 
       out.step(3, totalSteps, `Running tournament for ${tradingPairs.join(', ')}...`);
 
-      const riskConfig = parseRiskConfig({});
+      const riskConfig = parseRiskConfig({
+        volatilitySizing: true,
+        riskPerTradePct: 0.01,
+        atrStopMultiple: 2.0,
+        drawdownRecoveryScaling: true,
+        driftDetection: { enabled: true, windowSize: 20, sharpeThreshold: 0.5, winRateTolerance: 0.15 },
+      });
       const riskManager = new RiskManager(riskConfig);
 
       // Feed health monitoring for all instruments.
@@ -446,6 +453,8 @@ program
           activationMode: 'none',
           walkForward: { trainWindowMs, validateWindowMs, stepMs },
           strategyConfigs,
+          monteCarlo: { enabled: true, iterations: 1000, minTrades: 15, rankingWeight: 0.3 },
+          qualityFilters: { minSortino: 0, minCalmar: 0.5, minProfitFactor: 1.1 },
         });
 
         const result = await runner.run(tournamentConfig, candles);
@@ -498,10 +507,17 @@ program
               initialCapital: effectiveCapital,
             });
 
-            const engine = new PaperTradingEngine({
+            const engine = new SpotTradingEngine({
+              mode: 'paper',
+              executor: new PaperSpotOrderExecutor(new FillSimulator({
+                slippageBps: paperConfig.slippageBps,
+                feeTierMaker: paperConfig.feeTierMaker,
+                feeTierTaker: paperConfig.feeTierTaker,
+                assumeTaker: paperConfig.assumeTaker,
+              })),
               config: paperConfig,
               liveFeed,
-              sessionStore,
+              stateStore: sessionStore,
               strategyRegistry: registry,
               indicatorEngine,
               riskManager,
@@ -517,7 +533,7 @@ program
             const engineKey = `${entry.strategyName}:${tradePair}`;
             const stopEngine = async (): Promise<void> => { await engine.stop(); };
             resources.push({
-              name: `paper-engine:${engineKey}`,
+              name: `spot-engine:${engineKey}`,
               stop: stopEngine,
             });
 
@@ -578,7 +594,7 @@ program
       backtestStore = new BacktestStore({ dbPath: config.database.path });
 
       // Dashboard engine factory: supports hot-reload of strategy config via PATCH endpoint.
-      // Creates a new PaperTradingEngine with the supplied config override, then registers
+      // Creates a new SpotTradingEngine with the supplied config override, then registers
       // it as a stoppable resource so graceful shutdown covers the new engine.
       const dashboardEngineFactory = async (
         strategyName: string,
@@ -608,10 +624,17 @@ program
           strategyConfig: stratConfig,
           initialCapital: lastEquityAdHoc ?? capital,
         });
-        const engine = new PaperTradingEngine({
+        const engine = new SpotTradingEngine({
+          mode: 'paper',
+          executor: new PaperSpotOrderExecutor(new FillSimulator({
+            slippageBps: paperConfig.slippageBps,
+            feeTierMaker: paperConfig.feeTierMaker,
+            feeTierTaker: paperConfig.feeTierTaker,
+            assumeTaker: paperConfig.assumeTaker,
+          })),
           config: paperConfig,
           liveFeed,
-          sessionStore,
+          stateStore: sessionStore,
           strategyRegistry: registry,
           indicatorEngine,
           riskManager,
@@ -622,7 +645,7 @@ program
         const session = await engine.start();
         paperEngines.push(engine);
         resources.push({
-          name: `paper-engine:${strategyName}`,
+          name: `spot-engine:${strategyName}`,
           stop: async () => { await engine.stop(); },
         });
         return { sessionId: session.id };
@@ -781,101 +804,128 @@ program
           });
 
           if (config.intx.perpMode === 'paper') {
-            // PIPE-02: PaperPerpEngine
-            // Create initial strategy from tournament winner so the engine can
-            // trade immediately rather than waiting for regime classification.
+            // PIPE-02: PerpTradingEngine (paper mode) — one instance per pair for buffer isolation
             const perpLiveRegistry = createLivePerpRegistry(fundingRateProvider);
             const perpWinner = perpTournamentResult?.leaderboard.find(
               (e) => e.oosMetrics.totalTrades > 0,
             );
-            const perpInitialStrategy = perpWinner
-              ? perpLiveRegistry.create(perpWinner.strategyConfig)
-              : undefined;
-            if (perpInitialStrategy) {
-              out.info(`Perp initial strategy: ${perpInitialStrategy.name}`);
-            } else {
-              out.warn('No perp tournament winner with OOS trades — perp engine starts without strategy');
+
+            for (const perpPair of tradingPairs) {
+              // Each engine gets its own initial strategy instance (strategy holds
+              // mutable position state like _openDirection, _candlesHeld)
+              const perpInitialStrategy = perpWinner
+                ? perpLiveRegistry.create(perpWinner.strategyConfig)
+                : undefined;
+              if (perpInitialStrategy) {
+                out.info(`Perp ${perpPair} initial strategy: ${perpInitialStrategy.name}`);
+              } else {
+                out.warn(`Perp ${perpPair}: no tournament winner with OOS trades — starts without strategy`);
+              }
+
+              const perpEngine = new PerpTradingEngine({
+                mode: 'paper',
+                executor: new PaperPerpOrderExecutor(),
+                intxClient: perpClient,
+                stateStore: perpStateStore!,
+                config: config.intx,
+                tradingPair: perpPair,
+                timeframe,
+                candleRepo: repo,
+                regimeLeaderboards: perpRegimeLeaderboards,
+                initialStrategy: perpInitialStrategy,
+                strategyRegistry: perpLiveRegistry,
+                fundingRateProvider,
+                feedHealthMonitor,
+              });
+
+              perpEngine.start();
+              perpEngineEmitters.push(perpEngine);
+
+              // Each engine receives all candles but filters internally by pair
+              perpLiveFeed.on('candle', (candle: Candle) => {
+                perpEngine.onCandle(candle);
+              });
+
+              resources.push({
+                name: `perp-engine:${perpPair}`,
+                stop: async () => { perpEngine.stop(); },
+              });
+
+              out.table('  Activated', `PerpTradingEngine [${perpPair}] (paper)`);
             }
 
-            const paperPerpEngine = new PaperPerpEngine({
-              intxClient: perpClient,
-              stateStore: perpStateStore!,
-              config: config.intx,
-              regimeLeaderboards: perpRegimeLeaderboards,
-              initialStrategy: perpInitialStrategy,
-              strategyRegistry: perpLiveRegistry,
-              fundingRateProvider,
-              feedHealthMonitor,
-            });
-
-            await paperPerpEngine.start();
-            perpEngineEmitters.push(paperPerpEngine);
-
-            perpLiveFeed.on('candle', (candle: Candle) => {
-              paperPerpEngine.onCandle(candle);
-            });
             perpLiveFeed.start(['BTC-USD', 'ETH-USD'], undefined);
 
-            // INFRA-04: engine stops BEFORE perp-intx-client (engine pushed first)
+            // Stop live feed after all engines (pushed last)
             resources.push({
-              name: 'paper-perp-engine',
-              stop: async () => {
-                paperPerpEngine.stop();
-                perpLiveFeed.stop();
-              },
+              name: 'perp-live-feed',
+              stop: async () => { perpLiveFeed.stop(); },
             });
-
-            out.table('  Activated', 'PaperPerpEngine [BTC-PERP]');
           } else if (config.intx.perpMode === 'live') {
-            // PIPE-03: PerpPositionManager
+            // PIPE-03: PerpTradingEngine (live mode) — one instance per pair for buffer isolation
             const livePerpRegistry = createLivePerpRegistry(fundingRateProvider);
             const liveWinner = perpTournamentResult?.leaderboard.find(
               (e) => e.oosMetrics.totalTrades > 0,
             );
-            const liveInitialStrategy = liveWinner
-              ? livePerpRegistry.create(liveWinner.strategyConfig)
-              : undefined;
 
-            const perpManager = new PerpPositionManager({
-              intxClient: perpClient,
-              stateStore: perpStateStore!,
-              config: config.intx,
-              regimeLeaderboards: perpRegimeLeaderboards,
-              initialStrategy: liveInitialStrategy,
-              strategyRegistry: livePerpRegistry,
-              fundingRateProvider,
-              feedHealthMonitor,
-            });
+            for (const perpPair of tradingPairs) {
+              const liveInitialStrategy = liveWinner
+                ? livePerpRegistry.create(liveWinner.strategyConfig)
+                : undefined;
 
-            // PIPE-03: recoverFromRestart() BEFORE start()
-            const recovery = await perpManager.recoverFromRestart();
-            if (recovery.restored) {
-              out.info('PerpPositionManager: open position restored from previous run');
+              const perpEngine = new PerpTradingEngine({
+                mode: 'live',
+                executor: new LivePerpOrderExecutor({
+                  intxClient: perpClient,
+                  stateStore: perpStateStore!,
+                }),
+                intxClient: perpClient,
+                stateStore: perpStateStore!,
+                config: config.intx,
+                tradingPair: perpPair,
+                timeframe,
+                candleRepo: repo,
+                regimeLeaderboards: perpRegimeLeaderboards,
+                initialStrategy: liveInitialStrategy,
+                strategyRegistry: livePerpRegistry,
+                fundingRateProvider,
+                feedHealthMonitor,
+              });
+
+              // recoverFromRestart() BEFORE start() — live only
+              const recovery = await perpEngine.recoverFromRestart();
+              if (recovery.restored) {
+                out.info(`PerpTradingEngine ${perpPair}: open position restored from previous run`);
+              }
+              if (recovery.closedExternally) {
+                out.warn(`PerpTradingEngine ${perpPair}: position was closed externally since last run`);
+              }
+
+              perpEngine.start();
+              perpEngine.startBalanceMonitor();
+              perpEngineEmitters.push(perpEngine);
+
+              perpLiveFeed.on('candle', (candle: Candle) => {
+                perpEngine.onCandle(candle);
+              });
+
+              resources.push({
+                name: `perp-engine:${perpPair}`,
+                stop: async () => {
+                  perpEngine.stopBalanceMonitor();
+                  perpEngine.stop();
+                },
+              });
+
+              out.table('  Activated', `PerpTradingEngine [${perpPair}] (live)`);
             }
-            if (recovery.closedExternally) {
-              out.warn('PerpPositionManager: position was closed externally since last run');
-            }
 
-            perpManager.start();
-            perpManager.startBalanceMonitor(); // every 15 min
-            perpEngineEmitters.push(perpManager);
-
-            perpLiveFeed.on('candle', (candle: Candle) => {
-              perpManager.onCandle(candle);
-            });
             perpLiveFeed.start(['BTC-USD', 'ETH-USD'], undefined);
 
-            // INFRA-04: engine stops BEFORE perp-intx-client
             resources.push({
-              name: 'perp-position-manager',
-              stop: async () => {
-                perpManager.stopBalanceMonitor();
-                perpManager.stop();
-                perpLiveFeed.stop();
-              },
+              name: 'perp-live-feed',
+              stop: async () => { perpLiveFeed.stop(); },
             });
-
-            out.table('  Activated', 'PerpPositionManager [BTC-PERP] (live)');
           }
         }
 

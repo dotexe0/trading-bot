@@ -201,6 +201,7 @@ export async function runPerpTournament(
             rankingWeight: 0.3,
           }
         : undefined,
+      qualityFilters: { minSortino: 0, minCalmar: 0.5, minProfitFactor: 1.1 },
     });
 
     return await runner.run(tournamentConfig, candles);
