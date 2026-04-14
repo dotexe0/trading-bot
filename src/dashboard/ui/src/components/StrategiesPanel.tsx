@@ -19,7 +19,7 @@ interface StrategiesPanelProps {
   tournament: TournamentLeaderboard | null;
   availableStrategies: string[];
   onStop: (name: string) => Promise<void>;
-  driftWarning?: string | null;
+  driftWarnings?: Array<{ message: string; timestamp: number }>;
 }
 
 interface StopRowState {
@@ -33,7 +33,7 @@ export function StrategiesPanel({
   tournament,
   availableStrategies,
   onStop,
-  driftWarning,
+  driftWarnings,
 }: StrategiesPanelProps): React.ReactElement {
   const [stopStates, setStopStates] = useState<Record<string, StopRowState>>({});
 
@@ -140,7 +140,16 @@ export function StrategiesPanel({
           }, 0) / withSlippage.length
         : null;
 
-    return { tradeCount, winRate, avgWinPct, avgLossPct, winLossRatio, avgSlippageBps };
+    const withConfidence = completed.filter((t) => t.entryConfidence !== undefined);
+    const avgConfidence =
+      withConfidence.length > 0
+        ? withConfidence.reduce((sum, t) => sum + t.entryConfidence!, 0) / withConfidence.length
+        : null;
+
+    const limitFills = completed.filter((t) => t.entryFillType === 'limit').length;
+    const limitFillPct = completed.length > 0 ? (limitFills / completed.length) * 100 : null;
+
+    return { tradeCount, winRate, avgWinPct, avgLossPct, winLossRatio, avgSlippageBps, avgConfidence, limitFillPct };
   }, [trades]);
 
   const strategyStats = useMemo(() => {
@@ -196,9 +205,15 @@ export function StrategiesPanel({
     <div className="panel">
       <div className="panel-title">Strategies</div>
 
-      {driftWarning && (
+      {driftWarnings && driftWarnings.length > 0 && (
         <div style={{ background: 'rgba(234, 179, 8, 0.15)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: 4, padding: '6px 10px', marginBottom: 8, color: '#eab308', fontSize: 12 }}>
-          {driftWarning}
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Drift Alerts ({driftWarnings.length})</div>
+          {driftWarnings.map((dw, i) => (
+            <div key={i} style={{ marginBottom: 2 }}>
+              <span style={{ color: '#94a3b8', marginRight: 6 }}>{new Date(dw.timestamp).toLocaleTimeString()}</span>
+              {dw.message}
+            </div>
+          ))}
         </div>
       )}
 
@@ -361,6 +376,25 @@ export function StrategiesPanel({
                   {metrics.avgSlippageBps.toFixed(1)} bps
                 </div>
                 <div className="perf-stat-label">Avg Slippage</div>
+              </div>
+            )}
+            {metrics.avgConfidence !== null && (
+              <div className="perf-stat">
+                <div
+                  className="perf-stat-value"
+                  style={{ color: metrics.avgConfidence >= 0.7 ? '#22c55e' : metrics.avgConfidence >= 0.4 ? '#eab308' : '#ef4444' }}
+                >
+                  {metrics.avgConfidence.toFixed(2)}
+                </div>
+                <div className="perf-stat-label">Avg Confidence</div>
+              </div>
+            )}
+            {metrics.limitFillPct !== null && metrics.limitFillPct > 0 && (
+              <div className="perf-stat">
+                <div className="perf-stat-value">
+                  {metrics.limitFillPct.toFixed(0)}%
+                </div>
+                <div className="perf-stat-label">Limit Fills</div>
               </div>
             )}
           </div>

@@ -1111,6 +1111,8 @@ export class SpotTradingEngine extends EventEmitter {
         strategyName: tradeMetadata.strategyName,
         regimeAtEntry: tradeMetadata.regimeAtEntry,
         exitReason: tradeMetadata.exitReason,
+        entryConfidence: position.entrySignal.confidence,
+        entryFillType: this.useLimitEntries ? 'limit' : 'market',
       });
     }
   }

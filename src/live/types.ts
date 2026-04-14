@@ -149,6 +149,10 @@ export interface LiveTrade {
   regimeAtEntry?: string;
   /** Reason for exit (SIGNAL, STOP_LOSS, trailing_profit, etc.) */
   exitReason?: string;
+  /** Signal confidence at entry (0-1). */
+  entryConfidence?: number;
+  /** Whether the entry was filled via limit or market order. */
+  entryFillType?: 'limit' | 'market';
 }
 
 // ── Reconciliation Report ───────────────────────────────────────────

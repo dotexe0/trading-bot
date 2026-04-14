@@ -79,6 +79,8 @@ export interface TradeData {
   exitSignalPrice?: string;
   entrySlippageBps?: string;
   exitSlippageBps?: string;
+  entryConfidence?: number;
+  entryFillType?: 'limit' | 'market';
   mode?: 'spot' | 'perp';
 }
 

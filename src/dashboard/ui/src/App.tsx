@@ -95,7 +95,7 @@ function App(): React.ReactElement {
   const [tournament, setTournament] = useState<TournamentLeaderboard | null>(null);
   const [availableStrategies, setAvailableStrategies] = useState<string[]>([]);
   const [perpTournament, setPerpTournament] = useState<PerpTournamentLeaderboard | null>(null);
-  const [driftWarning, setDriftWarning] = useState<string | null>(null);
+  const [driftWarnings, setDriftWarnings] = useState<Array<{ message: string; timestamp: number }>>([]);
   const [activeSection, setActiveSection] = useState<string>('overview');
 
   // ── Chart refs for imperative updates ────────────────────────────
@@ -565,14 +565,14 @@ function App(): React.ReactElement {
         case 'strategyDrift': {
           const d = payload as { type: string; rolling: number; baseline: number; threshold: number; strategyName: string };
           const label = d.type === 'sharpe' ? 'Sharpe' : 'Win Rate';
-          setDriftWarning(
-            `Drift detected on ${d.strategyName}: rolling ${label} (${d.rolling.toFixed(2)}) below threshold (${d.threshold.toFixed(2)}, baseline ${d.baseline.toFixed(2)})`,
-          );
+          const msg = `${d.strategyName}: rolling ${label} (${d.rolling.toFixed(2)}) below threshold (${d.threshold.toFixed(2)}, baseline ${d.baseline.toFixed(2)})`;
+          setDriftWarnings((prev) => [{ message: msg, timestamp: Date.now() }, ...prev].slice(0, 10));
           break;
         }
 
         case 'strategySwitch': {
-          setDriftWarning(null);
+          // Clear drift warnings on strategy switch (new strategy = fresh baseline)
+          setDriftWarnings([]);
           break;
         }
 
@@ -842,7 +842,7 @@ function App(): React.ReactElement {
                     tournament={tournament}
                     availableStrategies={availableStrategies}
                     onStop={handleStrategyStop}
-                    driftWarning={driftWarning}
+                    driftWarnings={driftWarnings}
                   />
                   <PerpStrategiesPanel tournament={perpTournament} />
                 </div>

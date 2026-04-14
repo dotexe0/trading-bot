@@ -84,6 +84,8 @@ export interface ApiTrade {
   exitSignalPrice?: string;
   entrySlippageBps?: string;
   exitSlippageBps?: string;
+  entryConfidence?: number;
+  entryFillType?: 'limit' | 'market';
   mode?: 'spot' | 'perp';
 }
 
@@ -252,6 +254,8 @@ export function toApiTrade(trade: LiveTrade): ApiTrade {
     strategyName: trade.strategyName,
     regimeAtEntry: trade.regimeAtEntry,
     exitReason: trade.exitReason,
+    entryConfidence: trade.entryConfidence,
+    entryFillType: trade.entryFillType,
     mode: 'spot',
   };
 }
@@ -277,6 +281,7 @@ export function toApiPaperTrade(sessionId: string, trade: Trade): ApiTrade {
     strategyName: trade.strategyName ?? strategyName,
     regimeAtEntry: trade.regimeAtEntry,
     exitReason: trade.exitReason,
+    entryConfidence: trade.entryFill.signal.confidence,
     mode: 'spot',
   };
 }

@@ -189,6 +189,8 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
               />
               <th>Strategy</th>
               <th>Regime</th>
+              <th>Conf</th>
+              <th>Fill</th>
               <th>Side</th>
               <th>Entry</th>
               <th>Exit</th>
@@ -235,6 +237,12 @@ export function TradeHistory({ trades }: TradeHistoryProps): React.ReactElement 
                   <td className="text-muted">{formatTime(trade.entryTimestamp)}</td>
                   <td className="text-muted" style={{ fontSize: 11 }}>{trade.strategyName ?? '\u2014'}</td>
                   <td className="text-muted" style={{ fontSize: 11 }}>{trade.regimeAtEntry ?? '\u2014'}</td>
+                  <td className="mono" style={{ fontSize: 11, color: trade.entryConfidence !== undefined ? (trade.entryConfidence >= 0.7 ? '#22c55e' : trade.entryConfidence >= 0.4 ? '#eab308' : '#ef4444') : '#94a3b8' }}>
+                    {trade.entryConfidence !== undefined ? trade.entryConfidence.toFixed(2) : '\u2014'}
+                  </td>
+                  <td className="text-muted" style={{ fontSize: 11 }}>
+                    {trade.entryFillType ?? '\u2014'}
+                  </td>
                   <td className={trade.entrySide === 'buy' ? 'text-green' : 'text-red'}>
                     {trade.entrySide.toUpperCase()}
                   </td>
