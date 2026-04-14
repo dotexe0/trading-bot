@@ -488,6 +488,10 @@ program
           out.table(`#${entry.rank}`, `${entry.strategyName} [${tradePair}] (OOS Sharpe: ${sharpe})`);
         }
 
+        // Reset circuit breaker after tournament — backtest strategies may have pushed
+        // internalPeak well above $10K, causing a false drawdown trip for paper engines.
+        riskManager.resetCircuitBreaker();
+
         if (mode === 'paper') {
           // Filter out strategies with zero OOS trades — they can't produce signals
           const activatable = result.leaderboard.filter(
