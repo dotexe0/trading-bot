@@ -722,3 +722,139 @@ describe('SpotTradingEngine – regime auto-switch', () => {
     await engine.stop();
   });
 });
+
+// ── Limit entry tests ────────────────────────────────────────────────
+
+describe('SpotTradingEngine – limit entries', () => {
+  it('uses limit entry when useLimitEntries is enabled and executor supports it', async () => {
+    const limitFill = makeFillResult({
+      fillPrice: d('49950'),
+      quantity: d('0.01'),
+      fee: d('0.3'),
+      side: 'buy',
+    });
+
+    const executor = createMockExecutor({
+      executeLimitEntry: vi.fn().mockResolvedValue(limitFill),
+    });
+
+    const strategy = {
+      name: 'limit-test',
+      minCandles: 1,
+      evaluate: vi.fn().mockReturnValue([{
+        strategyName: 'limit-test',
+        pair: 'BTC-USD',
+        timeframe: '1h',
+        timestamp: Date.now(),
+        direction: 'long' as const,
+        confidence: 0.8,
+        reasoning: 'test',
+      }]),
+    };
+
+    const opts = createDefaultOptions({
+      executor,
+      strategyRegistry: createMockRegistry(strategy),
+      useLimitEntries: true,
+      limitEntryOffsetPct: 0.001,
+      limitEntryTimeoutMs: 5000,
+      limitEntryFallbackToMarket: true,
+    });
+    const engine = new SpotTradingEngine(opts);
+    await engine.start();
+
+    engine.onCandle(makeCandle('50000'));
+    await vi.waitFor(() => expect(engine.isFlat()).toBe(false));
+
+    expect(executor.executeLimitEntry).toHaveBeenCalled();
+    // Market order should NOT have been called (limit filled)
+    expect(executor.executeOrder).not.toHaveBeenCalled();
+
+    await engine.stop();
+  });
+
+  it('falls back to market order when limit entry misses and fallback enabled', async () => {
+    const marketFill = makeFillResult({
+      fillPrice: d('50000'),
+      quantity: d('0.01'),
+      fee: d('0.5'),
+      side: 'buy',
+    });
+
+    const executor = createMockExecutor({
+      executeOrder: vi.fn().mockResolvedValue(marketFill),
+      executeLimitEntry: vi.fn().mockResolvedValue(null), // limit missed
+    });
+
+    const strategy = {
+      name: 'fallback-test',
+      minCandles: 1,
+      evaluate: vi.fn().mockReturnValue([{
+        strategyName: 'fallback-test',
+        pair: 'BTC-USD',
+        timeframe: '1h',
+        timestamp: Date.now(),
+        direction: 'long' as const,
+        confidence: 0.8,
+        reasoning: 'test',
+      }]),
+    };
+
+    const opts = createDefaultOptions({
+      executor,
+      strategyRegistry: createMockRegistry(strategy),
+      useLimitEntries: true,
+      limitEntryFallbackToMarket: true,
+    });
+    const engine = new SpotTradingEngine(opts);
+    await engine.start();
+
+    engine.onCandle(makeCandle('50000'));
+    await vi.waitFor(() => expect(engine.isFlat()).toBe(false));
+
+    expect(executor.executeLimitEntry).toHaveBeenCalled();
+    expect(executor.executeOrder).toHaveBeenCalled();
+
+    await engine.stop();
+  });
+
+  it('does NOT open position when limit misses and fallback disabled', async () => {
+    const executor = createMockExecutor({
+      executeLimitEntry: vi.fn().mockResolvedValue(null),
+    });
+
+    const strategy = {
+      name: 'no-fallback-test',
+      minCandles: 1,
+      evaluate: vi.fn().mockReturnValue([{
+        strategyName: 'no-fallback-test',
+        pair: 'BTC-USD',
+        timeframe: '1h',
+        timestamp: Date.now(),
+        direction: 'long' as const,
+        confidence: 0.8,
+        reasoning: 'test',
+      }]),
+    };
+
+    const opts = createDefaultOptions({
+      executor,
+      strategyRegistry: createMockRegistry(strategy),
+      useLimitEntries: true,
+      limitEntryFallbackToMarket: false,
+    });
+    const engine = new SpotTradingEngine(opts);
+    await engine.start();
+
+    engine.onCandle(makeCandle('50000'));
+
+    // Give async a chance to resolve
+    await new Promise(r => setTimeout(r, 50));
+
+    expect(executor.executeLimitEntry).toHaveBeenCalled();
+    expect(executor.executeOrder).not.toHaveBeenCalled();
+    expect(engine.isFlat()).toBe(true);
+
+    await engine.stop();
+  });
+});

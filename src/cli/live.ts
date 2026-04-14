@@ -124,6 +124,10 @@ program
         orderManager,
         regimeLeaderboards,
         spotSignalGate,
+        useLimitEntries: config.spotStrategyOverrides.useLimitEntries,
+        limitEntryOffsetPct: config.spotStrategyOverrides.limitEntryOffsetPct,
+        limitEntryTimeoutMs: config.spotStrategyOverrides.limitEntryTimeoutMs,
+        limitEntryFallbackToMarket: config.spotStrategyOverrides.limitEntryFallbackToMarket,
       });
 
       // Register SIGINT handler for graceful shutdown

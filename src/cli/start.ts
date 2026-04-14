@@ -557,6 +557,10 @@ program
               crossAssetBus,
               confirmationFeed: spotConfirmFeed,
               confirmationTimeframe,
+              useLimitEntries: config.spotStrategyOverrides.useLimitEntries,
+              limitEntryOffsetPct: config.spotStrategyOverrides.limitEntryOffsetPct,
+              limitEntryTimeoutMs: config.spotStrategyOverrides.limitEntryTimeoutMs,
+              limitEntryFallbackToMarket: config.spotStrategyOverrides.limitEntryFallbackToMarket,
             });
 
             const session = await engine.start();
@@ -684,6 +688,10 @@ program
           crossAssetBus,
           confirmationFeed: adHocConfirmFeed,
           confirmationTimeframe,
+          useLimitEntries: config.spotStrategyOverrides.useLimitEntries,
+          limitEntryOffsetPct: config.spotStrategyOverrides.limitEntryOffsetPct,
+          limitEntryTimeoutMs: config.spotStrategyOverrides.limitEntryTimeoutMs,
+          limitEntryFallbackToMarket: config.spotStrategyOverrides.limitEntryFallbackToMarket,
         });
         const session = await engine.start();
         paperEngines.push(engine);

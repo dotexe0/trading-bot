@@ -45,7 +45,15 @@ const configSchema = z.object({
     momentumBreakoutWindow: z.number().int().positive().optional(),
     momentumVolumeWindow: z.number().int().positive().optional(),
     momentumVolumeMultiplier: z.number().positive().optional(),
-  }).default({ feeDragMultiple: 2.0, feeDragAtrPeriod: 14 }),
+    /** Enable limit entry orders instead of market orders (default: false). */
+    useLimitEntries: z.boolean().default(false),
+    /** Offset below/above close price for limit entries (decimal, e.g. 0.001 = 0.1%). Default: 0.001. */
+    limitEntryOffsetPct: z.number().min(0).max(0.05).default(0.001),
+    /** Max time to wait for limit fill before fallback (ms). Default: 60000. */
+    limitEntryTimeoutMs: z.number().int().positive().default(60000),
+    /** Fall back to market order if limit times out. Default: true. */
+    limitEntryFallbackToMarket: z.boolean().default(true),
+  }).default({ feeDragMultiple: 2.0, feeDragAtrPeriod: 14, useLimitEntries: false, limitEntryOffsetPct: 0.001, limitEntryTimeoutMs: 60000, limitEntryFallbackToMarket: true }),
   preLiveGate: z.object({
     minTrades: z.number().int().min(0).default(20),
     minNetPnl: z.number().default(0),
@@ -81,6 +89,10 @@ export type Config = z.infer<typeof configSchema>;
  * - SPOT_MOMENTUM_BREAKOUT_WINDOW -> spotStrategyOverrides.momentumBreakoutWindow (default 10)
  * - SPOT_MOMENTUM_VOLUME_WINDOW -> spotStrategyOverrides.momentumVolumeWindow (default 10)
  * - SPOT_MOMENTUM_VOLUME_MULTIPLIER -> spotStrategyOverrides.momentumVolumeMultiplier (default 1.5)
+ * - SPOT_USE_LIMIT_ENTRIES -> spotStrategyOverrides.useLimitEntries (default false)
+ * - SPOT_LIMIT_ENTRY_OFFSET_PCT -> spotStrategyOverrides.limitEntryOffsetPct (default 0.001 = 0.1%)
+ * - SPOT_LIMIT_ENTRY_TIMEOUT_MS -> spotStrategyOverrides.limitEntryTimeoutMs (default 60000)
+ * - SPOT_LIMIT_ENTRY_FALLBACK -> spotStrategyOverrides.limitEntryFallbackToMarket (default true)
  *
  * Pre-live gate thresholds (all optional — omit to use built-in Zod defaults):
  * - GATE_MIN_TRADES -> preLiveGate.minTrades (default 20)
@@ -131,6 +143,10 @@ export function loadConfig(): Config {
       momentumBreakoutWindow: env.SPOT_MOMENTUM_BREAKOUT_WINDOW ? parseInt(env.SPOT_MOMENTUM_BREAKOUT_WINDOW, 10) : undefined,
       momentumVolumeWindow: env.SPOT_MOMENTUM_VOLUME_WINDOW ? parseInt(env.SPOT_MOMENTUM_VOLUME_WINDOW, 10) : undefined,
       momentumVolumeMultiplier: env.SPOT_MOMENTUM_VOLUME_MULTIPLIER ? parseFloat(env.SPOT_MOMENTUM_VOLUME_MULTIPLIER) : undefined,
+      useLimitEntries: env.SPOT_USE_LIMIT_ENTRIES === 'true' ? true : undefined,
+      limitEntryOffsetPct: env.SPOT_LIMIT_ENTRY_OFFSET_PCT ? parseFloat(env.SPOT_LIMIT_ENTRY_OFFSET_PCT) : undefined,
+      limitEntryTimeoutMs: env.SPOT_LIMIT_ENTRY_TIMEOUT_MS ? parseInt(env.SPOT_LIMIT_ENTRY_TIMEOUT_MS, 10) : undefined,
+      limitEntryFallbackToMarket: env.SPOT_LIMIT_ENTRY_FALLBACK === 'false' ? false : undefined,
     },
     preLiveGate: {
       minTrades: env.GATE_MIN_TRADES ? parseInt(env.GATE_MIN_TRADES, 10) : undefined,
