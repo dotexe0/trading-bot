@@ -92,6 +92,11 @@ export class CrossAssetSignalBus {
     return -this.opposingDirectionPenalty;
   }
 
+  /** Get the current state of all published signals (for dashboard display). */
+  getState(): Map<TradingPair, SignalEntry> {
+    return new Map(this.signals);
+  }
+
   private getOtherPair(pair: TradingPair): TradingPair | null {
     if (pair === 'BTC-USD') return 'ETH-USD';
     if (pair === 'ETH-USD') return 'BTC-USD';

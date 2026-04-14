@@ -1057,6 +1057,7 @@ program
         tournamentStore,
         strategyRegistry: registry,
         perpTournamentResult,
+        crossAssetBus,
       });
 
       await server.start();

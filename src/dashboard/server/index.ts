@@ -26,6 +26,7 @@ import type { FeedHealthMonitor, FeedHealthState } from '../../core/feed-health.
 import type { TournamentStore } from '../../tournament/tournament-store.js';
 import type { StrategyRegistry } from '../../strategies/registry.js';
 import type { TournamentResult } from '../../tournament/types.js';
+import type { CrossAssetSignalBus } from '../../risk/cross-asset-signal-bus.js';
 import {
   toApiSession,
   toApiPaperSession,
@@ -94,6 +95,8 @@ export interface DashboardDeps {
   strategyRegistry?: StrategyRegistry;
   /** Perp tournament result from the most recent perp tournament run. */
   perpTournamentResult?: TournamentResult;
+  /** Cross-asset signal bus — exposes BTC/ETH signal alignment state. */
+  crossAssetBus?: CrossAssetSignalBus;
 }
 
 export interface RouteDeps {
@@ -117,6 +120,8 @@ export interface RouteDeps {
   strategyRegistry?: StrategyRegistry;
   /** Perp tournament result from the most recent perp tournament run. */
   perpTournamentResult?: TournamentResult;
+  /** Cross-asset signal bus — exposes BTC/ETH signal alignment state. */
+  crossAssetBus?: CrossAssetSignalBus;
 }
 
 export interface DashboardServer {
@@ -411,6 +416,29 @@ export async function createDashboardServer(
       uptime: process.uptime(),
       wsClients: broadcaster.getClientCount(),
     };
+  });
+
+  // Cross-asset signal state
+  app.get('/api/cross-asset-signals', async () => {
+    if (!deps.crossAssetBus) return { signals: [] };
+    const state = deps.crossAssetBus.getState();
+    const signals: Array<{ pair: string; direction: string; confidence: number; timestamp: number; ageMs: number }> = [];
+    const now = Date.now();
+    for (const [pair, entry] of state) {
+      signals.push({ pair, direction: entry.direction, confidence: entry.confidence, timestamp: entry.timestamp, ageMs: now - entry.timestamp });
+    }
+    // Compute alignment
+    const btc = state.get('BTC-USD' as any);
+    const eth = state.get('ETH-USD' as any);
+    let alignment: 'aligned' | 'opposing' | 'neutral' | 'stale' = 'neutral';
+    if (btc && eth) {
+      const stale = now - btc.timestamp > 3_600_000 || now - eth.timestamp > 3_600_000;
+      if (stale) alignment = 'stale';
+      else if (btc.direction === 'close' || eth.direction === 'close') alignment = 'neutral';
+      else if (btc.direction === eth.direction) alignment = 'aligned';
+      else alignment = 'opposing';
+    }
+    return { signals, alignment };
   });
 
   // Reset paper trading history (paper mode only)

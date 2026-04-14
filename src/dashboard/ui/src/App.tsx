@@ -22,6 +22,7 @@ import { LiveReadinessPanel } from './components/LiveReadinessPanel.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
 import { BacktestViewer } from './components/BacktestViewer.js';
 import { PortfolioStats } from './components/PortfolioStats.js';
+import { CrossAssetSignalPanel } from './components/CrossAssetSignalPanel.js';
 import type {
   CircuitBreakerEvent,
   EquityPoint,
@@ -901,6 +902,7 @@ function App(): React.ReactElement {
             {/* ── Analytics ─────────────────────────────────────── */}
             {activeSection === 'analytics' && (
               <div className="section-analytics">
+                <CrossAssetSignalPanel />
                 <div className="analytics-row2">
                   <div className="panel">
                     <div className="panel-title">Equity Curve — Spot</div>
