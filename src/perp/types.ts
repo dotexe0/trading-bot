@@ -155,6 +155,8 @@ export interface PerpEngineEvents {
   exposureUpdate: [{ totalNotionalUsd: string; exposureCapUsd: string; utilizationPct: string }];
   /** Emitted when the FCM available balance changes between periodic checks. */
   fcmBalanceChanged: [{ previous: string; current: string }];
+  /** Emitted when rolling performance drifts from tournament baseline. */
+  strategyDrift: [{ type: string; rolling: number; baseline: number; threshold: number; strategyName: string }];
   error: [Error];
 }
 

@@ -227,6 +227,10 @@ export class PerpStrategyController {
     return this.currentRegime;
   }
 
+  getRegimeLeaderboards(): RegimeLeaderboards | null {
+    return this.regimeLeaderboards;
+  }
+
   // ── Private ────────────────────────────────────────────────────────────────
 
   private resolveRegimeWinner(regime: MarketRegime): Record<string, unknown> | null {

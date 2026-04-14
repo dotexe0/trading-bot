@@ -41,6 +41,7 @@ import type {
 import type { FeedHealthMonitor } from '../core/feed-health.js';
 import { computeLeverage } from './leverage-sizer.js';
 import { MarketRegime } from '../regime/types.js';
+import { DriftDetector } from '../risk/drift-detector.js';
 
 const log = createModuleLogger('perp-trading-engine');
 
@@ -78,6 +79,8 @@ export interface PerpTradingEngineOptions {
   crossAssetBus?: import('../risk/cross-asset-signal-bus.js').CrossAssetSignalBus;
   /** Optional RiskManager for drawdown recovery scaling. */
   riskManager?: import('../risk/risk-manager.js').RiskManager;
+  /** Drift detection config — monitors rolling performance vs tournament baseline. */
+  driftDetection?: { enabled: boolean; windowSize: number; sharpeThreshold: number; winRateTolerance: number };
   /**
    * Paper-only: interval between simulated funding payments (default 8h).
    * Ignored in live mode (real funding events from WebSocket).
@@ -130,6 +133,9 @@ export class PerpTradingEngine extends EventEmitter {
   // Drawdown recovery scaling
   private readonly riskManager?: import('../risk/risk-manager.js').RiskManager;
 
+  // Drift detection
+  private driftDetector: DriftDetector | null = null;
+
   private readonly ctrl: PerpStrategyController;
 
   /** Typed emit override — matches PerpEngineEvents interface. */
@@ -164,6 +170,14 @@ export class PerpTradingEngine extends EventEmitter {
     this.crossAssetBus = options.crossAssetBus;
     this.riskManager = options.riskManager;
 
+    if (options.driftDetection?.enabled) {
+      this.driftDetector = new DriftDetector({
+        windowSize: options.driftDetection.windowSize,
+        sharpeThreshold: options.driftDetection.sharpeThreshold,
+        winRateTolerance: options.driftDetection.winRateTolerance,
+      });
+    }
+
     this.ctrl = new PerpStrategyController({
       regimeLeaderboards: options.regimeLeaderboards,
       strategyRegistry: options.strategyRegistry,
@@ -171,7 +185,10 @@ export class PerpTradingEngine extends EventEmitter {
       fundingRateProvider: options.fundingRateProvider,
       feedHealthMonitor: options.feedHealthMonitor,
       logPrefix: this.mode === 'paper' ? '[PAPER]' : '[LIVE]',
-      onStrategySwitch: (name) => this.emit('strategySwitch', { newStrategy: name }),
+      onStrategySwitch: (name) => {
+        this.emit('strategySwitch', { newStrategy: name });
+        this._updateDriftBaseline();
+      },
     });
     this._paperFundingIntervalMs = options.paperFundingIntervalMs ?? 28_800_000;
   }
@@ -221,6 +238,7 @@ export class PerpTradingEngine extends EventEmitter {
 
     // Preload candle buffer with historical data
     this._preloadBuffer();
+    this._updateDriftBaseline();
 
     log.info(
       { mode: this.mode, tradingPair: this.tradingPair, instrument: this.instrument, timeframe: this.timeframe },
@@ -753,6 +771,23 @@ export class PerpTradingEngine extends EventEmitter {
       this._riskGate.recordRealizedLoss(lossUsd);
     }
 
+    // Drift detection: record trade return and check for divergence
+    if (this.driftDetector) {
+      const entryVal = parseFloat(session.entryPrice) * parseFloat(session.size);
+      const pnlPct = entryVal > 0 ? parseFloat(realizedPnl) / entryVal : 0;
+      this.driftDetector.recordTrade(pnlPct);
+      const drift = this.driftDetector.checkDrift();
+      if (drift) {
+        this.emit('strategyDrift', {
+          type: drift.type,
+          rolling: drift.rolling,
+          baseline: drift.baseline,
+          threshold: drift.threshold,
+          strategyName: this.ctrl.getStrategy()?.name ?? 'unknown',
+        });
+      }
+    }
+
     this.emit('positionClosed', session);
     this.emit('exposureUpdate', {
       totalNotionalUsd: '0.00',
@@ -1132,5 +1167,33 @@ export class PerpTradingEngine extends EventEmitter {
 
   isPositionOpen(): boolean {
     return this.currentSession !== null && this.currentSession.status === 'open';
+  }
+
+  // ── Drift Detection ─────────────────────────────────────────────────
+
+  private _updateDriftBaseline(): void {
+    if (!this.driftDetector || !this.ctrl.getRegimeLeaderboards()) return;
+    const leaderboards = this.ctrl.getRegimeLeaderboards()!;
+    const regime = this.ctrl.getCurrentRegime();
+    const strategyName = this.ctrl.getStrategy()?.name;
+
+    if (regime) {
+      const entries = leaderboards[regime];
+      if (entries && entries.length > 0) {
+        const entry = entries.find(e => e.strategyName === strategyName) ?? entries[0];
+        this.driftDetector.setBaseline({
+          sharpeRatio: entry.regimeSharpeRatio,
+          winRate: entry.regimeWinRate,
+        });
+        return;
+      }
+    }
+    const fb = leaderboards.fallbackEntry;
+    if (fb) {
+      this.driftDetector.setBaseline({
+        sharpeRatio: fb.oosMetrics.sharpeRatio,
+        winRate: fb.oosMetrics.winRate.toNumber(),
+      });
+    }
   }
 }

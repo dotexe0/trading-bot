@@ -891,6 +891,7 @@ program
                 confirmationFeed: perpConfirmFeed,
                 confirmationTimeframe,
                 riskManager,
+                driftDetection: riskConfig.driftDetection,
               });
 
               perpEngine.start();
@@ -957,6 +958,7 @@ program
                 confirmationFeed: livePerpConfirmFeed,
                 confirmationTimeframe,
                 riskManager,
+                driftDetection: riskConfig.driftDetection,
               });
 
               // recoverFromRestart() BEFORE start() — live only
