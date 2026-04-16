@@ -151,6 +151,7 @@ export async function registerStrategyRoutes(
       leaderboard: result.leaderboard.map((e) => ({
         rank: e.rank,
         strategyName: e.strategyName,
+        strategyConfig: e.strategyConfig,
         isSharpe: e.isMetrics.sharpeRatio,
         oosSharpe: e.oosMetrics.sharpeRatio,
         robustnessRatio: e.robustnessRatio,

@@ -238,6 +238,7 @@ export interface SystemHealthPayload {
 export interface TournamentLeaderboardEntry {
   rank: number;
   strategyName: string;
+  strategyConfig?: Record<string, unknown>;
   isSharpe: number;
   oosSharpe: number;
   robustnessRatio: number;

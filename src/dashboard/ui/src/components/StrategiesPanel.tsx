@@ -206,11 +206,14 @@ export function StrategiesPanel({
       <div className="panel-title">Strategies</div>
 
       {driftWarnings && driftWarnings.length > 0 && (
-        <div style={{ background: 'rgba(234, 179, 8, 0.15)', border: '1px solid rgba(234, 179, 8, 0.3)', borderRadius: 4, padding: '6px 10px', marginBottom: 8, color: '#eab308', fontSize: 12 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Drift Alerts ({driftWarnings.length})</div>
+        <div className="drift-alert-box">
+          <div className="drift-alert-header">
+            <span>&#9888;</span>
+            Drift Alerts ({driftWarnings.length})
+          </div>
           {driftWarnings.map((dw, i) => (
-            <div key={i} style={{ marginBottom: 2 }}>
-              <span style={{ color: '#94a3b8', marginRight: 6 }}>{new Date(dw.timestamp).toLocaleTimeString()}</span>
+            <div key={i} className="drift-alert-item">
+              <span className="drift-alert-time">{new Date(dw.timestamp).toLocaleTimeString()}</span>
               {dw.message}
             </div>
           ))}
@@ -270,12 +273,36 @@ export function StrategiesPanel({
                   </td>
                   <td style={{ paddingRight: '8px' }}>{fmt(entry.isSharpe, 2)}</td>
                   <td style={{ paddingRight: '8px' }}>{fmt(entry.oosSharpe, 2)}</td>
-                  <td style={{ paddingRight: '8px' }}>{fmt(entry.robustnessRatio, 2)}</td>
+                  <td style={{ paddingRight: '8px' }}>
+                    {isNaN(entry.robustnessRatio) ? '—' : (
+                      <span className="micro-bar-cell" style={{ display: 'inline-block', position: 'relative' }}>
+                        <span
+                          className="micro-bar-bg"
+                          style={{
+                            width: `${Math.min(entry.robustnessRatio * 100, 100)}%`,
+                            background: entry.robustnessRatio >= 0.7 ? 'var(--gain)' : entry.robustnessRatio >= 0.4 ? 'var(--warn)' : 'var(--loss)',
+                          }}
+                        />
+                        <span className="micro-bar-text">{entry.robustnessRatio.toFixed(2)}</span>
+                      </span>
+                    )}
+                  </td>
                   <td style={{ paddingRight: '8px' }}>
                     {isNaN(entry.oosTradeCount) ? '—' : entry.oosTradeCount}
                   </td>
                   <td style={{ paddingRight: '8px' }}>
-                    {isNaN(entry.oosWinRate) ? '—' : `${(entry.oosWinRate * 100).toFixed(1)}%`}
+                    {isNaN(entry.oosWinRate) ? '—' : (
+                      <span className="micro-bar-cell" style={{ display: 'inline-block', position: 'relative' }}>
+                        <span
+                          className="micro-bar-bg"
+                          style={{
+                            width: `${Math.min(entry.oosWinRate * 100, 100)}%`,
+                            background: entry.oosWinRate >= 0.5 ? 'var(--gain)' : 'var(--loss)',
+                          }}
+                        />
+                        <span className="micro-bar-text">{(entry.oosWinRate * 100).toFixed(1)}%</span>
+                      </span>
+                    )}
                   </td>
                   <td style={{ textAlign: 'left' }}>
                     {isActive ? (

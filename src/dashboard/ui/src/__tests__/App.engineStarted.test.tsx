@@ -23,12 +23,10 @@ vi.mock('../components/PriceChart.js', () => ({
 vi.mock('../components/EquityCurve.js', () => ({
   EquityCurve: React.forwardRef((_p: object, _r: React.Ref<unknown>) => <div />),
 }));
-vi.mock('../components/BacktestViewer.js', () => ({ BacktestViewer: () => <div /> }));
 vi.mock('../components/PositionsTable.js', () => ({ PositionsTable: () => <div /> }));
 vi.mock('../components/TradeHistory.js', () => ({ TradeHistory: () => <div /> }));
 vi.mock('../components/StrategyControls.js', () => ({ StrategyControls: () => <div /> }));
-vi.mock('../components/StrategyConfigEditor.js', () => ({ StrategyConfigEditor: () => <div /> }));
-vi.mock('../components/PortfolioHeatMap.js', () => ({ PortfolioHeatMap: () => <div /> }));
+vi.mock('../components/WinnerConfigPanel.js', () => ({ WinnerConfigPanel: () => <div /> }));
 vi.mock('../components/RiskPanel.js', () => ({ RiskPanel: () => <div /> }));
 vi.mock('../components/PerformancePanel.js', () => ({ PerformancePanel: () => <div /> }));
 vi.mock('../components/CircuitBreakerBanner.js', () => ({ CircuitBreakerBanner: () => <div /> }));

@@ -51,6 +51,17 @@ body {
   overflow: hidden;
 }
 
+/* Subtle noise grain overlay for depth */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='1'/%3E%3C/svg%3E");
+}
+
 /* ── Monospace Numbers ────────────────────────────────────────────── */
 .mono {
   font-family: var(--mono);
@@ -93,6 +104,16 @@ body {
 @keyframes pulseBorder {
   0%, 100% { box-shadow: 0 0 0 0 rgba(242, 64, 96, 0.4); }
   50%       { box-shadow: 0 0 0 4px rgba(242, 64, 96, 0); }
+}
+
+@keyframes panelEnter {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 
 /* ── App Shell ────────────────────────────────────────────────────── */
@@ -205,6 +226,23 @@ body {
   flex: 1;
 }
 
+/* ── Sidebar Section Dividers ─────────────────────────────────────── */
+.nav-section-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 0.5rem 0.625rem;
+}
+
+.nav-section-label {
+  font-size: 8.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-lo);
+  padding: 0.375rem 0.625rem 0.125rem;
+  opacity: 0.6;
+}
+
 .nav-alert {
   width: 6px;
   height: 6px;
@@ -290,6 +328,24 @@ body {
   border-radius: var(--r);
   padding: 1rem;
   border: 1px solid var(--border);
+  animation: panelEnter 0.3s ease-out both;
+  animation-delay: calc(var(--panel-i, 0) * 60ms);
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.panel:hover {
+  border-color: rgba(23, 212, 200, 0.12);
+  box-shadow: 0 0 24px var(--accent-dim);
+}
+
+.panel-elevated {
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+  border-color: var(--border-hi);
+}
+
+.panel-elevated:hover {
+  border-color: rgba(23, 212, 200, 0.2);
+  box-shadow: 0 4px 32px rgba(0, 0, 0, 0.35), 0 0 24px var(--accent-dim);
 }
 
 .panel-title {
@@ -347,6 +403,28 @@ body {
   padding: 2rem;
   color: var(--text-lo);
   font-size: 12.5px;
+}
+
+/* ── Skeleton Loading ────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, var(--border) 25%, var(--border-hi) 50%, var(--border) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 3px;
+}
+
+.skeleton-line {
+  height: 12px;
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.skeleton-line:last-child { width: 60%; }
+
+.skeleton-stat {
+  height: 28px;
+  width: 64px;
+  margin: 0 auto;
 }
 
 /* ── Pair Tabs ────────────────────────────────────────────────────── */
@@ -886,16 +964,28 @@ body {
 ::-webkit-scrollbar-thumb { background: var(--border-hi); border-radius: 2px; }
 ::-webkit-scrollbar-thumb:hover { background: #2a4a66; }
 
-/* ── Portfolio Stats Bar ──────────────────────────────────────────── */
+/* ── Portfolio Stats Bar (elevated — visual anchor) ──────────────── */
 .portfolio-stats-bar {
   display: flex;
   align-items: center;
   gap: 0;
-  background: var(--bg-sidebar);
+  background: linear-gradient(180deg, rgba(12, 21, 32, 0.95) 0%, var(--bg-sidebar) 100%);
   border-bottom: 1px solid var(--border);
-  padding: 0.5rem 1.25rem;
+  padding: 0.625rem 1.25rem;
+  min-height: 56px;
   flex-wrap: wrap;
   flex-shrink: 0;
+  transition: box-shadow 0.4s;
+}
+
+.portfolio-stats-bar.pnl-positive {
+  box-shadow: 0 2px 20px var(--gain-glow);
+  border-bottom-color: rgba(45, 232, 144, 0.15);
+}
+
+.portfolio-stats-bar.pnl-negative {
+  box-shadow: 0 2px 20px var(--loss-glow);
+  border-bottom-color: rgba(242, 64, 96, 0.15);
 }
 
 .portfolio-stat {
@@ -907,11 +997,12 @@ body {
 .portfolio-stat:first-child { padding-left: 0; }
 
 .portfolio-stat-label {
-  font-size: 9.5px;
+  font-size: 9px;
   color: var(--text-lo);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 1px;
+  letter-spacing: 0.1em;
+  margin-bottom: 2px;
+  font-weight: 600;
 }
 
 .portfolio-stat-value {
@@ -922,9 +1013,20 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.portfolio-stat-value.stat-hero {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.portfolio-stat-value.stat-pnl {
+  font-size: 17px;
+  font-weight: 700;
+}
+
 .portfolio-stat-divider {
   width: 1px;
-  height: 1.5rem;
+  height: 2rem;
   background: var(--border);
   flex-shrink: 0;
 }
@@ -1038,6 +1140,184 @@ body {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
+}
+
+/* ── Risk Bars ───────────────────────────────────────────────────── */
+.risk-bar {
+  margin-bottom: 10px;
+}
+
+.risk-bar-header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+
+.risk-bar-label {
+  color: var(--text-lo);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 11px;
+}
+
+.risk-bar-value {
+  font-family: var(--mono);
+  color: var(--text-hi);
+}
+
+.risk-bar-value.over { color: var(--loss); }
+
+.risk-bar-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 5px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.risk-bar-fill {
+  height: 100%;
+  border-radius: 5px;
+  transition: width 0.4s ease;
+}
+
+.risk-bar-fill.level-ok   { background: var(--gain); }
+.risk-bar-fill.level-warn { background: var(--warn); }
+.risk-bar-fill.level-crit { background: var(--loss); }
+
+/* ── Signal Cards (Cross-Asset Panel) ────────────────────────────── */
+.signal-card {
+  flex: 1;
+  background: rgba(30, 41, 59, 0.5);
+  border-radius: 4px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--border);
+  transition: border-color 0.2s, background 0.2s;
+}
+
+.signal-card:hover {
+  background: rgba(30, 41, 59, 0.7);
+}
+
+.signal-card.dir-long  { border-left-color: var(--gain); }
+.signal-card.dir-short { border-left-color: var(--loss); }
+.signal-card.dir-close { border-left-color: var(--text-lo); }
+
+.signal-pair {
+  font-size: 11px;
+  color: var(--text-lo);
+  margin-bottom: 4px;
+}
+
+.signal-direction-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.signal-direction {
+  font-size: 14px;
+  font-weight: 600;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.signal-arrow {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.signal-confidence {
+  font-size: 11px;
+  color: var(--text-lo);
+}
+
+.signal-age {
+  font-size: 10px;
+  color: var(--text-lo);
+  margin-top: 2px;
+  opacity: 0.7;
+}
+
+.signal-alignment-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* ── Drift Alert Box ─────────────────────────────────────────────── */
+.drift-alert-box {
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.25);
+  border-radius: 4px;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.drift-alert-header {
+  font-weight: 600;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.drift-alert-item {
+  margin-bottom: 2px;
+}
+
+.drift-alert-time {
+  color: var(--text-lo);
+  margin-right: 6px;
+}
+
+/* ── Winner Config Panel ─────────────────────────────────────────── */
+.winner-config-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  margin-bottom: 4px;
+  letter-spacing: 0.03em;
+}
+
+.winner-config-key {
+  color: var(--text-lo);
+  font-size: 11.5px;
+  padding-right: 1rem;
+}
+
+.winner-config-value {
+  color: var(--text-hi);
+  font-size: 12px;
+}
+
+/* ── Micro Progress Bars (inline stats) ──────────────────────────── */
+.micro-bar-cell {
+  position: relative;
+  min-width: 60px;
+}
+
+.micro-bar-bg {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  height: 18px;
+  border-radius: 2px;
+  opacity: 0.12;
+  pointer-events: none;
+}
+
+.micro-bar-text {
+  position: relative;
+  z-index: 1;
 }
 
 /* ── Responsive ───────────────────────────────────────────────────── */

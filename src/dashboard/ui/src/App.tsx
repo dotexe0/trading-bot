@@ -6,8 +6,7 @@ import { PositionsTable } from './components/PositionsTable.js';
 import { TradeHistory } from './components/TradeHistory.js';
 import { StrategiesPanel } from './components/StrategiesPanel.js';
 import { PerpStrategiesPanel } from './components/PerpStrategiesPanel.js';
-import { StrategyConfigEditor } from './components/StrategyConfigEditor.js';
-import { PortfolioHeatMap } from './components/PortfolioHeatMap.js';
+import { WinnerConfigPanel } from './components/WinnerConfigPanel.js';
 import { RiskPanel } from './components/RiskPanel.js';
 import { CircuitBreakerBanner } from './components/CircuitBreakerBanner.js';
 import { PerpPositionsPanel } from './components/PerpPositionsPanel.js';
@@ -20,7 +19,6 @@ import { FeedHealthPanel } from './components/FeedHealthPanel.js';
 import { SystemHealthPanel } from './components/SystemHealthPanel.js';
 import { LiveReadinessPanel } from './components/LiveReadinessPanel.js';
 import { useWebSocket } from './hooks/useWebSocket.js';
-import { BacktestViewer } from './components/BacktestViewer.js';
 import { PortfolioStats } from './components/PortfolioStats.js';
 import { CrossAssetSignalPanel } from './components/CrossAssetSignalPanel.js';
 import type {
@@ -722,7 +720,20 @@ function App(): React.ReactElement {
           </div>
 
           <div className="sidebar-nav">
-            {navItems.map((item) => (
+            <div className="nav-section-label">Trading</div>
+            {navItems.slice(0, 3).map((item) => (
+              <button
+                key={item.id}
+                className={`nav-item${activeSection === item.id ? ' active' : ''}`}
+                onClick={() => setActiveSection(item.id)}
+              >
+                <span className="nav-icon">{item.icon}</span>
+                <span className="nav-label">{item.label}</span>
+              </button>
+            ))}
+            <div className="nav-section-divider" />
+            <div className="nav-section-label">Infra</div>
+            {navItems.slice(3).map((item) => (
               <button
                 key={item.id}
                 className={`nav-item${activeSection === item.id ? ' active' : ''}`}
@@ -759,7 +770,7 @@ function App(): React.ReactElement {
             {activeSection === 'overview' && (
               <div className="section-overview">
                 <div className="section-col">
-                  <div className="panel">
+                  <div className="panel panel-elevated" style={{ '--panel-i': 0 } as React.CSSProperties}>
                     <div className="panel-title">Price Chart</div>
                     <PriceChart
                       ref={priceChartRef}
@@ -768,7 +779,7 @@ function App(): React.ReactElement {
                       onPairChange={handlePairChange}
                     />
                   </div>
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 1 } as React.CSSProperties}>
                     <div className="panel-title">Equity Curve</div>
                     <EquityCurve ref={equityCurveRef} data={equityLineData} />
                   </div>
@@ -776,16 +787,16 @@ function App(): React.ReactElement {
 
                 <div className="section-col">
                   <div className="overview-positions-row">
-                    <div className="panel">
+                    <div className="panel" style={{ '--panel-i': 1 } as React.CSSProperties}>
                       <div className="panel-title">Spot Positions</div>
                       <PositionsTable positions={positions} />
                     </div>
-                    <div className="panel">
+                    <div className="panel" style={{ '--panel-i': 2 } as React.CSSProperties}>
                       <div className="panel-title">Perp Positions</div>
                       <PerpPositionsPanel positions={perpPositions} lastUpdatedAt={perpPositionUpdatedAt} />
                     </div>
                   </div>
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 3 } as React.CSSProperties}>
                     <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>Live Readiness</span>
                       {currentMode === 'paper' && (
@@ -817,16 +828,16 @@ function App(): React.ReactElement {
             {activeSection === 'positions' && (
               <div className="section-positions">
                 <div className="positions-top">
-                  <div className="panel">
+                  <div className="panel panel-elevated" style={{ '--panel-i': 0 } as React.CSSProperties}>
                     <div className="panel-title">Spot Positions</div>
                     <PositionsTable positions={positions} />
                   </div>
-                  <div className="panel">
+                  <div className="panel panel-elevated" style={{ '--panel-i': 1 } as React.CSSProperties}>
                     <div className="panel-title">Perp Positions</div>
                     <PerpPositionsPanel positions={perpPositions} lastUpdatedAt={perpPositionUpdatedAt} />
                   </div>
                 </div>
-                <div className="panel">
+                <div className="panel" style={{ '--panel-i': 2 } as React.CSSProperties}>
                   <div className="panel-title">Trade History</div>
                   <TradeHistory trades={trades} />
                 </div>
@@ -848,10 +859,7 @@ function App(): React.ReactElement {
                   <PerpStrategiesPanel tournament={perpTournament} />
                 </div>
                 <div className="strategies-bottom">
-                  <div className="panel">
-                    <div className="panel-title">Strategy Config</div>
-                    <StrategyConfigEditor strategies={strategies} />
-                  </div>
+                  <WinnerConfigPanel tournament={tournament} perpTournament={perpTournament} />
                   <div className="panel">
                     <div className="panel-title">Sessions</div>
                     {sessions.length === 0 && perpPositions.length === 0 ? (
@@ -904,31 +912,31 @@ function App(): React.ReactElement {
               <div className="section-analytics">
                 <CrossAssetSignalPanel />
                 <div className="analytics-row2">
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 1 } as React.CSSProperties}>
                     <div className="panel-title">Equity Curve — Spot</div>
                     <EquityCurve ref={equityCurveRef} data={equityLineData} />
                   </div>
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 2 } as React.CSSProperties}>
                     <div className="panel-title">P&amp;L Curve — Perp</div>
                     <PnlCurveChart ref={pnlCurveRef} data={pnlData} />
                   </div>
                 </div>
                 <div className="analytics-row2">
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 3 } as React.CSSProperties}>
                     <div className="panel-title">Funding Rates</div>
                     <PerpFundingPanel fundingRates={perpFunding} lastUpdatedAt={perpFundingUpdatedAt} />
                   </div>
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 4 } as React.CSSProperties}>
                     <div className="panel-title">Leverage Utilization</div>
                     <PerpLeverageMeter exposure={perpExposure} lastUpdatedAt={perpExposureUpdatedAt} />
                   </div>
                 </div>
                 <div className="analytics-row2">
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 5 } as React.CSSProperties}>
                     <div className="panel-title">Funding Rate History</div>
                     <FundingHistoryChart ref={fundingHistoryRef} data={fundingData} />
                   </div>
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 6 } as React.CSSProperties}>
                     <div className="panel-title">Leverage History</div>
                     <LeverageHistoryChart ref={leverageHistoryRef} data={[]} />
                   </div>
@@ -940,15 +948,15 @@ function App(): React.ReactElement {
             {activeSection === 'system' && (
               <div className="section-system">
                 <div className="system-row">
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 0 } as React.CSSProperties}>
                     <FeedHealthPanel feeds={feedHealthData} lastUpdatedAt={feedHealthUpdatedAt} />
                   </div>
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 1 } as React.CSSProperties}>
                     <SystemHealthPanel systemHealth={systemHealth} />
                   </div>
                 </div>
                 <div className="system-row">
-                  <div className="panel">
+                  <div className="panel" style={{ '--panel-i': 2 } as React.CSSProperties}>
                     <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span>Live Readiness</span>
                       {currentMode === 'paper' && (

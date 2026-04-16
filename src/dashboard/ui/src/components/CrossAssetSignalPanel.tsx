@@ -28,9 +28,15 @@ const ALIGNMENT_LABELS: Record<string, string> = {
 };
 
 const DIRECTION_COLORS: Record<string, string> = {
-  long: '#22c55e',
-  short: '#ef4444',
-  close: '#94a3b8',
+  long: 'var(--gain, #22c55e)',
+  short: 'var(--loss, #ef4444)',
+  close: 'var(--text-lo, #94a3b8)',
+};
+
+const DIRECTION_ARROWS: Record<string, string> = {
+  long: '\u25B2',
+  short: '\u25BC',
+  close: '\u25CF',
 };
 
 function formatAge(ms: number): string {
@@ -61,7 +67,7 @@ export function CrossAssetSignalPanel(): React.ReactElement {
     return (
       <div className="panel" style={{ minHeight: 60 }}>
         <div className="panel-title">Cross-Asset Signals</div>
-        <div style={{ color: '#64748b', fontSize: 12 }}>No signals yet</div>
+        <div className="empty-state" style={{ padding: '0.75rem 0' }}>No signals yet</div>
       </div>
     );
   }
@@ -70,40 +76,33 @@ export function CrossAssetSignalPanel(): React.ReactElement {
     <div className="panel">
       <div className="panel-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span>Cross-Asset Signals</span>
-        <span style={{
-          fontSize: 11,
-          fontWeight: 600,
-          color: ALIGNMENT_COLORS[state.alignment],
-          background: `${ALIGNMENT_COLORS[state.alignment]}22`,
-          padding: '2px 8px',
-          borderRadius: 4,
-        }}>
+        <span
+          className="signal-alignment-badge"
+          style={{
+            color: ALIGNMENT_COLORS[state.alignment],
+            background: `${ALIGNMENT_COLORS[state.alignment]}22`,
+          }}
+        >
           {ALIGNMENT_LABELS[state.alignment]}
         </span>
       </div>
       <div style={{ display: 'flex', gap: 12, marginTop: 6 }}>
         {state.signals.map((s) => (
-          <div key={s.pair} style={{
-            flex: 1,
-            background: 'rgba(30, 41, 59, 0.5)',
-            borderRadius: 4,
-            padding: '8px 10px',
-          }}>
-            <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 4 }}>{s.pair}</div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-              <span style={{
-                fontSize: 14,
-                fontWeight: 600,
-                color: DIRECTION_COLORS[s.direction] ?? '#94a3b8',
-                textTransform: 'uppercase',
-              }}>
+          <div key={s.pair} className={`signal-card dir-${s.direction}`}>
+            <div className="signal-pair">{s.pair}</div>
+            <div className="signal-direction-row">
+              <span
+                className="signal-direction"
+                style={{ color: DIRECTION_COLORS[s.direction] ?? 'var(--text-lo)' }}
+              >
+                <span className="signal-arrow">{DIRECTION_ARROWS[s.direction] ?? ''}</span>
                 {s.direction}
               </span>
-              <span className="mono" style={{ fontSize: 11, color: '#94a3b8' }}>
+              <span className="mono signal-confidence">
                 {s.confidence.toFixed(2)}
               </span>
             </div>
-            <div style={{ fontSize: 10, color: '#64748b', marginTop: 2 }}>
+            <div className="signal-age">
               {formatAge(s.ageMs)}
             </div>
           </div>

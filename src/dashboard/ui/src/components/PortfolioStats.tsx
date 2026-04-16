@@ -43,7 +43,15 @@ export function PortfolioStats({ mode = 'paper', refreshToken = 0 }: PortfolioSt
   }, [refreshToken, fetchEquity]);
 
   if (!data || (data.equity === '0' && data.initialCapital === '0')) {
-    return <div className="portfolio-stats-bar" style={{ color: '#6b7280', fontSize: '0.85rem' }}>No active session</div>;
+    return (
+      <div className="portfolio-stats-bar">
+        <div className="skeleton skeleton-stat" style={{ width: 120 }} />
+        <div className="portfolio-stat-divider" />
+        <div className="skeleton skeleton-stat" style={{ width: 80 }} />
+        <div className="portfolio-stat-divider" />
+        <div className="skeleton skeleton-stat" style={{ width: 100 }} />
+      </div>
+    );
   }
 
   const equity = parseFloat(data.equity);
@@ -51,18 +59,19 @@ export function PortfolioStats({ mode = 'paper', refreshToken = 0 }: PortfolioSt
   const pnl = parseFloat(data.pnl);
   const pnlPct = parseFloat(data.pnlPct);
   const isPositive = pnl >= 0;
-  const pnlColor = isPositive ? '#22c55e' : '#ef4444';
+  const pnlColor = isPositive ? 'var(--gain)' : 'var(--loss)';
+  const barClass = `portfolio-stats-bar ${isPositive ? 'pnl-positive' : 'pnl-negative'}`;
 
   return (
-    <div className="portfolio-stats-bar">
+    <div className={barClass}>
       <div className="portfolio-stat">
         <span className="portfolio-stat-label">Portfolio Value</span>
-        <span className="portfolio-stat-value">${fmt(equity)}</span>
+        <span className="portfolio-stat-value stat-hero">${fmt(equity)}</span>
       </div>
       <div className="portfolio-stat-divider" />
       <div className="portfolio-stat">
         <span className="portfolio-stat-label">P&amp;L</span>
-        <span className="portfolio-stat-value" style={{ color: pnlColor }}>
+        <span className="portfolio-stat-value stat-pnl" style={{ color: pnlColor }}>
           {isPositive ? '+' : ''}{fmt(pnl)} ({isPositive ? '+' : ''}{pnlPct.toFixed(2)}%)
         </span>
       </div>
@@ -75,7 +84,7 @@ export function PortfolioStats({ mode = 'paper', refreshToken = 0 }: PortfolioSt
       <div className="portfolio-stat">
         <span className="portfolio-stat-label">Mode</span>
         <span className="portfolio-stat-value" style={{
-          color: mode === 'live' ? '#f59e0b' : '#60a5fa',
+          color: mode === 'live' ? 'var(--warn)' : '#60a5fa',
           textTransform: 'uppercase',
           fontSize: '0.75rem',
           letterSpacing: '0.05em',

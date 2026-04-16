@@ -19,10 +19,10 @@ function formatTs(ts: number): string {
   });
 }
 
-function barColor(ratio: number): string {
-  if (ratio > 0.8) return '#ef4444';
-  if (ratio > 0.5) return '#f59e0b';
-  return '#22c55e';
+function barLevel(ratio: number): string {
+  if (ratio > 0.8) return 'level-crit';
+  if (ratio > 0.5) return 'level-warn';
+  return 'level-ok';
 }
 
 interface RiskBarProps {
@@ -35,24 +35,17 @@ function RiskBar({ label, current, max }: RiskBarProps): React.ReactElement {
   const ratio = max > 0 ? Math.min(current / max, 1) : 0;
   const over = max > 0 && current > max;
   return (
-    <div style={{ marginBottom: '10px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '4px' }}>
-        <span style={{ color: '#9ca3af', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', fontSize: '11px' }}>
-          {label}
-        </span>
-        <span style={{ fontFamily: 'monospace', color: over ? '#ef4444' : '#d1d5db' }}>
+    <div className="risk-bar">
+      <div className="risk-bar-header">
+        <span className="risk-bar-label">{label}</span>
+        <span className={`risk-bar-value${over ? ' over' : ''}`}>
           {current.toFixed(1)}% / {max.toFixed(0)}%
         </span>
       </div>
-      <div style={{ width: '100%', height: '10px', borderRadius: '5px', backgroundColor: '#374151' }}>
+      <div className="risk-bar-track">
         <div
-          style={{
-            width: `${Math.min(ratio * 100, 100)}%`,
-            height: '100%',
-            borderRadius: '5px',
-            backgroundColor: barColor(ratio),
-            transition: 'width 0.4s ease',
-          }}
+          className={`risk-bar-fill ${barLevel(ratio)}`}
+          style={{ width: `${Math.min(ratio * 100, 100)}%` }}
         />
       </div>
     </div>
