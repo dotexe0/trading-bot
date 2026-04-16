@@ -253,8 +253,7 @@ export class IntxClient extends EventEmitter {
       // ws.subscribe() triggers reconnect internally
       this._subscribe();
       this.emit('reconnected');
-      this.reconnectAttempts = 0; // reset on successful reconnect trigger
-      this._isStale = false;
+      // reconnectAttempts reset happens in 'open' handler on actual success
     }, delay);
   }
 
@@ -291,13 +290,13 @@ export class IntxClient extends EventEmitter {
       });
       const raw = (summary as any)?.fee_tier?.taker_fee_rate;
       const rawMaker = (summary as any)?.fee_tier?.maker_fee_rate;
-      const takerRate = typeof raw === 'string' && raw.length > 0 ? parseFloat(raw) : NaN;
+      const takerRate = typeof raw === 'string' && raw.length > 0 && /^[\d.]+$/.test(raw) ? parseFloat(raw) : NaN;
       if (!Number.isFinite(takerRate) || takerRate <= 0 || takerRate > 0.1) {
         log.warn({ raw }, 'fetchFeeConfig: malformed or missing taker_fee_rate — using fallback');
         return DEFAULT_FEE_CONFIG;
       }
       const makerRate =
-        typeof rawMaker === 'string' && rawMaker.length > 0 ? parseFloat(rawMaker) : FCM_FALLBACK_MAKER_RATE;
+        typeof rawMaker === 'string' && rawMaker.length > 0 && /^[\d.]+$/.test(rawMaker) ? parseFloat(rawMaker) : FCM_FALLBACK_MAKER_RATE;
       const makerFeeRate = Number.isFinite(makerRate) && makerRate >= 0 && makerRate <= 0.1
         ? makerRate
         : FCM_FALLBACK_MAKER_RATE;

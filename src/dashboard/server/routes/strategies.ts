@@ -49,8 +49,9 @@ export async function registerStrategyRoutes(
       return { success: true, sessionId: result.sessionId };
     } catch (err) {
       log.error({ strategy: name, err }, 'Failed to start strategy');
+      const msg = err instanceof Error ? err.message.split('\n')[0] : 'Unknown error';
       return reply.status(500).send({
-        error: err instanceof Error ? err.message : 'Failed to start strategy',
+        error: `Failed to start strategy: ${msg}`,
       });
     }
   });
@@ -73,8 +74,9 @@ export async function registerStrategyRoutes(
       return { success: true };
     } catch (err) {
       log.error({ strategy: name, err }, 'Failed to stop strategy');
+      const msg = err instanceof Error ? err.message.split('\n')[0] : 'Unknown error';
       return reply.status(500).send({
-        error: err instanceof Error ? err.message : 'Failed to stop strategy',
+        error: `Failed to stop strategy: ${msg}`,
       });
     }
   });
@@ -117,8 +119,9 @@ export async function registerStrategyRoutes(
       return { success: true, sessionId: result.sessionId };
     } catch (err) {
       log.error({ strategy: name, err }, 'Failed to restart engine with new config');
+      const msg = err instanceof Error ? err.message.split('\n')[0] : 'Unknown error';
       return reply.status(500).send({
-        error: err instanceof Error ? err.message : 'Failed to restart strategy',
+        error: `Failed to restart strategy: ${msg}`,
       });
     }
   });

@@ -9,7 +9,7 @@ import { z } from 'zod';
 
 export const dashboardConfigSchema = z.object({
   port: z.number().default(3001),
-  host: z.string().default('0.0.0.0'),
+  host: z.string().default('127.0.0.1'),
   isDev: z.boolean().default(process.env.NODE_ENV !== 'production'),
 });
 

@@ -210,6 +210,10 @@ export class SpotTradingEngine extends EventEmitter {
   private exitSignalPrice: Decimal | null = null;
   private recoveryFailed = false;
 
+  // Guards against concurrent async entry/close races
+  private _entryPending = false;
+  private _closePending = false;
+
   constructor(options: SpotTradingEngineOptions) {
     super();
     this.mode = options.mode;
@@ -646,7 +650,7 @@ export class SpotTradingEngine extends EventEmitter {
       );
     }
 
-    if (!this.isFlat()) return;
+    if (!this.isFlat() || this._entryPending) return;
 
     const currentPrice = d(candle.close);
     const equity = this.currentEquity(currentPrice);
@@ -765,9 +769,11 @@ export class SpotTradingEngine extends EventEmitter {
     // Execute the entry fill via the executor (limit or market)
     const fillCandle: Candle = { ...candle, open: candle.close };
     this.entrySignalPrice = currentPrice;
+    this._entryPending = true;
 
     this.attemptEntryFill(signal, fillCandle, quantity)
       .then((fill) => {
+        this._entryPending = false;
         if (!fill) return; // limit entry missed with no fallback
         // Update position state
         this.currentPosition = {
@@ -815,13 +821,14 @@ export class SpotTradingEngine extends EventEmitter {
         );
       })
       .catch((err) => {
+        this._entryPending = false;
         log.error({ err: err instanceof Error ? err.message : String(err) }, 'Failed to execute entry order');
         this.entrySignalPrice = null;
       });
   }
 
   private processCloseSignal(signal: Signal, candle: Candle): void {
-    if (this.isFlat()) return;
+    if (this.isFlat() || this._closePending) return;
     this.exitSignalPrice = d(candle.close);
     this.executeClose(candle, candle.close, 'EXIT', signal.strategyName);
     this.stopLossTrackers.clear();
@@ -838,6 +845,7 @@ export class SpotTradingEngine extends EventEmitter {
     strategyName: string,
   ): void {
     if (!this.currentPosition || !this.session) return;
+    this._closePending = true;
 
     const position = this.currentPosition;
     const closeSide = position.side === 'BUY' ? 'SELL' : 'BUY';
@@ -871,9 +879,11 @@ export class SpotTradingEngine extends EventEmitter {
 
     closePromise
       .then((fill) => {
+        this._closePending = false;
         this.applyClose(fill, position, candle, purpose, closeSignal);
       })
       .catch((err) => {
+        this._closePending = false;
         log.error({ err: err instanceof Error ? err.message : String(err), purpose }, 'Failed to execute close order');
       });
   }

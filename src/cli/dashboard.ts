@@ -50,7 +50,7 @@ program
 
       const dashboardConfig = dashboardConfigSchema.parse({
         port,
-        host: '0.0.0.0',
+        host: process.env.DASHBOARD_HOST ?? '127.0.0.1',
         isDev,
       });
 

@@ -108,11 +108,15 @@ export class PerpTradingEngine extends EventEmitter {
   /** Paper-only: entry price snapshot (mark price at simulated entry). */
   private _paperEntryPrice: string | null = null;
   private _started = false;
+  private _entryPending = false;
+  private _closePending = false;
   private _emergencyCloseInProgress = false;
   private _onMarkPrice: ((evt: IntxMarkPriceEvent) => void) | null = null;
   private _fundingRateTracker: FundingRateTracker;
   private _fundingDrainInProgress = false;
   private _onFundingRate: ((evt: IntxFundingRateEvent) => void) | null = null;
+  private _onReconnected: (() => void) | null = null;
+  private _onConfirmationCandle: ((candle: Candle) => void) | null = null;
 
   // Paper-only: simulated funding timer
   private _paperFundingTimer: ReturnType<typeof setInterval> | null = null;
@@ -203,7 +207,8 @@ export class PerpTradingEngine extends EventEmitter {
     this.intxClient.on('markPrice', this._onMarkPrice);
 
     // Re-hydrate in-memory state from DB on IntxClient reconnection
-    this.intxClient.on('reconnected', () => this._handleReconnection());
+    this._onReconnected = () => this._handleReconnection();
+    this.intxClient.on('reconnected', this._onReconnected);
 
     this._onFundingRate = (evt: IntxFundingRateEvent) => this._handleFundingRate(evt);
     this.intxClient.on('fundingRate', this._onFundingRate);
@@ -211,7 +216,7 @@ export class PerpTradingEngine extends EventEmitter {
     // Wire confirmation feed for multi-timeframe data
     if (this.confirmationFeed && this.confirmationTimeframe) {
       const confTf = this.confirmationTimeframe;
-      this.confirmationFeed.on('candle', (candle: Candle) => {
+      this._onConfirmationCandle = (candle: Candle) => {
         const key = `${candle.pair}:${confTf}`;
         let buf = this.confirmationBuffer.get(key);
         if (!buf) {
@@ -222,7 +227,8 @@ export class PerpTradingEngine extends EventEmitter {
         while (buf.length > 100) {
           buf.shift();
         }
-      });
+      };
+      this.confirmationFeed.on('candle', this._onConfirmationCandle);
       this.confirmationFeed.start([this.tradingPair], 60000);
     }
 
@@ -255,11 +261,21 @@ export class PerpTradingEngine extends EventEmitter {
       this.intxClient.off('fundingRate', this._onFundingRate);
       this._onFundingRate = null;
     }
+    if (this._onReconnected) {
+      this.intxClient.off('reconnected', this._onReconnected);
+      this._onReconnected = null;
+    }
+    if (this._onConfirmationCandle && this.confirmationFeed) {
+      this.confirmationFeed.off('candle', this._onConfirmationCandle);
+      this._onConfirmationCandle = null;
+    }
     if (this._paperFundingTimer) {
       clearInterval(this._paperFundingTimer);
       this._paperFundingTimer = null;
     }
     this.confirmationFeed?.stop();
+    this._entryPending = false;
+    this._closePending = false;
     this._started = false;
     log.info({ mode: this.mode }, 'PerpTradingEngine stopped');
   }
@@ -566,35 +582,39 @@ export class PerpTradingEngine extends EventEmitter {
           effectiveConfidence = Math.max(0, Math.min(1, signal.confidence + adjustment));
         }
 
-        if ((signal.direction === 'long' || signal.direction === 'short') && this.currentSession === null) {
+        if ((signal.direction === 'long' || signal.direction === 'short') && this.currentSession === null && !this._entryPending) {
           const direction: PerpDirection = signal.direction;
           const leverage = (regime !== undefined && this.config.leverageByRegime)
             ? computeLeverage(regime as MarketRegime, effectiveConfidence, this.config as any)
             : (this.config.defaultLeverage ?? 5);
           // Scale position size by confidence: size = base * (floor + (1-floor) * confidence)
-          const base = this.config.basePositionSize ?? 0.01;
-          const floor = this.config.confidenceFloor ?? 0.3;
-          const sizeScale = floor + (1 - floor) * effectiveConfidence;
+          const base = d(String(this.config.basePositionSize ?? 0.01));
+          const floor = d(String(this.config.confidenceFloor ?? 0.3));
+          const sizeScale = floor.plus(d(1).minus(floor).mul(d(String(effectiveConfidence))));
           // Apply drawdown recovery scaling (reduces size during drawdowns)
-          const recoveryScale = this.riskManager?.getDrawdownRecoveryScale() ?? 1.0;
-          const scaledSize = (base * sizeScale * recoveryScale).toFixed(8);
-          this.openPosition(instrument, direction, scaledSize, leverage, candle.close).catch(
-            (err) => {
+          const recoveryScale = d(String(this.riskManager?.getDrawdownRecoveryScale() ?? 1.0));
+          const scaledSize = base.mul(sizeScale).mul(recoveryScale).toFixed(8);
+          this._entryPending = true;
+          this.openPosition(instrument, direction, scaledSize, leverage, candle.close)
+            .then(() => { this._entryPending = false; })
+            .catch((err) => {
+              this._entryPending = false;
               log.error(
                 { err: err instanceof Error ? err.message : String(err) },
                 'strategy openPosition failed',
               );
-            },
-          );
-        } else if (signal.direction === 'close' && this.currentSession !== null) {
-          this.closePosition(candle.close, 'strategy-signal').catch(
-            (err) => {
+            });
+        } else if (signal.direction === 'close' && this.currentSession !== null && !this._closePending) {
+          this._closePending = true;
+          this.closePosition(candle.close, 'strategy-signal')
+            .then(() => { this._closePending = false; })
+            .catch((err) => {
+              this._closePending = false;
               log.error(
                 { err: err instanceof Error ? err.message : String(err) },
                 'strategy closePosition failed',
               );
-            },
-          );
+            });
         }
       }
     }
@@ -965,10 +985,14 @@ export class PerpTradingEngine extends EventEmitter {
           });
           break;
         case 'close':
-          if (this.currentSession) {
-            this.closePosition(evt.markPrice).catch((err) => {
-              log.error({ err: err instanceof Error ? err.message : String(err) }, 'closePosition failed');
-            });
+          if (this.currentSession && !this._closePending) {
+            this._closePending = true;
+            this.closePosition(evt.markPrice)
+              .then(() => { this._closePending = false; })
+              .catch((err) => {
+                this._closePending = false;
+                log.error({ err: err instanceof Error ? err.message : String(err) }, 'closePosition failed');
+              });
           }
           break;
         case 'hold':
