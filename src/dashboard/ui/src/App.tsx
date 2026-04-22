@@ -575,6 +575,16 @@ function App(): React.ReactElement {
           break;
         }
 
+        case 'orphanPosition': {
+          const o = payload as { instrument: string; direction: string; size: string; recovered: boolean; reason: string; sessionId: string };
+          const prefix = o.recovered
+            ? 'ORPHAN RECOVERED'
+            : 'CRITICAL ORPHAN';
+          const msg = `${prefix}: ${o.direction} ${o.size} ${o.instrument} (${o.reason})${o.recovered ? '' : ' — manual intervention required'}`;
+          setDriftWarnings((prev) => [{ message: msg, timestamp: Date.now() }, ...prev].slice(0, 10));
+          break;
+        }
+
         default:
           break;
       }

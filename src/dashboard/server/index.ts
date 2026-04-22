@@ -265,6 +265,7 @@ export async function createDashboardServer(
     positionOpened: 'perpPositionUpdate',
     positionClosed: 'perpPositionUpdate',
     exposureUpdate: 'perpExposureUpdate',
+    orphanPosition: 'orphanPosition',
   };
   for (const engine of (deps.perpEngines ?? [])) {
     for (const [engineEvent, wsType] of Object.entries(PERP_EVENT_MAP)) {

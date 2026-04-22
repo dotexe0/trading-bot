@@ -29,7 +29,8 @@ export type WsMessageType =
   | 'perpPnlUpdate'
   | 'perpMarkPriceUpdate'
   | 'feedHealth'
-  | 'systemHealth';
+  | 'systemHealth'
+  | 'orphanPosition';
 
 export interface WsMessage {
   type: WsMessageType;
