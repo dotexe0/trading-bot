@@ -55,6 +55,7 @@ import type { RegimeLeaderboards, TournamentResult } from '../tournament/types.j
 import { SpotSignalGate } from '../risk/spot-signal-gate.js';
 import { PreLiveGate } from '../risk/pre-live-gate.js';
 import { FeedHealthMonitor } from '../core/feed-health.js';
+import { ActivityMonitor } from '../core/activity-monitor.js';
 import { CrossAssetSignalBus } from '../risk/cross-asset-signal-bus.js';
 
 // ── Resource tracking ──────────────────────────────────────────────
@@ -1020,6 +1021,23 @@ program
       // Start feed health monitor and register for shutdown
       feedHealthMonitor.start();
       resources.push({ name: 'FeedHealthMonitor', stop: async () => feedHealthMonitor.stop() });
+
+      // Start activity monitor — detects silent engine failures (phantom sessions,
+      // no-signal-for-N-candles, stale heartbeat). Complements FeedHealthMonitor
+      // which only catches data stoppage, not engine-stuck conditions.
+      const activityMonitor = new ActivityMonitor({
+        checkIntervalMs: 60_000,
+      });
+      for (const e of paperEngines) {
+        activityMonitor.register(e);
+      }
+      for (const e of perpEngineEmitters) {
+        if (typeof (e as unknown as { getActivityMetrics?: unknown }).getActivityMetrics === 'function') {
+          activityMonitor.register(e as unknown as import('../core/activity-monitor.js').ActivitySource);
+        }
+      }
+      activityMonitor.start();
+      resources.push({ name: 'ActivityMonitor', stop: async () => activityMonitor.stop() });
 
       // Start fee refresh service (every 6h) — spot always, FCM only when enabled
       const { FeeRefreshService } = await import('../core/fee-refresh-service.js');
