@@ -127,14 +127,39 @@ export class LivePerpOrderExecutor implements IPerpOrderExecutor {
     // Persist BEFORE API call (idempotency)
     this.stateStore.persistOrder(order);
 
-    const result = await this.intxClient.placeOrder({
-      productId: instrument,
-      instrument,
-      side: order.side,
-      size,
-      orderType: 'MARKET',
-      clientOrderId,
-    });
+    let result;
+    try {
+      result = await this.intxClient.placeOrder({
+        productId: instrument,
+        instrument,
+        side: order.side,
+        size,
+        orderType: 'MARKET',
+        clientOrderId,
+      });
+    } catch (err) {
+      // Network error may have thrown AFTER the exchange accepted and filled.
+      // Query account state to detect a silent fill before propagating the error.
+      const silent = await this._detectSilentFill(instrument, direction);
+      if (silent) {
+        liveLog.warn(
+          {
+            instrument,
+            direction,
+            err: err instanceof Error ? err.message : String(err),
+            fillPrice: silent.fillPrice,
+          },
+          'Silent fill detected: placeOrder threw but exchange shows position — treating as filled',
+        );
+        order.status = 'FILLED';
+        order.avgFillPrice = silent.fillPrice;
+        order.fee = silent.fee;
+        order.updatedAt = Date.now();
+        this.stateStore.persistOrder(order);
+        return silent;
+      }
+      throw err;
+    }
 
     // Update order with exchange data
     order.exchangeOrderId = result.orderId;
@@ -154,6 +179,34 @@ export class LivePerpOrderExecutor implements IPerpOrderExecutor {
       fee: result.fee,
       exchangeOrderId: result.orderId,
     };
+  }
+
+  private async _detectSilentFill(
+    instrument: string,
+    direction: PerpDirection,
+  ): Promise<PerpFillResult | null> {
+    try {
+      const state = await this.intxClient.getAccountState();
+      const expectedSide = direction === 'long' ? 'LONG' : 'SHORT';
+      const positions = (state?.positions ?? []) as Array<Record<string, unknown>>;
+      const match = positions.find(
+        (p) =>
+          p.product_id === instrument &&
+          p.side === expectedSide &&
+          Number(p.number_of_contracts ?? '0') > 0,
+      );
+      if (!match) return null;
+      return {
+        fillPrice: String(match.avg_entry_price ?? '0'),
+        fee: '0',
+      };
+    } catch (detectErr) {
+      liveLog.error(
+        { err: detectErr instanceof Error ? detectErr.message : String(detectErr) },
+        'Silent-fill detection failed — original placeOrder error will propagate',
+      );
+      return null;
+    }
   }
 
   async closePosition(params: PerpCloseParams): Promise<PerpFillResult> {

@@ -157,6 +157,8 @@ export interface PerpEngineEvents {
   fcmBalanceChanged: [{ previous: string; current: string }];
   /** Emitted when rolling performance drifts from tournament baseline. */
   strategyDrift: [{ type: string; rolling: number; baseline: number; threshold: number; strategyName: string }];
+  /** Emitted when an exchange fill succeeded but DB persistence failed — orphan position either recovered via emergency close or requires manual intervention. */
+  orphanPosition: [{ instrument: string; direction: PerpDirection; size: string; recovered: boolean; reason: string; sessionId: string }];
   error: [Error];
 }
 

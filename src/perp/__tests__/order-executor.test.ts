@@ -85,6 +85,11 @@ describe('LivePerpOrderExecutor', () => {
         avgPrice: '50050',
         fee: '0.50',
       }),
+      getAccountState: vi.fn().mockResolvedValue({
+        positions: [],
+        balances: {},
+        summary: {},
+      }),
     };
 
     mockStateStore = {
@@ -228,5 +233,148 @@ describe('LivePerpOrderExecutor', () => {
 
     // Order should still have been persisted before the failure
     expect(mockStateStore.persistOrder).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Silent-fill detection (Finding 8) ──────────────────────────────
+
+  it('openPosition: detects silent fill when placeOrder throws but exchange has matching position', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('ECONNRESET'));
+    mockIntxClient.getAccountState.mockResolvedValue({
+      positions: [
+        {
+          product_id: 'BTC-PERP',
+          side: 'LONG',
+          number_of_contracts: '0.1',
+          avg_entry_price: '50050',
+        },
+      ],
+      balances: {},
+      summary: {},
+    });
+
+    const result = await executor.openPosition({
+      instrument: 'BTC-PERP',
+      direction: 'long',
+      size: '0.1',
+      leverage: 5,
+      entryPrice: '50000',
+    });
+
+    // Silent fill: use exchange entry price, fee unknown → '0'
+    expect(result.fillPrice).toBe('50050');
+    expect(result.fee).toBe('0');
+    expect(mockIntxClient.getAccountState).toHaveBeenCalled();
+  });
+
+  it('openPosition: re-throws original error when placeOrder throws and exchange has no matching position', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
+    mockIntxClient.getAccountState.mockResolvedValue({
+      positions: [],
+      balances: {},
+      summary: {},
+    });
+
+    await expect(
+      executor.openPosition({
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        size: '0.1',
+        leverage: 5,
+        entryPrice: '50000',
+      }),
+    ).rejects.toThrow('Network timeout');
+  });
+
+  it('openPosition: re-throws when exchange has position with wrong side', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
+    mockIntxClient.getAccountState.mockResolvedValue({
+      positions: [
+        {
+          product_id: 'BTC-PERP',
+          side: 'SHORT', // wrong direction — not our fill
+          number_of_contracts: '0.1',
+          avg_entry_price: '50000',
+        },
+      ],
+      balances: {},
+      summary: {},
+    });
+
+    await expect(
+      executor.openPosition({
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        size: '0.1',
+        leverage: 5,
+        entryPrice: '50000',
+      }),
+    ).rejects.toThrow('Network timeout');
+  });
+
+  it('openPosition: re-throws when exchange has position with wrong instrument', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
+    mockIntxClient.getAccountState.mockResolvedValue({
+      positions: [
+        {
+          product_id: 'ETH-PERP', // different instrument
+          side: 'LONG',
+          number_of_contracts: '0.5',
+          avg_entry_price: '3000',
+        },
+      ],
+      balances: {},
+      summary: {},
+    });
+
+    await expect(
+      executor.openPosition({
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        size: '0.1',
+        leverage: 5,
+        entryPrice: '50000',
+      }),
+    ).rejects.toThrow('Network timeout');
+  });
+
+  it('openPosition: re-throws original error when getAccountState also fails', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
+    mockIntxClient.getAccountState.mockRejectedValue(new Error('Exchange offline'));
+
+    await expect(
+      executor.openPosition({
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        size: '0.1',
+        leverage: 5,
+        entryPrice: '50000',
+      }),
+    ).rejects.toThrow('Network timeout'); // original error preserved, not Exchange offline
+  });
+
+  it('openPosition: treats zero-contract position as no match (not silent fill)', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
+    mockIntxClient.getAccountState.mockResolvedValue({
+      positions: [
+        {
+          product_id: 'BTC-PERP',
+          side: 'LONG',
+          number_of_contracts: '0', // closed position record
+          avg_entry_price: '50000',
+        },
+      ],
+      balances: {},
+      summary: {},
+    });
+
+    await expect(
+      executor.openPosition({
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        size: '0.1',
+        leverage: 5,
+        entryPrice: '50000',
+      }),
+    ).rejects.toThrow('Network timeout');
   });
 });
