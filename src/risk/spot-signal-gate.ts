@@ -72,7 +72,7 @@ export class SpotSignalGate {
     }
 
     const expectedMove = atr.mul(d(String(this._multiple)));
-    const roundTripFee = d(String(this._takerRate)).mul(d('2')).mul(notional);
+    const roundTripFee = d(String(this._takerRate)).mul(d('2')).mul(price);
 
     if (expectedMove.lte(roundTripFee)) {
       log.info(

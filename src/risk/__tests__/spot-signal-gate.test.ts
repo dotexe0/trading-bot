@@ -20,26 +20,26 @@ describe('SpotSignalGate', () => {
 
   describe('rejection (lte semantics)', () => {
     it('rejects when expectedMove equals roundTripFee exactly', () => {
-      // takerRate=0.0075, notional=1000 -> roundTripFee = 2*0.0075*1000 = 15
-      // feeDragMultiple=2.0, so atr that makes expectedMove = 15 -> atr = 15/2 = 7.5
+      // takerRate=0.0075, price=50000 -> roundTripFee = 2*0.0075*50000 = 750
+      // feeDragMultiple=2.0, so atr that makes expectedMove = 750 -> atr = 750/2 = 375
       const gate = makeGate(0.0075, 2.0);
-      const result = gate.check(d('7.5'), d('50000'), d('1000'));
+      const result = gate.check(d('375'), d('50000'), d('1000'));
       expect(result.approved).toBe(false);
       expect(result.reason).toBe('SPOT_FEE_DRAG');
     });
 
     it('rejects when expectedMove is less than roundTripFee', () => {
-      // roundTripFee = 15, atr=5 -> expectedMove = 5*2 = 10 < 15
+      // roundTripFee = 750, atr=200 -> expectedMove = 200*2 = 400 < 750
       const gate = makeGate(0.0075, 2.0);
-      const result = gate.check(d('5'), d('50000'), d('1000'));
+      const result = gate.check(d('200'), d('50000'), d('1000'));
       expect(result.approved).toBe(false);
       expect(result.reason).toBe('SPOT_FEE_DRAG');
     });
 
     it('approves when expectedMove exceeds roundTripFee', () => {
-      // roundTripFee = 15, atr=10 -> expectedMove = 10*2 = 20 > 15
+      // roundTripFee = 750, atr=500 -> expectedMove = 500*2 = 1000 > 750
       const gate = makeGate(0.0075, 2.0);
-      const result = gate.check(d('10'), d('50000'), d('1000'));
+      const result = gate.check(d('500'), d('50000'), d('1000'));
       expect(result.approved).toBe(true);
       expect(result.reason).toBeUndefined();
     });
@@ -61,14 +61,14 @@ describe('SpotSignalGate', () => {
 
   describe('feeDragMultiple effect', () => {
     it('uses correct fee-drag multiple in calculation (multiple=3.0)', () => {
-      // takerRate=0.0075, notional=1000 -> roundTripFee = 15
-      // With multiple=3.0: atr=4 -> expectedMove = 4*3 = 12 < 15 => rejected
+      // takerRate=0.0075, price=50000 -> roundTripFee = 750
+      // With multiple=3.0: atr=200 -> expectedMove = 200*3 = 600 < 750 => rejected
       const gate = makeGate(0.0075, 3.0);
-      const result = gate.check(d('4'), d('50000'), d('1000'));
+      const result = gate.check(d('200'), d('50000'), d('1000'));
       expect(result.approved).toBe(false);
 
-      // With multiple=3.0: atr=6 -> expectedMove = 6*3 = 18 > 15 => approved
-      const result2 = gate.check(d('6'), d('50000'), d('1000'));
+      // With multiple=3.0: atr=300 -> expectedMove = 300*3 = 900 > 750 => approved
+      const result2 = gate.check(d('300'), d('50000'), d('1000'));
       expect(result2.approved).toBe(true);
     });
   });
@@ -76,19 +76,19 @@ describe('SpotSignalGate', () => {
   describe('rejection details', () => {
     it('returns SPOT_FEE_DRAG as reason on rejection', () => {
       const gate = makeGate(0.0075, 2.0);
-      const result = gate.check(d('5'), d('50000'), d('1000'));
+      const result = gate.check(d('200'), d('50000'), d('1000'));
       expect(result.approved).toBe(false);
       expect(result.reason).toBe('SPOT_FEE_DRAG');
     });
 
     it('returns structured details with expectedMove, roundTripFee, atr, feeDragMultiple on rejection', () => {
       const gate = makeGate(0.0075, 2.0);
-      const result = gate.check(d('5'), d('50000'), d('1000'));
+      const result = gate.check(d('200'), d('50000'), d('1000'));
       expect(result.approved).toBe(false);
       expect(result.details).toEqual({
-        expectedMove: '10',   // 5 * 2.0 = 10
-        roundTripFee: '15',   // 2 * 0.0075 * 1000 = 15
-        atr: '5',
+        expectedMove: '400',   // 200 * 2.0 = 400
+        roundTripFee: '750',   // 2 * 0.0075 * 50000 = 750
+        atr: '200',
         feeDragMultiple: '2',
       });
     });

@@ -11,7 +11,7 @@
  *        + RSI between 30-60 (not oversold).
  *
  * Perp-specific features:
- * 1. NO regime filter — activates in any market condition.
+ * 1. Regime filter: suppressed in RANGING (EMA crossovers whipsaw), reduced confidence in VOLATILE.
  * 2. Funding rate adjustment: when funding rate strongly opposes direction,
  *    confidence is reduced by up to 50%.
  * 3. Tournament-safe: when fundingRateProvider returns null, no adjustment applied.
@@ -23,6 +23,7 @@ import type { Candle, TradingPair, Timeframe } from '../../core/types.js';
 import type { IndicatorConfig } from '../../indicators/types.js';
 import { IndicatorEngine } from '../../indicators/engine.js';
 import { extractVolumes } from '../../indicators/adapters.js';
+import { MarketRegime } from '../../regime/types.js';
 import type { IStrategy, Signal } from '../../strategies/types.js';
 
 interface PerpMicroMomentumParams {
@@ -94,10 +95,13 @@ export class PerpMicroMomentumStrategy implements IStrategy {
     pair: TradingPair,
     timeframe: Timeframe,
     _additionalCandles?: Map<Timeframe, Candle[]>,
-    _regime?: unknown,
+    regime?: MarketRegime,
   ): Signal[] {
     // 1. Length guard
     if (candles.length < this.minCandles) return [];
+
+    // 1b. Regime filter: suppress momentum/crossover in RANGING (whipsaws)
+    if (regime === MarketRegime.RANGING) return [];
 
     const lastCandle = candles[candles.length - 1];
     const currentClose = parseFloat(lastCandle.close);
@@ -193,11 +197,14 @@ export class PerpMicroMomentumStrategy implements IStrategy {
 
     const fundingRate = this.fundingRateProvider();
 
+    // Regime confidence scale: reduce in VOLATILE to reflect higher uncertainty
+    const regimeScale = regime === MarketRegime.VOLATILE ? 0.7 : 1.0;
+
     // 5a. Golden cross: prevFast <= prevSlow && currFast > currSlow
     if (prevFast <= prevSlow && currFast > currSlow) {
       // RSI filter for long: must be between 40 and 70 (not overbought)
       if (currRsi >= 40 && currRsi <= 70) {
-        const rawConfidence = Math.min(Math.abs(currFast - currSlow) / currSlow * 100, 1);
+        const rawConfidence = Math.min(Math.abs(currFast - currSlow) / currSlow * 100, 1) * regimeScale;
         const { confidence, fundingNote } = this._applyFundingAdjustment(rawConfidence, 'long', fundingRate);
         const baseReasoning = `GoldenCross: fastEMA=${currFast.toFixed(4)}>slowEMA=${currSlow.toFixed(4)}, RSI=${currRsi.toFixed(1)}, vol=${currentVolume.toFixed(0)} (${(currentVolume / avgVolume).toFixed(2)}x), close=${currentClose.toFixed(4)}`;
         this._openDirection = 'long';
@@ -219,7 +226,7 @@ export class PerpMicroMomentumStrategy implements IStrategy {
     if (prevFast >= prevSlow && currFast < currSlow) {
       // RSI filter for short: must be between 30 and 60 (not oversold)
       if (currRsi >= 30 && currRsi <= 60) {
-        const rawConfidence = Math.min(Math.abs(currFast - currSlow) / currSlow * 100, 1);
+        const rawConfidence = Math.min(Math.abs(currFast - currSlow) / currSlow * 100, 1) * regimeScale;
         const { confidence, fundingNote } = this._applyFundingAdjustment(rawConfidence, 'short', fundingRate);
         const baseReasoning = `DeathCross: fastEMA=${currFast.toFixed(4)}<slowEMA=${currSlow.toFixed(4)}, RSI=${currRsi.toFixed(1)}, vol=${currentVolume.toFixed(0)} (${(currentVolume / avgVolume).toFixed(2)}x), close=${currentClose.toFixed(4)}`;
         this._openDirection = 'short';

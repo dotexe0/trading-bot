@@ -140,6 +140,11 @@ export class PerpTradingEngine extends EventEmitter {
   // Drift detection
   private driftDetector: DriftDetector | null = null;
 
+  // Activity metrics (for ActivityMonitor silent-failure detection)
+  private _lastCandleProcessedAt: number | null = null;
+  private _lastSignalEmittedAt: number | null = null;
+  private _candlesSinceLastSignal = 0;
+
   private readonly ctrl: PerpStrategyController;
 
   /** Typed emit override — matches PerpEngineEvents interface. */
@@ -189,10 +194,7 @@ export class PerpTradingEngine extends EventEmitter {
       fundingRateProvider: options.fundingRateProvider,
       feedHealthMonitor: options.feedHealthMonitor,
       logPrefix: this.mode === 'paper' ? '[PAPER]' : '[LIVE]',
-      onStrategySwitch: (name) => {
-        this.emit('strategySwitch', { newStrategy: name });
-        this._updateDriftBaseline();
-      },
+      onStrategySwitch: (name) => this._handleStrategySwitch(name),
     });
     this._paperFundingIntervalMs = options.paperFundingIntervalMs ?? 28_800_000;
   }
@@ -291,6 +293,26 @@ export class PerpTradingEngine extends EventEmitter {
       .filter((s) => s.instrument === this.instrument || s.instrument === this.tradingPair);
 
     if (openSessions.length === 0) return;
+
+    // Paper mode: no real exchange position to reconcile — close all open sessions
+    // as "paper-restart" and start fresh. Rehydrating paper sessions across restarts
+    // causes phantom-position deadlock (engine thinks position is open, strategy
+    // was recreated on regime switch and has no _openDirection → no exit emitted,
+    // no new entries allowed).
+    if (this.mode === 'paper') {
+      for (const sess of openSessions) {
+        this.stateStore.updateSession(sess.id, {
+          status: 'closed',
+          closedAt: Date.now(),
+          closeReason: 'paper-restart',
+        });
+        log.info(
+          { sessionId: sess.id, instrument: sess.instrument },
+          'Closed paper session on startup — paper mode does not rehydrate',
+        );
+      }
+      return;
+    }
 
     // Sort descending by openedAt — keep the most recent, close the rest as orphans
     openSessions.sort((a, b) => b.openedAt - a.openedAt);
@@ -544,6 +566,18 @@ export class PerpTradingEngine extends EventEmitter {
   onCandle(candle: Candle): void {
     if (candle.pair !== this.tradingPair) return;
 
+    // Activity metrics: data flowing, engine processing
+    this._lastCandleProcessedAt = Date.now();
+    this._candlesSinceLastSignal++;
+
+    // Phantom-session reconciliation: if in-memory currentSession references a
+    // session that is no longer open in the DB (e.g. closed externally by a
+    // stale-session-startup path, or replaced by a different session), clear
+    // in-memory state before evaluating signals. Prevents the deadlock where
+    // engine thinks a position is open (blocking new entries) while DB shows
+    // no matching open session.
+    this._reconcilePhantomSession();
+
     const result = this.ctrl.processCandle(candle, this.currentSession !== null);
     if (result === null) return;
 
@@ -572,6 +606,9 @@ export class PerpTradingEngine extends EventEmitter {
           { pair: candle.pair, strategyName: this.ctrl.getStrategy()!.name, regime, bufferLen: this.ctrl.getCandleBuffer().length },
           'No signals emitted this candle',
         );
+      } else {
+        this._lastSignalEmittedAt = Date.now();
+        this._candlesSinceLastSignal = 0;
       }
       for (const signal of signals) {
         // Cross-asset signal confirmation: publish and adjust confidence
@@ -701,7 +738,42 @@ export class PerpTradingEngine extends EventEmitter {
       openedAt: Date.now(),
     };
 
-    this.stateStore.createSession({ ...session });
+    try {
+      this.stateStore.createSession({ ...session });
+    } catch (dbErr) {
+      // Exchange fill succeeded but DB write failed — orphan position on exchange.
+      // Live mode: emergency-close the orphan so we don't leave it hanging.
+      // Paper mode: no exchange state, nothing to reverse.
+      if (this.mode === 'live') {
+        let recovered = false;
+        try {
+          await this.executor.closePosition({ session, markPrice, reason: 'EMERGENCY_CLOSE' });
+          recovered = true;
+          log.warn(
+            { instrument, sessionId: session.id, err: dbErr instanceof Error ? dbErr.message : String(dbErr) },
+            'Orphan exchange position emergency-closed after createSession failure',
+          );
+        } catch (closeErr) {
+          log.error(
+            {
+              err: closeErr instanceof Error ? closeErr.message : String(closeErr),
+              instrument,
+              sessionId: session.id,
+            },
+            'CRITICAL: emergency close failed after createSession failure — manual intervention required',
+          );
+        }
+        this.emit('orphanPosition', {
+          instrument,
+          direction,
+          size,
+          recovered,
+          reason: 'createSession_failed',
+          sessionId: session.id,
+        });
+      }
+      throw dbErr;
+    }
     this.currentSession = session;
     this._paperEntryPrice = fill.fillPrice;
 
@@ -1191,6 +1263,94 @@ export class PerpTradingEngine extends EventEmitter {
 
   isPositionOpen(): boolean {
     return this.currentSession !== null && this.currentSession.status === 'open';
+  }
+
+  // ── Phantom-session reconciliation ──────────────────────────────────
+
+  /**
+   * Detect and clear phantom sessions — cases where the engine's in-memory
+   * currentSession references a session that is no longer open in the DB
+   * (closed by another path, e.g. stale-session-startup from a re-run of the
+   * startup pipeline). Leaving a phantom session in place causes a deadlock
+   * where new entries are blocked (engine believes position is open) but no
+   * close is ever emitted (strategy has no corresponding state).
+   */
+  private _reconcilePhantomSession(): void {
+    if (!this.currentSession) return;
+    const dbSession = this.stateStore.getOpenSession(this.currentSession.instrument);
+    if (!dbSession || dbSession.id !== this.currentSession.id) {
+      log.warn(
+        {
+          inMemorySessionId: this.currentSession.id,
+          dbSessionId: dbSession?.id ?? null,
+          instrument: this.currentSession.instrument,
+        },
+        'Phantom session detected — clearing in-memory state to unblock entries',
+      );
+      this.currentSession = null;
+      this._paperEntryPrice = null;
+    }
+  }
+
+  // ── Activity metrics (ActivityMonitor interface) ────────────────────
+
+  /**
+   * Snapshot of engine activity for silent-failure detection.
+   * Consumed by ActivityMonitor to detect stuck-with-position, no-activity,
+   * and stale-heartbeat conditions.
+   */
+  getActivityMetrics(): {
+    name: string;
+    lastCandleProcessedAt: number | null;
+    lastSignalEmittedAt: number | null;
+    candlesSinceLastSignal: number;
+    hasOpenPosition: boolean;
+    timeframeMs: number;
+  } {
+    return {
+      name: `perp-${this.tradingPair}`,
+      lastCandleProcessedAt: this._lastCandleProcessedAt,
+      lastSignalEmittedAt: this._lastSignalEmittedAt,
+      candlesSinceLastSignal: this._candlesSinceLastSignal,
+      hasOpenPosition: this.currentSession !== null,
+      timeframeMs: TIMEFRAME_MS[this.timeframe],
+    };
+  }
+
+  // ── Strategy-switch handling ────────────────────────────────────────
+
+  /**
+   * Invoked by PerpStrategyController whenever the active strategy changes.
+   * Emits the external event, refreshes drift baseline, and — critically —
+   * restores position state on the new strategy if a session is open.
+   *
+   * Without the restorePosition call, a regime-triggered switch during an open
+   * position left the new strategy with _openDirection=null, so its exit logic
+   * never fired and the engine deadlocked (engine thinks position open → blocks
+   * new entries; strategy thinks no position → emits no close).
+   */
+  private _handleStrategySwitch(newStrategyName: string): void {
+    this.emit('strategySwitch', { newStrategy: newStrategyName });
+    this._updateDriftBaseline();
+
+    if (this.currentSession) {
+      const newStrategy = this.ctrl.getStrategy();
+      if (
+        newStrategy
+        && typeof (newStrategy as unknown as Record<string, unknown>)['restorePosition'] === 'function'
+      ) {
+        (newStrategy as unknown as { restorePosition: (d: 'long' | 'short', e: string) => void })
+          .restorePosition(this.currentSession.direction, this.currentSession.entryPrice);
+        log.info(
+          {
+            newStrategy: newStrategyName,
+            direction: this.currentSession.direction,
+            entryPrice: this.currentSession.entryPrice,
+          },
+          'Restored position state on new strategy after switch',
+        );
+      }
+    }
   }
 
   // ── Drift Detection ─────────────────────────────────────────────────

@@ -7,7 +7,7 @@
  * SHORT: current LOW falls below prior N-candle lowest AND volume >= volumeMultiplier x rolling average.
  *
  * Perp-specific differences from MomentumBreakoutStrategy:
- * 1. NO regime filter — perp strategies activate in any market condition.
+ * 1. Regime filter: suppressed in RANGING (momentum whipsaws), reduced confidence in VOLATILE.
  * 2. Funding rate adjustment: when funding rate strongly opposes direction,
  *    confidence is reduced by up to 50%.
  * 3. tournament-safe: when fundingRateProvider returns null, no adjustment applied.
@@ -20,6 +20,7 @@ import type { Candle, TradingPair, Timeframe } from '../../core/types.js';
 import type { IndicatorConfig } from '../../indicators/types.js';
 import { IndicatorEngine } from '../../indicators/engine.js';
 import { extractVolumes } from '../../indicators/adapters.js';
+import { MarketRegime } from '../../regime/types.js';
 import type { IStrategy, Signal } from '../../strategies/types.js';
 
 interface PerpMomentumParams {
@@ -76,10 +77,13 @@ export class PerpMomentumStrategy implements IStrategy {
     pair: TradingPair,
     timeframe: Timeframe,
     _additionalCandles?: Map<Timeframe, Candle[]>,
-    _regime?: unknown,
+    regime?: MarketRegime,
   ): Signal[] {
     // 1. Length guard
     if (candles.length < this.minCandles) return [];
+
+    // 1b. Regime filter: suppress momentum in RANGING (whipsaws)
+    if (regime === MarketRegime.RANGING) return [];
 
     // 2. Build priorCandles — exclude current candle to avoid lookahead on levels
     const priorCandles = candles.slice(0, -1);
@@ -152,9 +156,12 @@ export class PerpMomentumStrategy implements IStrategy {
 
     const signals: Signal[] = [];
 
+    // Regime confidence scale: reduce in VOLATILE to reflect higher uncertainty
+    const regimeScale = regime === MarketRegime.VOLATILE ? 0.7 : 1.0;
+
     // 8. LONG entry: current high breaks above prior resistance
     if (currentHigh > resistanceLevel) {
-      const rawConfidence = Math.min((currentHigh - resistanceLevel) / resistanceLevel * 20, 1);
+      const rawConfidence = Math.min((currentHigh - resistanceLevel) / resistanceLevel * 20, 1) * regimeScale;
       const { confidence, fundingNote } = this._applyFundingAdjustment(rawConfidence, 'long', fundingRate);
       const baseReasoning = `Breakout above ${this.breakoutWindow}-candle high ${resistanceLevel.toFixed(2)}. High=${currentHigh.toFixed(2)}, Volume=${currentVolume.toFixed(0)} (${(currentVolume / avgVolume).toFixed(2)}x avg)`;
       signals.push({
@@ -169,7 +176,7 @@ export class PerpMomentumStrategy implements IStrategy {
 
     // 9. SHORT entry: current low breaks below prior support
     if (currentLow < supportLevel && this._openDirection === null) {
-      const rawConfidence = Math.min((supportLevel - currentLow) / supportLevel * 20, 1);
+      const rawConfidence = Math.min((supportLevel - currentLow) / supportLevel * 20, 1) * regimeScale;
       const { confidence, fundingNote } = this._applyFundingAdjustment(rawConfidence, 'short', fundingRate);
       const baseReasoning = `Breakdown below ${this.breakoutWindow}-candle low ${supportLevel.toFixed(2)}. Low=${currentLow.toFixed(2)}, Volume=${currentVolume.toFixed(0)} (${(currentVolume / avgVolume).toFixed(2)}x avg)`;
       signals.push({

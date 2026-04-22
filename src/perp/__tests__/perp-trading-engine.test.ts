@@ -35,19 +35,37 @@ function makeMockIntxClient(): IntxClient & EventEmitter {
 }
 
 function makeMockStateStore(): PerpStateStore {
-  return {
-    createSession: vi.fn(),
-    updateSession: vi.fn(),
-    getSession: vi.fn(),
-    getOpenSession: vi.fn(),
-    getAllOpenSessions: vi.fn().mockReturnValue([]),
+  // Stateful mock: tracks sessions so getOpenSession reflects what createSession
+  // put in and what updateSession mutated (needed for phantom-session reconciliation).
+  const sessionsById = new Map<string, PerpSession>();
+  const store = {
+    createSession: vi.fn((session: PerpSession) => {
+      sessionsById.set(session.id, { ...session });
+    }),
+    updateSession: vi.fn((id: string, updates: Partial<PerpSession>) => {
+      const existing = sessionsById.get(id);
+      if (existing) {
+        sessionsById.set(id, { ...existing, ...updates });
+      }
+    }),
+    getSession: vi.fn((id: string) => sessionsById.get(id) ?? null),
+    getOpenSession: vi.fn((instrument: string) => {
+      for (const s of sessionsById.values()) {
+        if (s.instrument === instrument && s.status === 'open') return s;
+      }
+      return null;
+    }),
+    getAllOpenSessions: vi.fn(() =>
+      Array.from(sessionsById.values()).filter((s) => s.status === 'open'),
+    ),
     recordTrade: vi.fn(),
     listClosedTrades: vi.fn().mockReturnValue([]),
     persistOrder: vi.fn(),
     getPendingOrders: vi.fn().mockReturnValue([]),
     getOpenOrdersBySession: vi.fn().mockReturnValue([]),
     close: vi.fn(),
-  } as any;
+  };
+  return store as any;
 }
 
 function makeMockConfig(overrides?: Partial<IntxConfig>): IntxConfig {
@@ -353,7 +371,7 @@ describe('PerpTradingEngine re-hydration', () => {
     engine.stop();
   });
 
-  it('BTC engine re-hydrates BTC session correctly', () => {
+  it('paper mode: closes BTC session on startup as paper-restart (does not rehydrate)', () => {
     (stateStore.getAllOpenSessions as any).mockReturnValue([
       {
         id: 'btc-sess',
@@ -380,12 +398,15 @@ describe('PerpTradingEngine re-hydration', () => {
     });
 
     engine.start();
-    expect(engine.getCurrentSession()).not.toBeNull();
-    expect(engine.getCurrentSession()!.instrument).toBe('BTC-PERP');
+    expect(engine.getCurrentSession()).toBeNull();
+    expect(stateStore.updateSession).toHaveBeenCalledWith('btc-sess', expect.objectContaining({
+      status: 'closed',
+      closeReason: 'paper-restart',
+    }));
     engine.stop();
   });
 
-  it('closes orphaned sessions on startup', () => {
+  it('paper mode: closes all matching open sessions on startup (no orphan preservation)', () => {
     const now = Date.now();
     (stateStore.getAllOpenSessions as any).mockReturnValue([
       {
@@ -426,12 +447,351 @@ describe('PerpTradingEngine re-hydration', () => {
 
     engine.start();
 
+    // In paper mode: no rehydration, both sessions closed as paper-restart
+    expect(engine.getCurrentSession()).toBeNull();
+    expect(stateStore.updateSession).toHaveBeenCalledWith('newer', expect.objectContaining({
+      status: 'closed',
+      closeReason: 'paper-restart',
+    }));
+    expect(stateStore.updateSession).toHaveBeenCalledWith('older', expect.objectContaining({
+      status: 'closed',
+      closeReason: 'paper-restart',
+    }));
+
+    engine.stop();
+  });
+
+  it('live mode: re-hydrates BTC session correctly', () => {
+    const liveConfig = makeMockConfig({ perpMode: 'live' });
+    (stateStore.getAllOpenSessions as any).mockReturnValue([
+      {
+        id: 'btc-sess',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '50000',
+        size: '0.1',
+        leverage: 5,
+        liquidationPrice: '40000',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: Date.now() - 3600_000,
+      },
+    ]);
+
+    const engine = new PerpTradingEngine({
+      mode: 'live',
+      executor: new LivePerpOrderExecutor({ intxClient: intxClient as any, stateStore: stateStore as any }),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config: liveConfig,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+    });
+
+    engine.start();
+    expect(engine.getCurrentSession()).not.toBeNull();
+    expect(engine.getCurrentSession()!.instrument).toBe('BTC-PERP');
+    engine.stop();
+  });
+
+  it('live mode: closes orphaned sessions on startup (keeps newest)', () => {
+    const liveConfig = makeMockConfig({ perpMode: 'live' });
+    const now = Date.now();
+    (stateStore.getAllOpenSessions as any).mockReturnValue([
+      {
+        id: 'newer',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '50000',
+        size: '0.1',
+        leverage: 5,
+        liquidationPrice: '40000',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: now - 1000,
+      },
+      {
+        id: 'older',
+        instrument: 'BTC-PERP',
+        direction: 'long',
+        entryPrice: '49000',
+        size: '0.1',
+        leverage: 5,
+        liquidationPrice: '39000',
+        maintenanceMarginRate: '0.0333',
+        status: 'open',
+        openedAt: now - 86400_000,
+      },
+    ]);
+
+    const engine = new PerpTradingEngine({
+      mode: 'live',
+      executor: new LivePerpOrderExecutor({ intxClient: intxClient as any, stateStore: stateStore as any }),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config: liveConfig,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+    });
+
+    engine.start();
+
     // Newer session adopted, older closed as orphan
     expect(engine.getCurrentSession()!.id).toBe('newer');
     expect(stateStore.updateSession).toHaveBeenCalledWith('older', expect.objectContaining({
       status: 'closed',
       closeReason: 'engine-restart',
     }));
+
+    engine.stop();
+  });
+});
+
+// ── Phantom-session reconciliation ───────────────────────────────────
+
+describe('PerpTradingEngine phantom-session reconciliation', () => {
+  let intxClient: ReturnType<typeof makeMockIntxClient>;
+  let stateStore: ReturnType<typeof makeMockStateStore>;
+  let config: IntxConfig;
+
+  beforeEach(() => {
+    intxClient = makeMockIntxClient();
+    stateStore = makeMockStateStore();
+    config = makeMockConfig();
+  });
+
+  it('onCandle clears phantom session when DB session no longer open', async () => {
+    const strategy: IStrategy = {
+      name: 'test',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+    };
+
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+      initialStrategy: strategy,
+    });
+
+    engine.start();
+    await engine.openPosition('BTC-PERP', 'long', '0.1', 5, '50000');
+    expect(engine.getCurrentSession()).not.toBeNull();
+
+    // Simulate phantom scenario: DB session closed externally (e.g. by a
+    // separate rehydrate path marking it stale), but in-memory currentSession
+    // still references it. getOpenSession returns null → phantom detected.
+    (stateStore.getOpenSession as any).mockReturnValue(null);
+
+    engine.onCandle(makeCandle());
+
+    // Reconciliation should have cleared in-memory state
+    expect(engine.getCurrentSession()).toBeNull();
+
+    engine.stop();
+  });
+
+  it('onCandle clears phantom session when DB has different open session id', async () => {
+    const strategy: IStrategy = {
+      name: 'test',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+    };
+
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+      initialStrategy: strategy,
+    });
+
+    engine.start();
+    await engine.openPosition('BTC-PERP', 'long', '0.1', 5, '50000');
+    const openedId = engine.getCurrentSession()!.id;
+
+    // DB now has a different open session for the same instrument —
+    // in-memory reference is stale/phantom.
+    (stateStore.getOpenSession as any).mockReturnValue({
+      id: `${openedId}-different`,
+      instrument: 'BTC-PERP',
+      direction: 'long',
+      entryPrice: '51000',
+      size: '0.1',
+      leverage: 5,
+      liquidationPrice: '40000',
+      maintenanceMarginRate: '0.0333',
+      status: 'open',
+      openedAt: Date.now(),
+    });
+
+    engine.onCandle(makeCandle());
+
+    expect(engine.getCurrentSession()).toBeNull();
+
+    engine.stop();
+  });
+
+  it('onCandle keeps session when DB confirms it is still open', async () => {
+    const strategy: IStrategy = {
+      name: 'test',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+    };
+
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+      initialStrategy: strategy,
+    });
+
+    engine.start();
+    const session = await engine.openPosition('BTC-PERP', 'long', '0.1', 5, '50000');
+    expect(engine.getCurrentSession()).not.toBeNull();
+
+    // DB confirms same session still open
+    (stateStore.getOpenSession as any).mockReturnValue({
+      id: session.id,
+      instrument: session.instrument,
+      direction: session.direction,
+      entryPrice: session.entryPrice,
+      size: session.size,
+      leverage: session.leverage,
+      liquidationPrice: session.liquidationPrice,
+      maintenanceMarginRate: session.maintenanceMarginRate,
+      status: 'open',
+      openedAt: session.openedAt,
+    });
+
+    engine.onCandle(makeCandle());
+
+    expect(engine.getCurrentSession()).not.toBeNull();
+    expect(engine.getCurrentSession()!.id).toBe(session.id);
+
+    engine.stop();
+  });
+});
+
+// ── Strategy-switch position restoration ─────────────────────────────
+
+describe('PerpTradingEngine strategy-switch position restoration', () => {
+  let intxClient: ReturnType<typeof makeMockIntxClient>;
+  let stateStore: ReturnType<typeof makeMockStateStore>;
+  let config: IntxConfig;
+
+  beforeEach(() => {
+    intxClient = makeMockIntxClient();
+    stateStore = makeMockStateStore();
+    config = makeMockConfig();
+  });
+
+  it('restores position state on new strategy when strategy switch fires with open position', async () => {
+    const restoreSpy = vi.fn();
+    const switchedStrategy = {
+      name: 'switched',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+      restorePosition: restoreSpy,
+    };
+
+    const registry = {
+      create: vi.fn().mockReturnValue(switchedStrategy),
+    };
+
+    const leaderboards = {
+      trending: [{ strategyConfig: { name: 'trending' }, sharpe: 1 }],
+      ranging: [],
+      volatile: [],
+      fallbackEntry: { strategyConfig: { name: 'fallback' }, sharpe: 0 },
+    } as any;
+
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+      regimeLeaderboards: leaderboards,
+      strategyRegistry: registry as any,
+    });
+
+    engine.start();
+
+    // Open a short position so currentSession is set
+    await engine.openPosition('BTC-PERP', 'short', '0.1', 5, '50000');
+
+    // Simulate a deferred strategy switch firing: set pendingSwitch, then trigger
+    // via firePendingSwitchIfIdle(false) which calls executeStrategySwitch →
+    // onStrategySwitch callback. The engine's callback must call restorePosition
+    // on the new strategy because currentSession is non-null.
+    const ctrl = (engine as any).ctrl;
+    (ctrl as any).pendingSwitch = { strategyConfig: { name: 'new' }, regime: 'trending' };
+    ctrl.firePendingSwitchIfIdle(false);
+
+    expect(restoreSpy).toHaveBeenCalledWith('short', '50000');
+
+    engine.stop();
+  });
+
+  it('does not call restorePosition when strategy switch fires with no open position', async () => {
+    const restoreSpy = vi.fn();
+    const switchedStrategy = {
+      name: 'switched',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: vi.fn().mockReturnValue([]),
+      restorePosition: restoreSpy,
+    };
+
+    const registry = {
+      create: vi.fn().mockReturnValue(switchedStrategy),
+    };
+
+    const leaderboards = {
+      trending: [{ strategyConfig: { name: 'trending' }, sharpe: 1 }],
+      ranging: [],
+      volatile: [],
+      fallbackEntry: { strategyConfig: { name: 'fallback' }, sharpe: 0 },
+    } as any;
+
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+      regimeLeaderboards: leaderboards,
+      strategyRegistry: registry as any,
+    });
+
+    engine.start();
+
+    // No position open — strategy switch should not call restorePosition
+    const ctrl = (engine as any).ctrl;
+    (ctrl as any).pendingSwitch = { strategyConfig: { name: 'new' }, regime: 'trending' };
+    ctrl.firePendingSwitchIfIdle(false);
+
+    expect(restoreSpy).not.toHaveBeenCalled();
 
     engine.stop();
   });
@@ -584,6 +944,100 @@ describe('PerpTradingEngine (live mode)', () => {
     const result = await paperEngine.recoverFromRestart();
     expect(result.restored).toBe(false);
     expect(intxClient.getAccountState).not.toHaveBeenCalled();
+  });
+
+  it('openPosition: emergency-closes orphan exchange position when createSession throws', async () => {
+    // Simulate DB failure AFTER successful exchange fill — partial failure
+    (stateStore.createSession as any).mockImplementation(() => {
+      throw new Error('SQLITE_BUSY: database is locked');
+    });
+
+    const orphanEvents: any[] = [];
+    engine.on('orphanPosition', (evt) => orphanEvents.push(evt));
+
+    engine.start();
+
+    await expect(
+      engine.openPosition('BTC-PERP', 'long', '0.1', 5, '50000'),
+    ).rejects.toThrow('SQLITE_BUSY');
+
+    // placeOrder called twice: open, then emergency close
+    expect(intxClient.placeOrder).toHaveBeenCalledTimes(2);
+    expect(intxClient.placeOrder).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ side: 'BUY' }),
+    );
+    expect(intxClient.placeOrder).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ side: 'SELL', closeOnly: true }),
+    );
+
+    // engine must not believe a position is open
+    expect(engine.getCurrentSession()).toBeNull();
+
+    // orphanPosition event emitted for ops visibility
+    expect(orphanEvents).toHaveLength(1);
+    expect(orphanEvents[0]).toMatchObject({
+      instrument: 'BTC-PERP',
+      direction: 'long',
+      recovered: true,
+    });
+  });
+
+  it('openPosition: emits orphanPosition with recovered=false when emergency close also fails', async () => {
+    (stateStore.createSession as any).mockImplementation(() => {
+      throw new Error('SQLITE_BUSY: database is locked');
+    });
+    // First placeOrder (entry) succeeds, second (emergency close) fails
+    vi.mocked(intxClient.placeOrder)
+      .mockResolvedValueOnce({
+        orderId: 'ex-entry', status: 'FILLED', execQty: '0.1', avgPrice: '50000', fee: '0.5',
+      })
+      .mockRejectedValueOnce(new Error('Network timeout'));
+    // getAccountState (silent-fill check during close) returns empty → no silent fill
+    vi.mocked(intxClient.getAccountState).mockResolvedValue({
+      positions: [], balances: {}, summary: {},
+    });
+
+    const orphanEvents: any[] = [];
+    engine.on('orphanPosition', (evt) => orphanEvents.push(evt));
+
+    engine.start();
+
+    await expect(
+      engine.openPosition('BTC-PERP', 'long', '0.1', 5, '50000'),
+    ).rejects.toThrow();
+
+    expect(orphanEvents).toHaveLength(1);
+    expect(orphanEvents[0].recovered).toBe(false);
+    expect(engine.getCurrentSession()).toBeNull();
+  });
+
+  it('openPosition: paper mode createSession failure does not attempt emergency close', async () => {
+    const paperEngine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config: makeMockConfig(), // paper mode
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+    });
+
+    (stateStore.createSession as any).mockImplementation(() => {
+      throw new Error('SQLITE_BUSY');
+    });
+
+    paperEngine.start();
+
+    await expect(
+      paperEngine.openPosition('BTC-PERP', 'long', '0.1', 5, '50000'),
+    ).rejects.toThrow('SQLITE_BUSY');
+
+    // paper mode never touches the exchange
+    expect(intxClient.placeOrder).not.toHaveBeenCalled();
+    expect(paperEngine.getCurrentSession()).toBeNull();
+    paperEngine.stop();
   });
 });
 
@@ -738,5 +1192,175 @@ describe('PerpTradingEngine onCandle strategy signals', () => {
     expect(parseFloat(session.size)).toBeCloseTo(0.0065, 4);
 
     engine.stop();
+  });
+});
+
+// ── Activity metrics for ActivityMonitor ─────────────────────────────────────
+
+describe('PerpTradingEngine getActivityMetrics', () => {
+  let intxClient: ReturnType<typeof makeMockIntxClient>;
+  let stateStore: ReturnType<typeof makeMockStateStore>;
+  let config: IntxConfig;
+
+  beforeEach(() => {
+    intxClient = makeMockIntxClient();
+    stateStore = makeMockStateStore();
+    config = makeMockConfig();
+  });
+
+  it('fresh engine reports null timestamps, 0 candles since signal, no open position', () => {
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+    });
+
+    const m = engine.getActivityMetrics();
+    expect(m.name).toBe('perp-BTC-USD');
+    expect(m.lastCandleProcessedAt).toBeNull();
+    expect(m.lastSignalEmittedAt).toBeNull();
+    expect(m.candlesSinceLastSignal).toBe(0);
+    expect(m.hasOpenPosition).toBe(false);
+    expect(m.timeframeMs).toBe(3_600_000);
+  });
+
+  it('onCandle updates lastCandleProcessedAt and increments candlesSinceLastSignal', () => {
+    const strategy: IStrategy = {
+      name: 'test-noop',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => [],
+    };
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+      initialStrategy: strategy,
+    });
+
+    engine.start();
+    const beforeTs = Date.now();
+    engine.onCandle(makeCandle());
+    engine.onCandle(makeCandle());
+    engine.onCandle(makeCandle());
+
+    const m = engine.getActivityMetrics();
+    expect(m.lastCandleProcessedAt).not.toBeNull();
+    expect(m.lastCandleProcessedAt!).toBeGreaterThanOrEqual(beforeTs);
+    expect(m.candlesSinceLastSignal).toBe(3);
+    engine.stop();
+  });
+
+  it('ignored candle (wrong pair) does not update metrics', () => {
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+    });
+
+    engine.start();
+    engine.onCandle(makeCandle('ETH-USD'));
+
+    const m = engine.getActivityMetrics();
+    expect(m.lastCandleProcessedAt).toBeNull();
+    expect(m.candlesSinceLastSignal).toBe(0);
+    engine.stop();
+  });
+
+  it('resets candlesSinceLastSignal and sets lastSignalEmittedAt when strategy emits a signal', async () => {
+    let calls = 0;
+    const strategy: IStrategy = {
+      name: 'test-signal',
+      minCandles: 1,
+      requiredIndicators: [],
+      evaluate: () => {
+        calls++;
+        if (calls === 3) {
+          return [{
+            direction: 'long' as const,
+            strategyName: 'test',
+            pair: 'BTC-USD' as const,
+            timeframe: '1h' as const,
+            confidence: 1,
+            timestamp: Date.now(),
+            reasoning: 'test',
+          }];
+        }
+        return [];
+      },
+    };
+
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+      initialStrategy: strategy,
+    });
+
+    const opened = vi.fn();
+    engine.on('positionOpened', opened);
+    engine.start();
+    engine.onCandle(makeCandle());
+    engine.onCandle(makeCandle());
+    engine.onCandle(makeCandle());
+
+    await vi.waitFor(() => expect(opened).toHaveBeenCalled());
+
+    const m = engine.getActivityMetrics();
+    expect(m.lastSignalEmittedAt).not.toBeNull();
+    expect(m.candlesSinceLastSignal).toBe(0);
+    engine.stop();
+  });
+
+  it('hasOpenPosition reflects currentSession state', async () => {
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'BTC-USD',
+      timeframe: '1h',
+    });
+
+    engine.start();
+    expect(engine.getActivityMetrics().hasOpenPosition).toBe(false);
+
+    await engine.openPosition('BTC-PERP', 'long', '0.01', 5, '50000');
+    expect(engine.getActivityMetrics().hasOpenPosition).toBe(true);
+
+    await engine.closePosition('50000', 'test');
+    expect(engine.getActivityMetrics().hasOpenPosition).toBe(false);
+    engine.stop();
+  });
+
+  it('ETH engine reports name perp-ETH-USD', () => {
+    const engine = new PerpTradingEngine({
+      mode: 'paper',
+      executor: new PaperPerpOrderExecutor(),
+      intxClient: intxClient as any,
+      stateStore: stateStore as any,
+      config,
+      tradingPair: 'ETH-USD',
+      timeframe: '1h',
+    });
+
+    expect(engine.getActivityMetrics().name).toBe('perp-ETH-USD');
   });
 });

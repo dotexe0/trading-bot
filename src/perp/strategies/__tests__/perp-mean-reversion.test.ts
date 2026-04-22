@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import type { Candle, TradingPair, Timeframe } from '../../../core/types.js';
 import type { Signal } from '../../../strategies/types.js';
 import { MarketRegime } from '../../../regime/types.js';
@@ -42,14 +42,23 @@ function assertValidSignal(signal: Signal, expectedDirection?: 'long' | 'short' 
 
 // period=5, threshold=1.5, fundingThreshold=0.01, fundingRateProvider=null
 // minCandles = period + 1 = 6
-const strategy = new PerpMeanReversionStrategy({
-  period: 5,
-  threshold: 1.5,
-  fundingThreshold: 0.01,
-  fundingRateProvider: makeFundingProvider(null),
-});
+// Fresh instance per test — strategy carries _openDirection/_candlesHeld state
+// between evaluate() calls, so sharing across tests would cause interference.
+function makeStrategy(): PerpMeanReversionStrategy {
+  return new PerpMeanReversionStrategy({
+    period: 5,
+    threshold: 1.5,
+    fundingThreshold: 0.01,
+    fundingRateProvider: makeFundingProvider(null),
+  });
+}
 
 describe('PerpMeanReversionStrategy', () => {
+  let strategy: PerpMeanReversionStrategy;
+  beforeEach(() => {
+    strategy = makeStrategy();
+  });
+
   // ---- constructor --------------------------------------------------------
 
   describe('constructor', () => {
@@ -128,13 +137,19 @@ describe('PerpMeanReversionStrategy', () => {
       expect(signals).toEqual([]);
     });
 
-    it('generates signals in any regime (TRENDING, RANGING, VOLATILE) — no regime filter', () => {
+    it('suppresses signals in TRENDING regime (mean-reversion fights the trend)', () => {
       const closes = [100, 101, 100, 99, 100, 101, 100, 99, 100, 80];
       const candles = makeCandles(closes);
+      const signals = strategy.evaluate(candles, 'BTC-USD', '1h', undefined, MarketRegime.TRENDING);
+      expect(signals).toEqual([]);
+    });
 
-      // All three regimes must produce signals (no regime filter)
-      for (const regime of [MarketRegime.TRENDING, MarketRegime.RANGING, MarketRegime.VOLATILE]) {
-        const signals = strategy.evaluate(candles, 'BTC-USD', '1h', undefined, regime);
+    it('generates signals in RANGING and VOLATILE regimes', () => {
+      const closes = [100, 101, 100, 99, 100, 101, 100, 99, 100, 80];
+      const candles = makeCandles(closes);
+      for (const regime of [MarketRegime.RANGING, MarketRegime.VOLATILE]) {
+        const freshStrategy = makeStrategy();
+        const signals = freshStrategy.evaluate(candles, 'BTC-USD', '1h', undefined, regime);
         expect(signals.length).toBeGreaterThanOrEqual(1);
       }
     });
@@ -345,13 +360,18 @@ describe('PerpMeanReversionStrategy', () => {
   describe('causality (no-lookahead)', () => {
     it('signal at candle i is unchanged when candle i+1 is appended', () => {
       const baseCloses = [100, 101, 100, 99, 100, 101, 100, 99, 100, 80];
-      const extendedCloses = [...baseCloses, 105]; // append one more candle
+      const extendedCloses = [...baseCloses, 105];
 
       const baseCandles = makeCandles(baseCloses);
       const extendedCandles = makeCandles(extendedCloses);
 
-      const signalsBase = strategy.evaluate(baseCandles, 'BTC-USD', '1h');
-      const signalsSliced = strategy.evaluate(extendedCandles.slice(0, baseCloses.length), 'BTC-USD', '1h');
+      // Fresh instances — strategy is stateful across evaluate() calls
+      const signalsBase = makeStrategy().evaluate(baseCandles, 'BTC-USD', '1h');
+      const signalsSliced = makeStrategy().evaluate(
+        extendedCandles.slice(0, baseCloses.length),
+        'BTC-USD',
+        '1h',
+      );
 
       expect(signalsBase).toEqual(signalsSliced);
     });
@@ -363,18 +383,22 @@ describe('PerpMeanReversionStrategy', () => {
       const candlesN = makeCandles(closesN);
       const candlesN1 = makeCandles(closesN1);
 
-      const signalN = strategy.evaluate(candlesN, 'BTC-USD', '1h');
-      const signalN1 = strategy.evaluate(candlesN1.slice(0, closesN.length), 'BTC-USD', '1h');
+      const signalN = makeStrategy().evaluate(candlesN, 'BTC-USD', '1h');
+      const signalN1 = makeStrategy().evaluate(
+        candlesN1.slice(0, closesN.length),
+        'BTC-USD',
+        '1h',
+      );
 
       expect(signalN).toEqual(signalN1);
       expect(signalN.length).toBeGreaterThanOrEqual(1);
     });
 
-    it('evaluate with same candles twice produces identical results (stateless)', () => {
+    it('evaluate from fresh state with same candles produces identical results', () => {
       const closes = [100, 101, 100, 99, 100, 101, 100, 99, 100, 80];
       const candles = makeCandles(closes);
-      const result1 = strategy.evaluate(candles, 'BTC-USD', '1h');
-      const result2 = strategy.evaluate(candles, 'BTC-USD', '1h');
+      const result1 = makeStrategy().evaluate(candles, 'BTC-USD', '1h');
+      const result2 = makeStrategy().evaluate(candles, 'BTC-USD', '1h');
       expect(result1).toEqual(result2);
     });
   });
@@ -388,11 +412,11 @@ describe('PerpMeanReversionStrategy', () => {
       expect(signals).toEqual([]);
     });
 
-    it('is deterministic (same input = same output)', () => {
+    it('is deterministic across fresh instances (same input = same output)', () => {
       const closes = [100, 101, 100, 99, 100, 101, 100, 99, 100, 80];
       const candles = makeCandles(closes);
-      const result1 = strategy.evaluate(candles, 'BTC-USD', '1h');
-      const result2 = strategy.evaluate(candles, 'BTC-USD', '1h');
+      const result1 = makeStrategy().evaluate(candles, 'BTC-USD', '1h');
+      const result2 = makeStrategy().evaluate(candles, 'BTC-USD', '1h');
       expect(result1).toEqual(result2);
     });
 

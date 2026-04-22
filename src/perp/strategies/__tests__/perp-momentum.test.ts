@@ -183,9 +183,18 @@ describe('PerpMomentumStrategy', () => {
       }
     });
 
-    it('generates signals in any regime (TRENDING, RANGING, VOLATILE)', () => {
-      // All three regimes should produce signals (no regime filter)
-      for (const regime of [MarketRegime.TRENDING, MarketRegime.RANGING, MarketRegime.VOLATILE]) {
+    it('suppresses signals in RANGING regime (momentum whipsaws)', () => {
+      const strat = new PerpMomentumStrategy({
+        breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
+        fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),
+      });
+      const candles = makeBreakoutCandles(8);
+      const signals = strat.evaluate(candles, 'BTC-USD', '1h', undefined, MarketRegime.RANGING);
+      expect(signals).toEqual([]);
+    });
+
+    it('generates signals in TRENDING and VOLATILE regimes', () => {
+      for (const regime of [MarketRegime.TRENDING, MarketRegime.VOLATILE]) {
         const strat = new PerpMomentumStrategy({
           breakoutWindow: 5, volumeWindow: 5, volumeMultiplier: 1.5,
           fundingThreshold: 0.01, fundingRateProvider: makeFundingProvider(null),

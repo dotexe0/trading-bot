@@ -858,3 +858,108 @@ describe('SpotTradingEngine – limit entries', () => {
     await engine.stop();
   });
 });
+
+// ── Activity metrics for ActivityMonitor ─────────────────────────────────────
+
+describe('SpotTradingEngine getActivityMetrics', () => {
+  it('fresh engine reports null timestamps, 0 candles since signal, no position, 1h timeframeMs', () => {
+    const engine = new SpotTradingEngine(createDefaultOptions());
+    const m = engine.getActivityMetrics();
+    expect(m.name).toBe('spot-BTC-USD');
+    expect(m.lastCandleProcessedAt).toBeNull();
+    expect(m.lastSignalEmittedAt).toBeNull();
+    expect(m.candlesSinceLastSignal).toBe(0);
+    expect(m.hasOpenPosition).toBe(false);
+    expect(m.timeframeMs).toBe(3_600_000);
+  });
+
+  it('onCandle updates lastCandleProcessedAt and increments candlesSinceLastSignal', async () => {
+    const strategy = {
+      name: 'noop',
+      minCandles: 1,
+      evaluate: vi.fn().mockReturnValue([]),
+    };
+    const engine = new SpotTradingEngine(createDefaultOptions({
+      strategyRegistry: createMockRegistry(strategy),
+    }));
+    await engine.start();
+
+    const beforeTs = Date.now();
+    engine.onCandle(makeCandle('50000'));
+    engine.onCandle(makeCandle('50100'));
+
+    const m = engine.getActivityMetrics();
+    expect(m.lastCandleProcessedAt).not.toBeNull();
+    expect(m.lastCandleProcessedAt!).toBeGreaterThanOrEqual(beforeTs);
+    expect(m.candlesSinceLastSignal).toBe(2);
+    await engine.stop();
+  });
+
+  it('wrong-pair candle is ignored and does not update metrics', async () => {
+    const engine = new SpotTradingEngine(createDefaultOptions());
+    await engine.start();
+
+    engine.onCandle(makeCandle('50000', 'ETH-USD'));
+
+    const m = engine.getActivityMetrics();
+    expect(m.lastCandleProcessedAt).toBeNull();
+    expect(m.candlesSinceLastSignal).toBe(0);
+    await engine.stop();
+  });
+
+  it('resets candlesSinceLastSignal and sets lastSignalEmittedAt when signal fires', async () => {
+    let calls = 0;
+    const strategy = {
+      name: 'one-signal',
+      minCandles: 1,
+      evaluate: vi.fn().mockImplementation(() => {
+        calls++;
+        if (calls === 2) {
+          return [{
+            strategyName: 'one-signal',
+            pair: 'BTC-USD',
+            timeframe: '1h',
+            timestamp: Date.now(),
+            direction: 'long' as const,
+            confidence: 0.8,
+            reasoning: 'test',
+          }];
+        }
+        return [];
+      }),
+    };
+    const engine = new SpotTradingEngine(createDefaultOptions({
+      strategyRegistry: createMockRegistry(strategy),
+    }));
+    await engine.start();
+
+    engine.onCandle(makeCandle('50000')); // no signal → count=1
+    engine.onCandle(makeCandle('50100')); // signal → reset to 0
+
+    await new Promise(r => setTimeout(r, 10));
+
+    const m = engine.getActivityMetrics();
+    expect(m.lastSignalEmittedAt).not.toBeNull();
+    expect(m.candlesSinceLastSignal).toBe(0);
+    await engine.stop();
+  });
+
+  it('ETH engine reports name spot-ETH-USD', () => {
+    const engine = new SpotTradingEngine(createDefaultOptions({
+      config: {
+        pair: 'ETH-USD',
+        timeframe: '1h',
+        strategyConfig: { strategy: 'test' },
+        initialCapital: '10000',
+        allowShorts: true,
+        slippageBps: 5,
+        feeTierMaker: 0.004,
+        feeTierTaker: 0.006,
+        assumeTaker: true,
+        bufferSize: 500,
+        pollIntervalMs: 60000,
+      },
+    }));
+    expect(engine.getActivityMetrics().name).toBe('spot-ETH-USD');
+  });
+});

@@ -203,6 +203,11 @@ export class SpotTradingEngine extends EventEmitter {
   private pendingSwitch: { strategyConfig: Record<string, unknown> } | null = null;
   private cooldownCandlesRemaining: number = 0;
 
+  // Activity metrics (for ActivityMonitor silent-failure detection)
+  private _lastCandleProcessedAt: number | null = null;
+  private _lastSignalEmittedAt: number | null = null;
+  private _candlesSinceLastSignal = 0;
+
   // Live-only state
   private shutdownState: ShutdownState = 'running';
   private reconciliationTimer: ReturnType<typeof setInterval> | null = null;
@@ -434,11 +439,37 @@ export class SpotTradingEngine extends EventEmitter {
     return this.candleBuffer.get(key)?.length ?? 0;
   }
 
+  /**
+   * Snapshot of engine activity for ActivityMonitor silent-failure detection.
+   */
+  getActivityMetrics(): {
+    name: string;
+    lastCandleProcessedAt: number | null;
+    lastSignalEmittedAt: number | null;
+    candlesSinceLastSignal: number;
+    hasOpenPosition: boolean;
+    timeframeMs: number;
+  } {
+    return {
+      name: `spot-${this.config.pair}`,
+      lastCandleProcessedAt: this._lastCandleProcessedAt,
+      lastSignalEmittedAt: this._lastSignalEmittedAt,
+      candlesSinceLastSignal: this._candlesSinceLastSignal,
+      hasOpenPosition: this.currentPosition !== null,
+      timeframeMs: TIMEFRAME_MS[this.config.timeframe],
+    };
+  }
+
   // ── Core: candle processing ────────────────────────────────────────
 
   onCandle(candle: Candle): void {
     if (!this.isRunning || !this.session) return;
     if (this.mode === 'live' && this.shutdownState !== 'running') return;
+    if (candle.pair !== this.config.pair) return;
+
+    // Activity metrics: data flowing, engine processing
+    this._lastCandleProcessedAt = Date.now();
+    this._candlesSinceLastSignal++;
 
     log.debug(
       { pair: candle.pair, timestamp: candle.timestamp, close: candle.close },
@@ -523,6 +554,9 @@ export class SpotTradingEngine extends EventEmitter {
         { pair: candle.pair, strategyName: this.strategy.name, regime, bufferLen: buffer.length },
         'No signals emitted this candle',
       );
+    } else {
+      this._lastSignalEmittedAt = Date.now();
+      this._candlesSinceLastSignal = 0;
     }
 
     for (const signal of signals) {
