@@ -79,8 +79,11 @@ describe('start.ts – PIPE-01: perp tournament call', () => {
     expect(nearbyLines).not.toMatch(/config\.perpDatabase\.path/);
   });
 
-  it('has zero-trade guard that warns when no OOS trades', () => {
-    expect(src).toMatch(/zero OOS trades/);
+  it('has an edge-floor guard that holds cash when no strategy qualifies', () => {
+    // Stronger than the old zero-trade guard: perp activates only when a
+    // strategy clears the edge floor (positive OOS Sharpe), not merely traded.
+    expect(src).toMatch(/edge floor/);
+    expect(src).toMatch(/selectDeployableEntries/);
   });
 
   it('--skip-perp-tournament option is registered', () => {

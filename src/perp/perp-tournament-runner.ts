@@ -15,7 +15,7 @@ import { createPerpRegistry } from './strategies/index.js';
 import { TournamentRunner } from '../tournament/tournament-runner.js';
 import { parseTournamentConfig, type TournamentConfig } from '../tournament/config.js';
 import type { TournamentResult } from '../tournament/types.js';
-import { WalkForwardRunner } from '../backtest/walk-forward.js';
+import { WalkForwardRunner, splitWalkForward } from '../backtest/walk-forward.js';
 import { MetricsCalculator } from '../backtest/metrics.js';
 import { BacktestEngine } from '../backtest/engine.js';
 import { RiskManager } from '../risk/risk-manager.js';
@@ -171,11 +171,10 @@ export async function runPerpTournament(
       metricsCalculator,
     });
 
-    // Compute walk-forward window durations: 70/30 IS/OOS split across 3 windows
+    // Walk-forward windows: 70/30 IS/OOS split across 5 windows for more
+    // out-of-sample evaluation (less swayed by a single noisy slice).
     const totalMs = endMs - startMs;
-    const trainWindowMs = Math.floor((totalMs * 0.7) / 3);
-    const validateWindowMs = Math.floor((totalMs * 0.3) / 3);
-    const stepMs = trainWindowMs + validateWindowMs;
+    const { trainWindowMs, validateWindowMs, stepMs } = splitWalkForward(totalMs);
 
     const tournamentConfig: TournamentConfig = parseTournamentConfig({
       pair,

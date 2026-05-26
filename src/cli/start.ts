@@ -17,8 +17,8 @@ import { out } from './shared/output.js';
 import { DataPipeline } from '../data/pipeline.js';
 import { BacktestEngine } from '../backtest/engine.js';
 import { MetricsCalculator } from '../backtest/metrics.js';
-import { WalkForwardRunner } from '../backtest/walk-forward.js';
-import { TournamentRunner } from '../tournament/tournament-runner.js';
+import { WalkForwardRunner, splitWalkForward } from '../backtest/walk-forward.js';
+import { TournamentRunner, selectDeployableEntries } from '../tournament/tournament-runner.js';
 import { parseTournamentConfig } from '../tournament/config.js';
 import { TournamentStore } from '../tournament/tournament-store.js';
 import { ActivationBridge } from '../tournament/activation-bridge.js';
@@ -332,11 +332,10 @@ program
         metricsCalculator,
       });
 
-      // Compute walk-forward window durations from data range
+      // Walk-forward windows from data range: 70/30 IS/OOS split across 5
+      // windows for more out-of-sample evaluation.
       const totalMs = endMs - startMs;
-      const trainWindowMs = Math.floor((totalMs * 0.7) / 3);
-      const validateWindowMs = Math.floor((totalMs * 0.3) / 3);
-      const stepMs = trainWindowMs + validateWindowMs;
+      const { trainWindowMs, validateWindowMs, stepMs } = splitWalkForward(totalMs);
 
       const tournamentStore = new TournamentStore({
         dbPath: config.database.path,
@@ -466,6 +465,8 @@ program
           strategyConfigs,
           monteCarlo: { enabled: true, iterations: 1000, minTrades: 15, rankingWeight: 0.3 },
           qualityFilters: { minSortino: 0, minCalmar: 0.5, minProfitFactor: 1.1 },
+          // Coinbase spot cannot short — evaluate long-only so paper/live match.
+          allowShorts: false,
         });
 
         // Load higher-TF candles for multi-timeframe strategies in tournament
@@ -494,12 +495,12 @@ program
         riskManager.resetCircuitBreaker();
 
         if (mode === 'paper') {
-          // Filter out strategies with zero OOS trades — they can't produce signals
-          const activatable = result.leaderboard.filter(
-            (e) => e.oosMetrics.totalTrades > 0,
-          );
+          // Only deploy strategies that cleared the tournament edge floor
+          // (positive out-of-sample expectancy). When none qualify, hold cash
+          // rather than deploying a known-losing strategy.
+          const activatable = selectDeployableEntries(result.leaderboard);
           if (activatable.length === 0) {
-            out.warn(`${tradePair}: all strategies had 0 OOS trades — skipping paper engine activation`);
+            out.warn(`${tradePair}: no strategy cleared the edge floor (positive OOS Sharpe) — holding cash, no paper engine`);
           }
 
           for (const entry of activatable.slice(0, topN)) {
@@ -530,6 +531,8 @@ program
               timeframe,
               strategyConfig: entry.strategyConfig,
               initialCapital: effectiveCapital,
+              // Coinbase spot cannot short — keep paper consistent with live.
+              allowShorts: false,
             });
 
             // Multi-TF confirmation feed (e.g. 4h when primary is 1h)
@@ -821,14 +824,12 @@ program
               const sharpe = entry.oosMetrics.sharpeRatio.toFixed(4);
               out.table(`#${entry.rank}`, `${entry.strategyName} [PERP] (OOS Sharpe: ${sharpe})`);
             }
-            const hasOosTrades = perpResult.leaderboard.some(
-              (e) => e.oosMetrics.totalTrades > 0,
-            );
-            if (hasOosTrades) {
+            const hasDeployable = selectDeployableEntries(perpResult.leaderboard).length > 0;
+            if (hasDeployable) {
               out.success('Perp tournament complete');
               perpActivationReady = true;
             } else {
-              out.warn('Perp tournament produced zero OOS trades — perp engine will not activate');
+              out.warn('No perp strategy cleared the edge floor (positive OOS Sharpe) — perp engine will not activate (holding cash)');
             }
           } catch (perpErr) {
             out.warn(
@@ -862,9 +863,9 @@ program
           if (config.intx.perpMode === 'paper') {
             // PIPE-02: PerpTradingEngine (paper mode) — one instance per pair for buffer isolation
             const perpLiveRegistry = createLivePerpRegistry(fundingRateProvider);
-            const perpWinner = perpTournamentResult?.leaderboard.find(
-              (e) => e.oosMetrics.totalTrades > 0,
-            );
+            const perpWinner = selectDeployableEntries(
+              perpTournamentResult?.leaderboard ?? [],
+            )[0];
 
             for (const perpPair of tradingPairs) {
               // Each engine gets its own initial strategy instance (strategy holds
@@ -933,9 +934,9 @@ program
           } else if (config.intx.perpMode === 'live') {
             // PIPE-03: PerpTradingEngine (live mode) — one instance per pair for buffer isolation
             const livePerpRegistry = createLivePerpRegistry(fundingRateProvider);
-            const liveWinner = perpTournamentResult?.leaderboard.find(
-              (e) => e.oosMetrics.totalTrades > 0,
-            );
+            const liveWinner = selectDeployableEntries(
+              perpTournamentResult?.leaderboard ?? [],
+            )[0];
 
             for (const perpPair of tradingPairs) {
               const liveInitialStrategy = liveWinner
