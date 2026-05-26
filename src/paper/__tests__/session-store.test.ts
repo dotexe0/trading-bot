@@ -268,6 +268,27 @@ describe('SessionStore', () => {
       expect(store.getLastFinalEquity('BTC-USD')).toBe('10800.75');
     });
 
+    it('falls back to the last equity snapshot when a stopped session has null final equity (unclean shutdown)', () => {
+      const config = makeConfig({ pair: 'BTC-USD' });
+      const s = store.createSession(config, 'strat-a');
+      store.recordEquityPoint(s.id, 1700000000000, d('10000'));
+      store.recordEquityPoint(s.id, 1700003600000, d('10250'));
+      // Simulate a force-kill: recoverRunningSessions marks it stopped with NO final_equity.
+      store.recoverRunningSessions();
+
+      // Equity continuity should survive the unclean shutdown.
+      expect(store.getLastFinalEquity('BTC-USD')).toBe('10250');
+    });
+
+    it('prefers a clean final equity over the snapshot fallback', () => {
+      const config = makeConfig({ pair: 'BTC-USD' });
+      const s = store.createSession(config, 'strat-a');
+      store.recordEquityPoint(s.id, 1700000000000, d('9000'));
+      store.endSession(s.id, '10500', 'stopped'); // clean final equity recorded
+
+      expect(store.getLastFinalEquity('BTC-USD')).toBe('10500');
+    });
+
     it('ignores sessions with error status', () => {
       const config = makeConfig({ pair: 'BTC-USD' });
 

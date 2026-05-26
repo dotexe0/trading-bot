@@ -40,7 +40,8 @@ vi.mock('coinbase-api', () => ({
   },
 }));
 
-import { LiveDataFeed } from '../live-data-feed.js';
+import { LiveDataFeed, aggregateToClosedCandles } from '../live-data-feed.js';
+import type { Candle } from '../../core/types.js';
 
 describe('LiveDataFeed', () => {
   let feed: LiveDataFeed;
@@ -336,5 +337,52 @@ describe('LiveDataFeed REST polling', () => {
     expect(polledPairs).toHaveLength(0);
 
     restFeed.stop();
+  });
+});
+
+// ── 4h aggregation helper ────────────────────────────────────────────
+
+describe('aggregateToClosedCandles', () => {
+  const HOUR = 3_600_000;
+  function hc(h: number, o: number, hi: number, lo: number, c: number, v: number): Candle {
+    return {
+      pair: 'BTC-USD',
+      timeframe: '1h',
+      timestamp: h * HOUR,
+      open: String(o),
+      high: String(hi),
+      low: String(lo),
+      close: String(c),
+      volume: String(v),
+    };
+  }
+
+  it('aggregates 1h candles into true 4h candles (OHLCV correct)', () => {
+    const candles: Candle[] = [];
+    for (let h = 0; h < 12; h++) candles.push(hc(h, 100 + h, 110 + h, 90 + h, 105 + h, 10));
+    const now = 12 * HOUR;
+
+    const result = aggregateToClosedCandles(candles, '4h', now);
+
+    expect(result).toHaveLength(3); // 00:00, 04:00, 08:00 windows all closed
+    const last = result[result.length - 1];
+    expect(last.timestamp).toBe(8 * HOUR);
+    expect(last.timeframe).toBe('4h');
+    expect(last.open).toBe('108');   // hour-8 open
+    expect(last.close).toBe('116');  // hour-11 close
+    expect(last.high).toBe('121');   // max high across hours 8-11
+    expect(last.low).toBe('98');     // min low across hours 8-11
+    expect(Number(last.volume)).toBe(40); // 4 × 10
+  });
+
+  it('excludes the still-open (not yet closed) 4h window', () => {
+    const candles: Candle[] = [];
+    for (let h = 0; h < 11; h++) candles.push(hc(h, 100 + h, 110 + h, 90 + h, 105 + h, 10));
+    const now = 11 * HOUR; // 08:00 window closes at 12:00 > now → not closed yet
+
+    const result = aggregateToClosedCandles(candles, '4h', now);
+
+    expect(result).toHaveLength(2);
+    expect(result[result.length - 1].timestamp).toBe(4 * HOUR);
   });
 });

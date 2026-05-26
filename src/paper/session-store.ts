@@ -276,7 +276,19 @@ export class SessionStore {
        WHERE pair = ? AND status = 'stopped' AND final_equity IS NOT NULL
        ORDER BY end_time DESC, rowid DESC LIMIT 1`,
     ).get(pair) as { final_equity: string } | undefined;
-    return row?.final_equity ?? null;
+    if (row?.final_equity != null) return row.final_equity;
+
+    // Fallback: an unclean shutdown (force-kill) leaves a stopped session with
+    // null final_equity (see recoverRunningSessions). Recover equity continuity
+    // from that session's last recorded equity snapshot instead of resetting to
+    // base capital.
+    const snap = this.sqlite.prepare(
+      `SELECT pe.equity AS equity FROM paper_equity pe
+       JOIN paper_sessions ps ON pe.session_id = ps.id
+       WHERE ps.pair = ? AND ps.status = 'stopped'
+       ORDER BY pe.timestamp DESC, pe.rowid DESC LIMIT 1`,
+    ).get(pair) as { equity: string } | undefined;
+    return snap?.equity ?? null;
   }
 
   /**

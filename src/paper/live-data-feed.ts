@@ -22,20 +22,46 @@ import { EventEmitter } from 'node:events';
 import { WebsocketClient, CBAdvancedTradeClient } from 'coinbase-api';
 import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import { TIMEFRAME_MS } from '../core/types.js';
+import { aggregateCandles } from '../data/aggregator.js';
 import type { LiveDataFeedEvents } from './types.js';
 import { createModuleLogger } from '../core/logger.js';
 
 const log = createModuleLogger('live-data-feed');
 
-/** Coinbase granularity string for each supported timeframe. */
+/**
+ * Coinbase granularity to poll for each timeframe. Coinbase does not serve a
+ * native 4h granularity, so 4h is polled at ONE_HOUR and aggregated up (see
+ * AGGREGATION_SOURCE) rather than mislabeling SIX_HOUR candles as 4h.
+ */
 const TIMEFRAME_TO_GRANULARITY: Partial<Record<Timeframe, string>> = {
   '1m': 'ONE_MINUTE',
   '5m': 'FIVE_MINUTE',
   '15m': 'FIFTEEN_MINUTE',
   '1h': 'ONE_HOUR',
-  '4h': 'SIX_HOUR', // closest match (no 4h on CB)
+  '4h': 'ONE_HOUR', // not native on CB — poll 1h and aggregate to 4h
   '1D': 'ONE_DAY',
 };
+
+/** Timeframes built by aggregating a finer, natively-served source timeframe. */
+const AGGREGATION_SOURCE: Partial<Record<Timeframe, Timeframe>> = {
+  '4h': '1h',
+};
+
+/**
+ * Aggregate finer source candles into a target timeframe, returning only the
+ * windows that have fully closed as of `nowMs`. The still-open trailing window
+ * is dropped so consumers never act on a partial candle.
+ */
+export function aggregateToClosedCandles(
+  sourceCandles: Candle[],
+  targetTimeframe: Timeframe,
+  nowMs: number,
+): Candle[] {
+  const intervalMs = TIMEFRAME_MS[targetTimeframe];
+  return aggregateCandles(sourceCandles, targetTimeframe).filter(
+    (c) => c.timestamp + intervalMs <= nowMs,
+  );
+}
 
 /** WS sends 5m candles only. For other timeframes, use REST polling. */
 const WS_NATIVE_TIMEFRAME: Timeframe = '5m';
@@ -53,6 +79,8 @@ export class LiveDataFeed extends EventEmitter {
 
   private readonly timeframe: Timeframe;
   private readonly granularity: string;
+  /** Source timeframe to aggregate from when target isn't native (e.g. 4h←1h), else null. */
+  private readonly aggregateFrom: Timeframe | null;
   private readonly useWsForData: boolean;
 
   /** Tracks the last seen candle start (Unix seconds string) per product_id */
@@ -81,6 +109,7 @@ export class LiveDataFeed extends EventEmitter {
 
     this.timeframe = options.timeframe ?? WS_NATIVE_TIMEFRAME;
     this.granularity = TIMEFRAME_TO_GRANULARITY[this.timeframe] ?? 'FIVE_MINUTE';
+    this.aggregateFrom = AGGREGATION_SOURCE[this.timeframe] ?? null;
     // Only use WS candle data when WS natively provides this timeframe
     this.useWsForData = this.timeframe === WS_NATIVE_TIMEFRAME;
 
@@ -323,8 +352,11 @@ export class LiveDataFeed extends EventEmitter {
     if (!this.restClient) return;
 
     const tfMs = TIMEFRAME_MS[this.timeframe] ?? 300_000;
-    // Look back 3 periods to reliably catch the last completed candle
-    const lookbackSec = Math.ceil((tfMs * 3) / 1000);
+    // Look back enough periods to reliably catch the last completed candle.
+    // When aggregating (e.g. 4h←1h) we need extra slack so ≥2 target windows
+    // are fully covered after time-alignment.
+    const lookbackPeriods = this.aggregateFrom ? 6 : 3;
+    const lookbackSec = Math.ceil((tfMs * lookbackPeriods) / 1000);
 
     for (const pair of pairs) {
       try {
@@ -338,33 +370,57 @@ export class LiveDataFeed extends EventEmitter {
           granularity: this.granularity as any,
         });
 
-        // Sort descending by start time (newest first)
-        const sorted = (response.candles ?? [])
-          .map((c: { start: string; open: string; high: string; low: string; close: string; volume: string }) => ({
+        const raw = (response.candles ?? []).map(
+          (c: { start: string; open: string; high: string; low: string; close: string; volume: string }) => ({
             ...c,
             startMs: Number(c.start) * 1000,
-          }))
-          .sort((a: { startMs: number }, b: { startMs: number }) => b.startMs - a.startMs);
+          }),
+        );
 
-        // Skip the first (in-progress) candle; take the most recent completed one
-        if (sorted.length < 2) continue;
-        const completed = sorted[1];
+        let candleObj: Candle | null = null;
 
-        const candleObj: Candle = {
-          pair,
-          timeframe: this.timeframe,
-          timestamp: completed.startMs,
-          open: completed.open,
-          high: completed.high,
-          low: completed.low,
-          close: completed.close,
-          volume: completed.volume,
-        };
+        if (this.aggregateFrom) {
+          // Build source-timeframe candles, then aggregate up to the target
+          // timeframe, keeping only fully-closed windows. Coinbase has no
+          // native 4h granularity, so we poll 1h and roll up here.
+          const sourceCandles: Candle[] = raw.map((c) => ({
+            pair,
+            timeframe: this.aggregateFrom!,
+            timestamp: c.startMs,
+            open: c.open,
+            high: c.high,
+            low: c.low,
+            close: c.close,
+            volume: c.volume,
+          }));
+          const closed = aggregateToClosedCandles(sourceCandles, this.timeframe, Date.now());
+          candleObj = closed.length > 0 ? closed[closed.length - 1] : null;
+        } else {
+          // Native timeframe: skip the first (in-progress) candle, take the
+          // most recent completed one.
+          const sorted = raw.sort(
+            (a: { startMs: number }, b: { startMs: number }) => b.startMs - a.startMs,
+          );
+          if (sorted.length >= 2) {
+            const completed = sorted[1];
+            candleObj = {
+              pair,
+              timeframe: this.timeframe,
+              timestamp: completed.startMs,
+              open: completed.open,
+              high: completed.high,
+              low: completed.low,
+              close: completed.close,
+              volume: completed.volume,
+            };
+          }
+        }
 
-        this.lastCandleStart.set(pair, String(completed.startMs / 1000));
-        this.currentCandle.set(pair, candleObj);
-
-        this.emitIfNew(pair, candleObj);
+        if (candleObj) {
+          this.lastCandleStart.set(pair, String(candleObj.timestamp / 1000));
+          this.currentCandle.set(pair, candleObj);
+          this.emitIfNew(pair, candleObj);
+        }
         // Heartbeat: fire on every successful poll so FeedHealthMonitor stays
         // current regardless of candle deduplication (e.g. long timeframes).
         this.emit('polled', pair as TradingPair);
