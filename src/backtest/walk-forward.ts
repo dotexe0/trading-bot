@@ -68,6 +68,24 @@ export interface WalkForwardResult {
  * @param config - Walk-forward configuration
  * @returns Array of non-overlapping validate windows with overlapping train windows
  */
+/**
+ * Build a walk-forward config that splits a total span into `windowCount`
+ * non-overlapping windows with a 70/30 in-sample/out-of-sample ratio.
+ *
+ * More windows = more out-of-sample evaluation, so OOS Sharpe and robustness
+ * are estimated over more data and are less swayed by a single noisy slice.
+ * Default 5 (up from the legacy 3).
+ */
+export function splitWalkForward(
+  totalMs: number,
+  windowCount = 5,
+): WalkForwardConfig {
+  const trainWindowMs = Math.floor((totalMs * 0.7) / windowCount);
+  const validateWindowMs = Math.floor((totalMs * 0.3) / windowCount);
+  const stepMs = trainWindowMs + validateWindowMs;
+  return { trainWindowMs, validateWindowMs, stepMs };
+}
+
 export function generateWindows(
   startMs: number,
   endMs: number,

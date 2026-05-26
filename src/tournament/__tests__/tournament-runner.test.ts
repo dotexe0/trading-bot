@@ -10,7 +10,8 @@ import type { WalkForwardResult, WalkForwardWindowResult } from '../../backtest/
 import type { BacktestResult, BacktestConfig } from '../../backtest/types.js';
 import type { Candle } from '../../core/types.js';
 import type { TournamentConfig } from '../config.js';
-import { TournamentRunner } from '../tournament-runner.js';
+import { TournamentRunner, selectDeployableEntries } from '../tournament-runner.js';
+import type { LeaderboardEntry } from '../types.js';
 import { RegimeClassifier } from '../../regime/classifier.js';
 import { MarketRegime } from '../../regime/types.js';
 
@@ -79,6 +80,8 @@ function makeTournamentConfig(overrides: Partial<TournamentConfig> = {}): Tourna
     feeTierTaker: 0.0075,
     topN: 3,
     activationMode: 'none',
+    minOosSharpe: 0,
+    allowShorts: true,
     ...overrides,
   };
 }
@@ -207,6 +210,28 @@ describe('TournamentRunner', () => {
     expect(backtestConfig.initialCapital).toBe('5000');
     expect(backtestConfig.slippageBps).toBe(10);
     expect(backtestConfig.strategyConfig).toEqual({ strategy: 'sma-crossover' });
+  });
+
+  it('forwards allowShorts=false from tournament config to backtest config (spot)', async () => {
+    mockWfRunner.run.mockReturnValue(makeWfResult(1.0, [1.0]));
+    mockRegistry.list.mockReturnValue(['sma-crossover']);
+
+    const config = makeTournamentConfig({ allowShorts: false });
+    await runner.run(config, dummyCandles);
+
+    const backtestConfig = mockWfRunner.run.mock.calls[0][0] as BacktestConfig;
+    expect(backtestConfig.allowShorts).toBe(false);
+  });
+
+  it('defaults allowShorts=true (perp keeps shorting)', async () => {
+    mockWfRunner.run.mockReturnValue(makeWfResult(1.0, [1.0]));
+    mockRegistry.list.mockReturnValue(['perp-mean-reversion']);
+
+    const config = makeTournamentConfig({ allowShorts: true });
+    await runner.run(config, dummyCandles);
+
+    const backtestConfig = mockWfRunner.run.mock.calls[0][0] as BacktestConfig;
+    expect(backtestConfig.allowShorts).toBe(true);
   });
 
   it('includes tournament metadata in result', async () => {
@@ -342,6 +367,22 @@ describe('TournamentRunner regime leaderboards', () => {
     expect(result.regimeLeaderboards!.fallbackEntry).toBeDefined();
   });
 
+  it('excludes a regime entry whose regime Sharpe is negative (edge floor)', async () => {
+    vi.spyOn(RegimeClassifier.prototype, 'classifyAll').mockReturnValue(
+      new Map([[1000, MarketRegime.TRENDING]]),
+    );
+    mockWfRunner.run.mockReturnValue(makeWfResult(1.5, [1.5])); // qualifies overall
+    // Enough regime trades, but the regime-specific Sharpe is negative → not deployable.
+    mockMetricsCalculator.calculateRegimeBreakdown.mockReturnValue([
+      { regime: MarketRegime.TRENDING, tradeCount: 5, sharpeRatio: -0.8, winRate: 0.3, timePct: 0.3 },
+    ]);
+
+    const config = makeTournamentConfig();
+    const result = await runner.run(config, dummyCandles);
+
+    expect(result.regimeLeaderboards!.TRENDING).toHaveLength(0);
+  });
+
   it('fallbackEntry equals overall leaderboard winner', async () => {
     mockRegistry.list.mockReturnValue(['stratA', 'stratB']);
     vi.spyOn(RegimeClassifier.prototype, 'classifyAll').mockReturnValue(
@@ -368,14 +409,14 @@ describe('TournamentRunner regime leaderboards', () => {
   });
 
   describe('disqualification filter', () => {
-    it('ranks disqualified (negative robustness) strategy below qualified ones even if OOS Sharpe is higher', async () => {
-      // qualified: IS=2.0, OOS=1.5 → robustness=0.75 (positive, qualifies)
-      // disqualified: IS=-1.0, OOS=3.0 → robustness=-3.0 (negative, disqualified despite higher OOS)
+    it('ranks disqualified (negative OOS) strategy below qualified ones even if IS Sharpe is higher', async () => {
+      // qualified: IS=2.0, OOS=1.5 → positive OOS edge, qualifies
+      // disqualified: IS=3.0, OOS=-1.0 → overfit (great in-sample, loses out-of-sample) → disqualified
       mockWfRunner.run
-        .mockReturnValueOnce(makeWfResult(1.5, [2.0]))   // qualified
-        .mockReturnValueOnce(makeWfResult(3.0, [-1.0])); // disqualified
+        .mockReturnValueOnce(makeWfResult(1.5, [2.0]))    // qualified
+        .mockReturnValueOnce(makeWfResult(-1.0, [3.0]));  // overfit loser
 
-      mockRegistry.list.mockReturnValue(['qualified-strat', 'disqualified-strat']);
+      mockRegistry.list.mockReturnValue(['qualified-strat', 'overfit-strat']);
 
       const config = makeTournamentConfig();
       const result = await runner.run(config, dummyCandles);
@@ -384,15 +425,30 @@ describe('TournamentRunner regime leaderboards', () => {
       expect(result.leaderboard[0].disqualified).toBe(false);
       expect(result.leaderboard[0].rank).toBe(1);
 
-      expect(result.leaderboard[1].strategyName).toBe('disqualified-strat');
+      expect(result.leaderboard[1].strategyName).toBe('overfit-strat');
       expect(result.leaderboard[1].disqualified).toBe(true);
-      expect(result.leaderboard[1].disqualifyReason).toMatch(/IS\/OOS direction mismatch/);
+      expect(result.leaderboard[1].disqualifyReason).toMatch(/edge floor|OOS Sharpe/i);
       expect(result.leaderboard[1].rank).toBe(2);
     });
 
+    it('KEEPS an IS-negative but OOS-positive strategy (it generalizes to unseen data)', async () => {
+      // The whole point of walk-forward is out-of-sample performance. A strategy
+      // that lost in training but WON in validation is a desirable generalizer,
+      // not a fluke to discard. (This was the bug: perp-mean-reversion got thrown out.)
+      mockWfRunner.run.mockReturnValue(makeWfResult(2.5, [-3.0])); // IS=-3.0, OOS=+2.5
+      mockRegistry.list.mockReturnValue(['generalizer']);
+
+      const config = makeTournamentConfig();
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].strategyName).toBe('generalizer');
+      expect(result.leaderboard[0].disqualified).toBe(false);
+      expect(result.leaderboard[0].disqualifyReason).toBeNull();
+    });
+
     it('disqualifies strategy with 0 OOS trades', async () => {
-      // zero-trade: IS=0, OOS=0, totalTrades=0 → robustness=0 but 0 trades should disqualify
-      // real-strat: IS=2.0, OOS=1.5 → robustness=0.75, qualifies
+      // zero-trade: OOS=0, totalTrades=0 → disqualified (never traded)
+      // real-strat: IS=2.0, OOS=1.5 → positive OOS edge, qualifies
       const zeroTradeResult = makeWfResult(0, [0]);
       zeroTradeResult.aggregateValidateMetrics.totalTrades = 0;
       mockWfRunner.run
@@ -415,24 +471,61 @@ describe('TournamentRunner regime leaderboards', () => {
       expect(result.leaderboard[1].rank).toBe(2);
     });
 
-    it('falls back to IS Sharpe ranking when all strategies are disqualified', async () => {
-      // strat-a: IS=-1.0, OOS=2.0 → robustness=-2.0, disqualified
-      // strat-b: IS=-0.5, OOS=1.0 → robustness=-2.0, disqualified but higher IS Sharpe
+    it('does NOT fall back to a deployable winner when every strategy has non-positive OOS (hold cash)', async () => {
+      // Both strategies lose out-of-sample. The old code fell back to IN-SAMPLE
+      // Sharpe ranking and deployed the most overfit loser anyway. Correct behavior:
+      // every entry stays disqualified and ranking is by OOS (not IS), so consumers
+      // hold cash instead of deploying a known loser.
       mockWfRunner.run
-        .mockReturnValueOnce(makeWfResult(2.0, [-1.0]))  // strat-a
-        .mockReturnValueOnce(makeWfResult(1.0, [-0.5])); // strat-b
+        .mockReturnValueOnce(makeWfResult(-1.0, [3.0]))  // strat-a: huge IS, OOS=-1.0
+        .mockReturnValueOnce(makeWfResult(-0.5, [0.2])); // strat-b: small IS, OOS=-0.5 (less bad OOS)
 
       mockRegistry.list.mockReturnValue(['strat-a', 'strat-b']);
 
       const config = makeTournamentConfig();
       const result = await runner.run(config, dummyCandles);
 
-      // strat-b has higher IS Sharpe (-0.5 > -1.0) so ranks first in fallback
+      // Ranked by OOS (−0.5 > −1.0), NOT by IS Sharpe (which would put strat-a first).
       expect(result.leaderboard[0].strategyName).toBe('strat-b');
       expect(result.leaderboard[1].strategyName).toBe('strat-a');
-      // Both are still marked disqualified
+      // Nothing is deployable.
+      expect(result.leaderboard.every((e) => e.disqualified)).toBe(true);
       expect(result.leaderboard[0].disqualified).toBe(true);
-      expect(result.leaderboard[1].disqualified).toBe(true);
+    });
+  });
+
+  describe('edge floor', () => {
+    it('disqualifies a strategy with positive trades but OOS Sharpe of exactly 0', async () => {
+      mockWfRunner.run.mockReturnValue(makeWfResult(0, [1.0])); // OOS=0, has trades
+      mockRegistry.list.mockReturnValue(['flat-strat']);
+
+      const config = makeTournamentConfig();
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(true);
+      expect(result.leaderboard[0].disqualifyReason).toMatch(/edge floor|OOS Sharpe/i);
+    });
+
+    it('disqualifies a strategy with negative OOS Sharpe even though it traded', async () => {
+      mockWfRunner.run.mockReturnValue(makeWfResult(-1.88, [1.0])); // the deployed -1.88 case
+      mockRegistry.list.mockReturnValue(['losing-strat']);
+
+      const config = makeTournamentConfig();
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(true);
+      expect(result.leaderboard[0].disqualifyReason).toMatch(/edge floor|OOS Sharpe/i);
+    });
+
+    it('respects a custom minOosSharpe floor', async () => {
+      // OOS=0.3 passes the default floor (0) but fails a stricter floor of 0.5.
+      mockWfRunner.run.mockReturnValue(makeWfResult(0.3, [0.3]));
+      mockRegistry.list.mockReturnValue(['marginal-strat']);
+
+      const config = makeTournamentConfig({ minOosSharpe: 0.5 } as Partial<TournamentConfig>);
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(true);
     });
   });
 
@@ -575,5 +668,42 @@ describe('TournamentRunner regime leaderboards', () => {
       additionalCandles,   // additionalCandlesMap — NOT undefined
       expect.any(Object),  // precomputedRegimes
     );
+  });
+});
+
+// ── selectDeployableEntries ─────────────────────────────────────────
+
+describe('selectDeployableEntries', () => {
+  function entry(name: string, disqualified: boolean): LeaderboardEntry {
+    return {
+      rank: 0,
+      strategyName: name,
+      strategyConfig: { strategy: name },
+      oosMetrics: makeMetrics(),
+      isMetrics: makeMetrics(),
+      robustnessRatio: 1,
+      windowCount: 1,
+      disqualified,
+      disqualifyReason: disqualified ? 'test' : null,
+    };
+  }
+
+  it('returns only non-disqualified entries, preserving order', () => {
+    const board = [
+      entry('a', false),
+      entry('b', true),
+      entry('c', false),
+    ];
+    const deployable = selectDeployableEntries(board);
+    expect(deployable.map((e) => e.strategyName)).toEqual(['a', 'c']);
+  });
+
+  it('returns an empty array when every entry is disqualified (hold cash)', () => {
+    const board = [entry('a', true), entry('b', true)];
+    expect(selectDeployableEntries(board)).toEqual([]);
+  });
+
+  it('returns an empty array for an empty leaderboard', () => {
+    expect(selectDeployableEntries([])).toEqual([]);
   });
 });

@@ -33,6 +33,18 @@ export const tournamentConfigSchema = z
     feeTierTaker: z.number().min(0).max(0.1).default(DEFAULT_FEE_TAKER),
     /** Number of top strategies to consider for activation */
     topN: z.number().int().min(1).max(10).default(3),
+    /**
+     * Edge floor: minimum out-of-sample Sharpe a strategy must clear to be
+     * deployable. Strategies at or below this are disqualified ("hold cash").
+     * Default 0 = require demonstrated positive out-of-sample expectancy.
+     */
+    minOosSharpe: z.number().default(0),
+    /**
+     * Whether short entries are allowed in evaluation. Spot (Coinbase) cannot
+     * short, so spot tournaments must set this false to match live execution.
+     * Perp can short — default true.
+     */
+    allowShorts: z.boolean().default(true),
     /** What to do with winning strategies */
     activationMode: z.enum(['paper', 'live', 'none']).default('none'),
     /** Optional explicit strategy configs (overrides registry defaults) */

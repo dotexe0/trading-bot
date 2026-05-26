@@ -11,6 +11,7 @@
 import { createModuleLogger } from '../core/logger.js';
 import type { TournamentConfig } from './config.js';
 import type { TournamentResult, LeaderboardEntry } from './types.js';
+import { selectDeployableEntries } from './tournament-runner.js';
 import type { TournamentStore } from './tournament-store.js';
 
 const log = createModuleLogger('activation-bridge');
@@ -58,7 +59,16 @@ export class ActivationBridge {
     ) => Promise<EngineHandle>,
   ): Promise<ActivationResult> {
     const topN = result.config.topN;
-    const topEntries = result.leaderboard.slice(0, topN);
+    // Only deploy strategies that cleared the tournament's edge floor / quality
+    // gates. If none qualified, topEntries is empty and we deploy nothing
+    // (hold cash) rather than activating a known-losing strategy.
+    const topEntries = selectDeployableEntries(result.leaderboard).slice(0, topN);
+    if (topEntries.length === 0) {
+      log.warn(
+        { tournamentId: result.id, mode },
+        'No deployable strategy (all disqualified) — holding cash, activating nothing',
+      );
+    }
 
     // 1. Stop all currently tracked engines
     const deactivated = await this.stopAllEngines();

@@ -212,6 +212,37 @@ describe('ActivationBridge', () => {
     expect(activationResult.mode).toBe('live');
   });
 
+  it('does not activate disqualified entries — only deployable ones', async () => {
+    const factory = vi.fn()
+      .mockResolvedValueOnce(makeEngineHandle('good', 'sess-good'));
+
+    const goodEntry = makeEntry(1, 'good', 2.0);
+    const loserEntry = { ...makeEntry(2, 'loser', -1.5), disqualified: true, disqualifyReason: 'no edge' };
+    const result = makeResult(3, [goodEntry, loserEntry]);
+
+    const activationResult = await bridge.activate(result, 'paper', factory);
+
+    expect(factory).toHaveBeenCalledTimes(1);
+    expect(factory).toHaveBeenCalledWith({ strategy: 'good' }, result.config);
+    expect(activationResult.activated.map((a) => a.strategyName)).toEqual(['good']);
+    expect(bridge.getActiveEngines().size).toBe(1);
+  });
+
+  it('activates nothing when every entry is disqualified (hold cash)', async () => {
+    const factory = vi.fn();
+    const entries = [
+      { ...makeEntry(1, 'loser-a', -1.0), disqualified: true, disqualifyReason: 'no edge' },
+      { ...makeEntry(2, 'loser-b', -2.0), disqualified: true, disqualifyReason: 'no edge' },
+    ];
+    const result = makeResult(3, entries);
+
+    const activationResult = await bridge.activate(result, 'live', factory);
+
+    expect(factory).not.toHaveBeenCalled();
+    expect(activationResult.activated.length).toBe(0);
+    expect(bridge.getActiveEngines().size).toBe(0);
+  });
+
   it('engineFactory failure for one strategy does not prevent others', async () => {
     const factory = vi.fn()
       .mockResolvedValueOnce(makeEngineHandle('strat-a', 'sess-a'))

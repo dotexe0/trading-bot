@@ -20,6 +20,23 @@ import { MIN_REGIME_TRADES } from './constants.js';
 
 const log = createModuleLogger('tournament-runner');
 
+/**
+ * Select the strategies from a leaderboard that are actually safe to deploy.
+ *
+ * A deployable strategy is one that cleared the tournament's edge floor and
+ * other quality gates (i.e. `disqualified === false`). When this returns an
+ * empty array, NO strategy demonstrated a positive out-of-sample edge and the
+ * caller should hold cash rather than deploy the least-bad loser.
+ *
+ * This is the single source of truth for "what may trade" — used by the
+ * orchestrator (start.ts) and the ActivationBridge.
+ */
+export function selectDeployableEntries(
+  leaderboard: LeaderboardEntry[],
+): LeaderboardEntry[] {
+  return leaderboard.filter((e) => !e.disqualified);
+}
+
 interface EntryAccumulator {
   entry: LeaderboardEntry;
   validateTrades: Trade[];
@@ -87,7 +104,7 @@ export class TournamentRunner {
         strategyConfig: stratConfig as Record<string, unknown>,
         assumeTaker: true,
         positionSizePct: 0.95,
-        allowShorts: true,
+        allowShorts: config.allowShorts ?? true,
       };
 
       const wfResult: WalkForwardResult = this.walkForwardRunner.run(
@@ -185,17 +202,25 @@ export class TournamentRunner {
     // Extract entries from accumulators for sorting
     const entries = accumulators.map((a) => a.entry);
 
-    // Mark disqualified entries:
-    // 1. robustness < 0 means IS and OOS point in opposite directions — statistical fluke
-    // 2. totalTrades === 0 means strategy never traded — no edge to validate
+    // Mark disqualified entries. Deployability is judged on OUT-OF-SAMPLE
+    // expectancy — the only metric walk-forward validation can trust:
+    // 1. totalTrades === 0 — strategy never traded, no edge to validate.
+    // 2. OOS Sharpe <= edge floor — no demonstrated positive out-of-sample edge.
+    //    This is the gate that matters: it disqualifies overfit strategies
+    //    (great in-sample, negative out-of-sample) AND keeps generalizers
+    //    (poor in-sample, positive out-of-sample). We deliberately do NOT
+    //    disqualify on robustnessRatio < 0: that flag fires for IS-negative/
+    //    OOS-positive strategies, which are desirable, not flukes.
+    const minOosSharpe = config.minOosSharpe ?? 0;
     for (const entry of entries) {
+      const oosSharpe = entry.oosMetrics.sharpeRatio;
       if (entry.oosMetrics.totalTrades === 0) {
         entry.disqualified = true;
         entry.disqualifyReason = 'No OOS trades — strategy never traded';
-      } else if (entry.robustnessRatio < 0) {
+      } else if (oosSharpe <= minOosSharpe) {
         entry.disqualified = true;
         entry.disqualifyReason =
-          `IS/OOS direction mismatch (robustness ${entry.robustnessRatio.toFixed(2)})`;
+          `OOS Sharpe ${oosSharpe.toFixed(2)} <= edge floor ${minOosSharpe} — no out-of-sample edge`;
       } else {
         entry.disqualified = false;
         entry.disqualifyReason = null;
@@ -237,18 +262,21 @@ export class TournamentRunner {
       : (a: LeaderboardEntry, b: LeaderboardEntry) =>
           b.oosMetrics.sharpeRatio - a.oosMetrics.sharpeRatio;
 
+    // Always rank by out-of-sample performance (qualified first, then the
+    // disqualified for transparency). We NEVER fall back to in-sample Sharpe:
+    // that ranked the most overfit loser at the top and got it deployed. When
+    // nothing qualifies, rank 1 is a disqualified entry — consumers must check
+    // `entry.disqualified` before deploying. No qualified entry ⇒ hold cash.
+    qualified.sort(sortFn);
+    disqualifiedEntries.sort(sortFn);
+    entries.length = 0;
+    entries.push(...qualified, ...disqualifiedEntries);
+
     if (qualified.length === 0) {
-      // All strategies disqualified — fall back to IS Sharpe ranking across all entries
       log.warn(
         { strategies: entries.map((e) => e.strategyName) },
-        'All strategies disqualified by robustness filter — falling back to IS Sharpe ranking',
+        'No strategy cleared the edge floor — no deployable winner (holding cash)',
       );
-      entries.sort((a, b) => b.isMetrics.sharpeRatio - a.isMetrics.sharpeRatio);
-    } else {
-      qualified.sort(sortFn);
-      disqualifiedEntries.sort(sortFn);
-      entries.length = 0;
-      entries.push(...qualified, ...disqualifiedEntries);
     }
 
     // Assign ranks
@@ -261,6 +289,7 @@ export class TournamentRunner {
       accumulators,
       precomputedRegimes,
       entries[0],
+      minOosSharpe,
     );
 
     const durationMs = Date.now() - startTime;
@@ -330,6 +359,7 @@ export class TournamentRunner {
     accumulators: EntryAccumulator[],
     precomputedRegimes: Map<number, MarketRegime>,
     fallbackEntry: LeaderboardEntry | undefined,
+    minRegimeSharpe = 0,
   ): RegimeLeaderboards | undefined {
     if (precomputedRegimes.size === 0 || accumulators.length === 0) return undefined;
     if (!fallbackEntry) return undefined;
@@ -349,6 +379,9 @@ export class TournamentRunner {
 
       for (const bd of breakdown) {
         if (bd.tradeCount < MIN_REGIME_TRADES) continue;
+        // Edge floor per regime: never surface a regime entry with no positive
+        // regime-specific edge — the auto-switcher must not deploy a loser.
+        if (bd.sharpeRatio <= minRegimeSharpe) continue;
         regimeArrays[bd.regime].push({
           rank: 0,
           strategyName: acc.entry.strategyName,

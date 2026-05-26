@@ -64,6 +64,8 @@ function makeConfig(): TournamentConfig {
     feeTierTaker: 0.0075,
     topN: 3,
     activationMode: 'none',
+    minOosSharpe: 0,
+    allowShorts: true,
   };
 }
 

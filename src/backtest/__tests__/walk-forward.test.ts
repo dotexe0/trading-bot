@@ -5,6 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   generateWindows,
+  splitWalkForward,
   WalkForwardRunner,
   type WalkForwardConfig,
 } from '../walk-forward.js';
@@ -338,5 +339,26 @@ describe('WalkForwardResult validateTrades', () => {
 
     expect(Array.isArray(result.validateTrades)).toBe(true);
     expect(result.validateTrades.length).toBe(0);
+  });
+});
+
+describe('splitWalkForward', () => {
+  it('splits total span into windowCount non-overlapping windows (70/30 IS/OOS)', () => {
+    const total = 1000;
+    const cfg = splitWalkForward(total, 5);
+    expect(cfg.trainWindowMs).toBe(140);   // floor(0.7*1000/5)
+    expect(cfg.validateWindowMs).toBe(60);  // floor(0.3*1000/5)
+    expect(cfg.stepMs).toBe(200);           // train + validate
+
+    const windows = generateWindows(0, total, cfg);
+    expect(windows).toHaveLength(5);
+  });
+
+  it('defaults to 5 windows and yields more OOS slices than the old 3-window split', () => {
+    const total = 1_000_000;
+    const five = generateWindows(0, total, splitWalkForward(total));
+    const three = generateWindows(0, total, splitWalkForward(total, 3));
+    expect(five.length).toBeGreaterThan(three.length);
+    expect(five.length).toBe(5);
   });
 });
