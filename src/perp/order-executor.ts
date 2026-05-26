@@ -210,7 +210,7 @@ export class LivePerpOrderExecutor implements IPerpOrderExecutor {
   }
 
   async closePosition(params: PerpCloseParams): Promise<PerpFillResult> {
-    const { session, reason } = params;
+    const { session, reason, markPrice } = params;
     const { instrument, direction, size } = session;
     const closeSide = direction === 'long' ? 'SELL' : 'BUY';
     const clientOrderId = crypto.randomUUID();
@@ -232,15 +232,35 @@ export class LivePerpOrderExecutor implements IPerpOrderExecutor {
     // Persist BEFORE API call
     this.stateStore.persistOrder(closeOrder);
 
-    const result = await this.intxClient.placeOrder({
-      productId: instrument,
-      instrument,
-      side: closeSide,
-      size,
-      orderType: 'MARKET',
-      closeOnly: true,
-      clientOrderId,
-    });
+    let result;
+    try {
+      result = await this.intxClient.placeOrder({
+        productId: instrument,
+        instrument,
+        side: closeSide,
+        size,
+        orderType: 'MARKET',
+        closeOnly: true,
+        clientOrderId,
+      });
+    } catch (err) {
+      // Network error may have thrown AFTER the exchange accepted and closed.
+      // Query account state — if position is gone, treat as closed.
+      const silentClose = await this._detectSilentClose(instrument, direction);
+      if (silentClose) {
+        liveLog.warn(
+          { instrument, direction, err: err instanceof Error ? err.message : String(err) },
+          'Silent close detected: placeOrder threw but exchange shows position gone — treating as closed',
+        );
+        closeOrder.status = 'FILLED';
+        closeOrder.avgFillPrice = markPrice;
+        closeOrder.fee = '0';
+        closeOrder.updatedAt = Date.now();
+        this.stateStore.persistOrder(closeOrder);
+        return { fillPrice: markPrice, fee: '0' };
+      }
+      throw err;
+    }
 
     // Update close order
     closeOrder.exchangeOrderId = result.orderId;
@@ -260,6 +280,31 @@ export class LivePerpOrderExecutor implements IPerpOrderExecutor {
       fee: result.fee,
       exchangeOrderId: result.orderId,
     };
+  }
+
+  private async _detectSilentClose(
+    instrument: string,
+    direction: PerpDirection,
+  ): Promise<boolean> {
+    try {
+      const state = await this.intxClient.getAccountState();
+      const expectedSide = direction === 'long' ? 'LONG' : 'SHORT';
+      const positions = (state?.positions ?? []) as Array<Record<string, unknown>>;
+      const match = positions.find(
+        (p) =>
+          p.product_id === instrument &&
+          p.side === expectedSide &&
+          Number(p.number_of_contracts ?? '0') > 0,
+      );
+      // Silent close: position that was open is no longer present (or zero).
+      return !match;
+    } catch (detectErr) {
+      liveLog.error(
+        { err: detectErr instanceof Error ? detectErr.message : String(detectErr) },
+        'Silent-close detection failed — original placeOrder error will propagate',
+      );
+      return false;
+    }
   }
 
   async cleanupOrders(sessionId: string): Promise<void> {

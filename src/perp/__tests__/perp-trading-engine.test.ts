@@ -994,9 +994,14 @@ describe('PerpTradingEngine (live mode)', () => {
         orderId: 'ex-entry', status: 'FILLED', execQty: '0.1', avgPrice: '50000', fee: '0.5',
       })
       .mockRejectedValueOnce(new Error('Network timeout'));
-    // getAccountState (silent-fill check during close) returns empty → no silent fill
+    // Exchange STILL shows position → silent-close detection says "close genuinely failed"
+    // (empty positions would be interpreted as silent close success)
     vi.mocked(intxClient.getAccountState).mockResolvedValue({
-      positions: [], balances: {}, summary: {},
+      positions: [
+        { product_id: 'BTC-PERP', side: 'LONG', number_of_contracts: '0.1', avg_entry_price: '50000' },
+      ],
+      balances: {},
+      summary: {},
     });
 
     const orphanEvents: any[] = [];
@@ -1011,6 +1016,36 @@ describe('PerpTradingEngine (live mode)', () => {
     expect(orphanEvents).toHaveLength(1);
     expect(orphanEvents[0].recovered).toBe(false);
     expect(engine.getCurrentSession()).toBeNull();
+  });
+
+  it('closePosition: nulls currentSession and emits orphanPosition when updateSession throws after exchange close', async () => {
+    // First, open a position normally (createSession not mocked to throw yet)
+    engine.start();
+    const session = await engine.openPosition('BTC-PERP', 'long', '0.1', 5, '50000');
+    expect(engine.getCurrentSession()).not.toBeNull();
+
+    // Now simulate DB failure on close update
+    (stateStore.updateSession as any).mockImplementation(() => {
+      throw new Error('SQLITE_BUSY: database is locked');
+    });
+
+    const orphanEvents: any[] = [];
+    engine.on('orphanPosition', (evt) => orphanEvents.push(evt));
+
+    await expect(engine.closePosition('51000', 'manual')).rejects.toThrow('SQLITE_BUSY');
+
+    // Exchange-side close succeeded (placeOrder was called for the close),
+    // so currentSession MUST be nulled — leaving it set would block all future entries.
+    expect(engine.getCurrentSession()).toBeNull();
+
+    // orphanPosition emitted so dashboard surfaces the inconsistency
+    expect(orphanEvents).toHaveLength(1);
+    expect(orphanEvents[0]).toMatchObject({
+      instrument: 'BTC-PERP',
+      reason: 'updateSession_failed',
+      recovered: true, // exchange side is consistent, only DB is stale
+      sessionId: session.id,
+    });
   });
 
   it('openPosition: paper mode createSession failure does not attempt emergency close', async () => {

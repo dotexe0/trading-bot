@@ -352,6 +352,76 @@ describe('LivePerpOrderExecutor', () => {
     ).rejects.toThrow('Network timeout'); // original error preserved, not Exchange offline
   });
 
+  // ── Silent-close detection (CP-3) ──────────────────────────────────
+
+  it('closePosition: detects silent close when placeOrder throws but exchange shows no position', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('ECONNRESET'));
+    // Exchange shows no position → silent close succeeded
+    mockIntxClient.getAccountState.mockResolvedValue({
+      positions: [],
+      balances: {},
+      summary: {},
+    });
+
+    const session = makeSession();
+    const result = await executor.closePosition({ session, markPrice: '51000', reason: 'manual' });
+
+    // Treated as closed — use requested markPrice as exit price (best effort), fee unknown
+    expect(result.fillPrice).toBe('51000');
+    expect(result.fee).toBe('0');
+    expect(mockIntxClient.getAccountState).toHaveBeenCalled();
+  });
+
+  it('closePosition: detects silent close when exchange shows zero-contract position', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
+    mockIntxClient.getAccountState.mockResolvedValue({
+      positions: [
+        {
+          product_id: 'BTC-PERP',
+          side: 'LONG',
+          number_of_contracts: '0', // exchange already flat
+          avg_entry_price: '50000',
+        },
+      ],
+      balances: {}, summary: {},
+    });
+
+    const session = makeSession();
+    const result = await executor.closePosition({ session, markPrice: '51000' });
+
+    expect(result.fillPrice).toBe('51000');
+  });
+
+  it('closePosition: re-throws original error when placeOrder throws and position still on exchange', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
+    mockIntxClient.getAccountState.mockResolvedValue({
+      positions: [
+        {
+          product_id: 'BTC-PERP',
+          side: 'LONG',
+          number_of_contracts: '0.1', // still open — close genuinely failed
+          avg_entry_price: '50000',
+        },
+      ],
+      balances: {}, summary: {},
+    });
+
+    const session = makeSession();
+    await expect(
+      executor.closePosition({ session, markPrice: '51000' }),
+    ).rejects.toThrow('Network timeout');
+  });
+
+  it('closePosition: re-throws original error when getAccountState also fails', async () => {
+    mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
+    mockIntxClient.getAccountState.mockRejectedValue(new Error('Exchange offline'));
+
+    const session = makeSession();
+    await expect(
+      executor.closePosition({ session, markPrice: '51000' }),
+    ).rejects.toThrow('Network timeout');
+  });
+
   it('openPosition: treats zero-contract position as no match (not silent fill)', async () => {
     mockIntxClient.placeOrder.mockRejectedValue(new Error('Network timeout'));
     mockIntxClient.getAccountState.mockResolvedValue({

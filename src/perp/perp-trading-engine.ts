@@ -826,25 +826,50 @@ export class PerpTradingEngine extends EventEmitter {
     session.closedAt = closedAt;
     session.closeReason = closeReason;
 
-    this.stateStore.updateSession(session.id, { status: 'closed', closedAt, closeReason });
-
-    // Record closed trade for analytics
-    this.stateStore.recordTrade({
-      sessionId: session.id,
-      instrument: session.instrument,
-      direction: session.direction,
-      leverage: session.leverage,
-      entryPrice: session.entryPrice,
-      exitPrice: fill.fillPrice,
-      size: session.size,
-      cumulativeFundingCost: session.cumulativeFundingCost ?? '0.00000000',
-      realizedPnl,
-      openedAt: session.openedAt,
-      closedAt,
-      closeReason,
-      strategyName: this.ctrl.getStrategy()?.name,
-      regimeAtEntry: this.ctrl.getCurrentRegime(),
-    });
+    try {
+      this.stateStore.updateSession(session.id, { status: 'closed', closedAt, closeReason });
+      // Record closed trade for analytics — grouped with updateSession under the same
+      // try so a DB outage doesn't leave engine state pointing at a closed exchange position.
+      this.stateStore.recordTrade({
+        sessionId: session.id,
+        instrument: session.instrument,
+        direction: session.direction,
+        leverage: session.leverage,
+        entryPrice: session.entryPrice,
+        exitPrice: fill.fillPrice,
+        size: session.size,
+        cumulativeFundingCost: session.cumulativeFundingCost ?? '0.00000000',
+        realizedPnl,
+        openedAt: session.openedAt,
+        closedAt,
+        closeReason,
+        strategyName: this.ctrl.getStrategy()?.name,
+        regimeAtEntry: this.ctrl.getCurrentRegime(),
+      });
+    } catch (dbErr) {
+      // Exchange-side close succeeded but DB write failed. Leaving currentSession set
+      // would block all future entries — flatten engine state to match the exchange.
+      log.error(
+        {
+          err: dbErr instanceof Error ? dbErr.message : String(dbErr),
+          sessionId: session.id,
+          instrument: session.instrument,
+        },
+        'CRITICAL: close DB write failed after successful exchange close — flattening engine state to match exchange',
+      );
+      this.emit('orphanPosition', {
+        instrument: session.instrument,
+        direction: session.direction,
+        size: session.size,
+        recovered: true, // exchange-side consistent, only DB stale
+        reason: 'updateSession_failed',
+        sessionId: session.id,
+      });
+      this.currentSession = null;
+      this._paperEntryPrice = null;
+      this._fundingRateTracker.reset();
+      throw dbErr;
+    }
 
     log.info(
       {
