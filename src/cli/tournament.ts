@@ -10,7 +10,7 @@ import { bootstrap } from './shared/bootstrap.js';
 import { out } from './shared/output.js';
 import { BacktestEngine } from '../backtest/engine.js';
 import { MetricsCalculator } from '../backtest/metrics.js';
-import { WalkForwardRunner } from '../backtest/walk-forward.js';
+import { WalkForwardRunner, splitWalkForward } from '../backtest/walk-forward.js';
 import { TournamentRunner } from '../tournament/tournament-runner.js';
 import { parseTournamentConfig } from '../tournament/config.js';
 import { RiskManager } from '../risk/risk-manager.js';
@@ -81,11 +81,12 @@ program
         metricsCalculator,
       });
 
-      // Compute walk-forward window durations from data range
+      // Walk-forward windows: use the SAME 5-window split as the deployment
+      // pipeline (start.ts) so CLI numbers match how the bot actually evaluates.
+      // (Was a hand-rolled 3-window split, which produced misleadingly rosy,
+      // small-sample OOS Sharpes that didn't match deployment.)
       const totalMs = endMs - startMs;
-      const trainWindowMs = Math.floor(totalMs * 0.7 / 3);
-      const validateWindowMs = Math.floor(totalMs * 0.3 / 3);
-      const stepMs = trainWindowMs + validateWindowMs;
+      const { trainWindowMs, validateWindowMs, stepMs } = splitWalkForward(totalMs);
 
       // Load optimized exit configs and merge into strategy configs
       const exitStore = new ExitConfigStore({ dbPath: config.database.path });
@@ -141,6 +142,8 @@ program
         initialCapital: capital,
         topN,
         activationMode: 'none',
+        // Coinbase spot cannot short — evaluate long-only so CLI matches paper/live.
+        allowShorts: false,
         walkForward: {
           trainWindowMs,
           validateWindowMs,
