@@ -29,6 +29,12 @@ const configSchema = z.object({
       .array(z.enum(['BTC-USD', 'ETH-USD']))
       .default(['BTC-USD', 'ETH-USD']),
     historyDays: z.number().int().positive().default(365),
+    /**
+     * History window (days) for native 1h/1D fetching. Separate from the 1m
+     * `historyDays` because Coinbase retains coarse candles far longer; the
+     * fetch walks back until empty, bounded by this generous cap. Default 3 years.
+     */
+    nativeHistoryDays: z.number().int().positive().default(1095),
   }),
   logging: z.object({
     level: z
@@ -73,6 +79,7 @@ export type Config = z.infer<typeof configSchema>;
  * - DB_PATH -> database.path
  * - TRADING_PAIRS -> data.pairs (comma-separated)
  * - HISTORY_DAYS -> data.historyDays (parsed as int)
+ * - NATIVE_HISTORY_DAYS -> data.nativeHistoryDays (parsed as int, default 1095 = 3yr)
  * - LOG_LEVEL -> logging.level
  * - FCM_ENABLED -> intx.enabled (default false)
  * - FCM_TESTNET -> intx.testnet (default false)
@@ -123,6 +130,9 @@ export function loadConfig(): Config {
         ? env.TRADING_PAIRS.split(',').map((s) => s.trim())
         : ['BTC-USD', 'ETH-USD'],
       historyDays: env.HISTORY_DAYS ? parseInt(env.HISTORY_DAYS, 10) : 365,
+      nativeHistoryDays: env.NATIVE_HISTORY_DAYS
+        ? parseInt(env.NATIVE_HISTORY_DAYS, 10)
+        : 1095,
     },
     logging: {
       level: env.LOG_LEVEL ?? 'info',

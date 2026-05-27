@@ -1,7 +1,7 @@
 # Design: Native Higher-Timeframe Candle Fetching
 
 **Date:** 2026-05-26
-**Status:** Approved design — pre-implementation.
+**Status:** ✅ Implemented 2026-05-27 (TDD). See `coinbase.ts`, `pipeline.ts`, `config.ts` + tests in `providers.test.ts`, `pipeline.test.ts`, `config.test.ts`. Edge re-validation (#2) still pending — run `npm run fetch` to populate native history, then re-run multi-window walk-forward.
 **Goal:** Fetch 1+ years of 1h/1D candle history (vs the current ~113 days) so out-of-sample edge validation has statistical power.
 
 ## Problem

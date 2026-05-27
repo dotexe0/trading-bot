@@ -14,28 +14,57 @@ import type { Candle, TradingPair, Timeframe } from '../core/types.js';
 import { TIMEFRAME_MS } from '../core/types.js';
 import { createModuleLogger } from '../core/logger.js';
 import { CoinbaseProvider } from './providers/coinbase.js';
+import type { CandleGranularity } from './providers/coinbase.js';
 import { CryptoCompareProvider } from './providers/cryptocompare.js';
 import type { CandleRepository } from './storage/candle-repo.js';
 import { validateCandles } from './validator.js';
 import { detectGaps, classifyGaps } from './gap-detector.js';
-import { aggregateAllTimeframes } from './aggregator.js';
+import { aggregateCandles } from './aggregator.js';
 
 const log = createModuleLogger('pipeline');
 
+/** Timeframes aggregated from 1m candles (coarse frames come from native fetch). */
+const SCALPING_TIMEFRAMES: Timeframe[] = ['5m', '15m'];
+
+/** Native granularities fetched directly from Coinbase, with their stored timeframe. */
+const NATIVE_FETCHES: ReadonlyArray<{ granularity: CandleGranularity; timeframe: Timeframe }> = [
+  { granularity: 'ONE_HOUR', timeframe: '1h' },
+  { granularity: 'ONE_DAY', timeframe: '1D' },
+];
+
+/**
+ * Minimal candle-fetching contract DataPipeline depends on.
+ * Declared as an interface so tests can inject a mock provider.
+ */
+export interface CandleFetcher {
+  fetchCandles(
+    pair: TradingPair,
+    startMs: number,
+    endMs: number,
+    granularity?: CandleGranularity,
+  ): Promise<Candle[]>;
+}
+
 export class DataPipeline {
-  private coinbase: CoinbaseProvider;
+  private coinbase: CandleFetcher;
   private cryptoCompare: CryptoCompareProvider | null;
   private repo: CandleRepository;
   private config: Config;
 
-  constructor(config: Config, repo: CandleRepository) {
+  /**
+   * @param coinbase - Optional injected candle fetcher (for testing);
+   *                   defaults to a real CoinbaseProvider built from config.
+   */
+  constructor(config: Config, repo: CandleRepository, coinbase?: CandleFetcher) {
     this.config = config;
     this.repo = repo;
 
-    this.coinbase = new CoinbaseProvider(
-      config.coinbase.apiKeyName,
-      config.coinbase.apiKeySecret,
-    );
+    this.coinbase =
+      coinbase ??
+      new CoinbaseProvider(
+        config.coinbase.apiKeyName,
+        config.coinbase.apiKeySecret,
+      );
 
     this.cryptoCompare =
       config.cryptoCompare.apiKey.length > 0
@@ -55,8 +84,9 @@ export class DataPipeline {
    * 3. Validate fetched candles
    * 4. Store valid candles
    * 5. Detect and attempt to fill gaps
-   * 6. Aggregate to all higher timeframes
-   * 7. Store aggregated candles
+   * 6. Aggregate 1m → 5m/15m only (coarse frames come from native fetch)
+   * 7. Fetch native 1h and 1D directly (sole source — lifts the ~113-day 1m ceiling)
+   * 8. Derive 4h from the stored native 1h
    */
   async runFull(pair: TradingPair): Promise<void> {
     const endMs = Date.now();
@@ -182,29 +212,22 @@ export class DataPipeline {
       }
     }
 
-    // Step 6: Aggregate 1m candles to all higher timeframes
-    // Fetch all stored 1m candles for aggregation
+    // Step 6: Aggregate 1m candles to scalping timeframes only (5m/15m).
+    // 1h/1D are no longer derived from 1m — they come from the native fetch below.
     const earliest = this.repo.getEarliestTimestamp(pair, '1m');
     const latest = this.repo.getLatestTimestamp(pair, '1m');
+    let totalAggregated = 0;
 
     if (earliest !== null && latest !== null) {
-      const allMinuteCandles = this.repo.getCandles(
-        pair,
-        '1m',
-        earliest,
-        latest,
-      );
+      const allMinuteCandles = this.repo.getCandles(pair, '1m', earliest, latest);
 
       log.info(
         { pair, minuteCandles: allMinuteCandles.length },
-        'Aggregating to higher timeframes',
+        'Aggregating 1m to scalping timeframes (5m/15m)',
       );
 
-      const aggregated = aggregateAllTimeframes(allMinuteCandles, pair);
-
-      // Step 7: Store aggregated candles
-      let totalAggregated = 0;
-      for (const [timeframe, candles] of aggregated) {
+      for (const timeframe of SCALPING_TIMEFRAMES) {
+        const candles = aggregateCandles(allMinuteCandles, timeframe);
         const aggInserted = this.repo.insertCandles(candles);
         totalAggregated += aggInserted;
         log.info(
@@ -212,23 +235,110 @@ export class DataPipeline {
           'Aggregated candles stored',
         );
       }
+    } else {
+      log.warn({ pair }, 'No 1m candles found after fetch -- skipping 5m/15m aggregation');
+    }
 
+    // Step 7: Fetch native 1h and 1D directly (sole source for those frames).
+    for (const { granularity, timeframe } of NATIVE_FETCHES) {
+      await this.syncNativeTimeframe(pair, granularity, timeframe);
+    }
+
+    // Step 8: Derive 4h from the stored native 1h candles.
+    const fourHourStored = this.derive4hFromNativeHourly(pair);
+
+    log.info(
+      {
+        pair,
+        rawFetched: rawCandles.length,
+        valid: valid.length,
+        rejected: rejected.length,
+        stored: insertedCount,
+        gapsFound: gaps.length,
+        gapsFilled,
+        totalAggregated,
+        fourHourStored,
+      },
+      'Pipeline complete for pair',
+    );
+  }
+
+  /**
+   * Fetch a native higher-timeframe (1h or 1D) directly from Coinbase and store it.
+   *
+   * Walks back over `nativeHistoryDays` (fetch-until-empty discovers the true
+   * retention limit), or incrementally from the latest stored candle. Native
+   * candles already carry the correct timeframe tag. A fetch failure logs and
+   * preserves existing stored data (never wipes).
+   */
+  private async syncNativeTimeframe(
+    pair: TradingPair,
+    granularity: CandleGranularity,
+    timeframe: Timeframe,
+  ): Promise<void> {
+    const endMs = Date.now();
+    const latestTimestamp = this.repo.getLatestTimestamp(pair, timeframe);
+    const startMs =
+      latestTimestamp !== null
+        ? latestTimestamp
+        : endMs - this.config.data.nativeHistoryDays * 86_400_000;
+
+    log.info(
+      {
+        pair,
+        timeframe,
+        granularity,
+        mode: latestTimestamp !== null ? 'incremental' : 'full',
+        from: new Date(startMs).toISOString(),
+        to: new Date(endMs).toISOString(),
+      },
+      'Fetching native candles from Coinbase',
+    );
+
+    try {
+      const native = await this.coinbase.fetchCandles(pair, startMs, endMs, granularity);
+      const { valid, rejected } = validateCandles(native);
+      const inserted = this.repo.insertCandles(valid);
       log.info(
+        { pair, timeframe, fetched: native.length, valid: valid.length, rejected: rejected.length, stored: inserted },
+        'Native candles stored',
+      );
+    } catch (error) {
+      log.error(
         {
           pair,
-          rawFetched: rawCandles.length,
-          valid: valid.length,
-          rejected: rejected.length,
-          stored: insertedCount,
-          gapsFound: gaps.length,
-          gapsFilled,
-          totalAggregated,
+          timeframe,
+          granularity,
+          error: error instanceof Error ? error.message : String(error),
         },
-        'Pipeline complete for pair',
+        'Native fetch failed -- preserving existing stored data',
       );
-    } else {
-      log.warn({ pair }, 'No 1m candles found after fetch -- skipping aggregation');
     }
+  }
+
+  /**
+   * Aggregate the stored native 1h candles into 4h and store them.
+   * Coinbase has no native 4h granularity, so it is derived from 1h.
+   *
+   * @returns Number of 4h candles newly stored
+   */
+  private derive4hFromNativeHourly(pair: TradingPair): number {
+    const earliest = this.repo.getEarliestTimestamp(pair, '1h');
+    const latest = this.repo.getLatestTimestamp(pair, '1h');
+
+    if (earliest === null || latest === null) {
+      log.warn({ pair }, 'No native 1h candles -- skipping 4h derivation');
+      return 0;
+    }
+
+    const hourly = this.repo.getCandles(pair, '1h', earliest, latest);
+    const fourHour = aggregateCandles(hourly, '4h');
+    const inserted = this.repo.insertCandles(fourHour);
+    log.info(
+      { pair, hourlyCandles: hourly.length, stored: inserted, total: fourHour.length },
+      '4h derived from native 1h and stored',
+    );
+    return inserted;
   }
 
   /**
