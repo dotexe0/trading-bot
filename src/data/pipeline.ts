@@ -266,10 +266,17 @@ export class DataPipeline {
   /**
    * Fetch a native higher-timeframe (1h or 1D) directly from Coinbase and store it.
    *
-   * Walks back over `nativeHistoryDays` (fetch-until-empty discovers the true
-   * retention limit), or incrementally from the latest stored candle. Native
-   * candles already carry the correct timeframe tag. A fetch failure logs and
-   * preserves existing stored data (never wipes).
+   * Two complementary passes, because a DB may already hold shallow candles for
+   * this frame (e.g. the old 1m-aggregation era) — a forward-only resume would
+   * top up recent candles but never lift the history ceiling:
+   *
+   *   1. Forward top-up: from the latest stored candle to now (catch up since last sync).
+   *   2. Backward backfill: from the `nativeHistoryDays` target up to the earliest
+   *      stored candle, extending deep history. fetch-until-empty self-limits once
+   *      Coinbase's true retention edge is reached, so steady-state runs are cheap.
+   *
+   * Native candles already carry the correct timeframe tag, and INSERT OR IGNORE
+   * dedupes any overlap. A fetch failure logs and preserves existing data (never wipes).
    */
   private async syncNativeTimeframe(
     pair: TradingPair,
@@ -277,18 +284,49 @@ export class DataPipeline {
     timeframe: Timeframe,
   ): Promise<void> {
     const endMs = Date.now();
-    const latestTimestamp = this.repo.getLatestTimestamp(pair, timeframe);
-    const startMs =
-      latestTimestamp !== null
-        ? latestTimestamp
-        : endMs - this.config.data.nativeHistoryDays * 86_400_000;
+    const targetStartMs = endMs - this.config.data.nativeHistoryDays * 86_400_000;
+    const latest = this.repo.getLatestTimestamp(pair, timeframe);
+    const earliest = this.repo.getEarliestTimestamp(pair, timeframe);
 
+    // Pass 1: forward top-up from the latest stored candle (skip when no data yet).
+    if (latest !== null) {
+      await this.fetchNativeRange(pair, granularity, timeframe, latest, endMs, 'forward');
+    }
+
+    // Pass 2: backward backfill toward the native target. When the DB is empty
+    // this is the full fetch; when shallow data exists it extends deeper; once
+    // Coinbase's retention edge is reached it returns empty almost immediately.
+    if (earliest === null || earliest > targetStartMs) {
+      const backfillEndMs = earliest ?? endMs;
+      await this.fetchNativeRange(
+        pair,
+        granularity,
+        timeframe,
+        targetStartMs,
+        backfillEndMs,
+        'backfill',
+      );
+    }
+  }
+
+  /**
+   * Fetch a native candle range and store the valid candles. Failures are logged
+   * and swallowed so one bad pass never wipes or aborts the rest of the sync.
+   */
+  private async fetchNativeRange(
+    pair: TradingPair,
+    granularity: CandleGranularity,
+    timeframe: Timeframe,
+    startMs: number,
+    endMs: number,
+    mode: 'forward' | 'backfill',
+  ): Promise<void> {
     log.info(
       {
         pair,
         timeframe,
         granularity,
-        mode: latestTimestamp !== null ? 'incremental' : 'full',
+        mode,
         from: new Date(startMs).toISOString(),
         to: new Date(endMs).toISOString(),
       },
@@ -300,7 +338,7 @@ export class DataPipeline {
       const { valid, rejected } = validateCandles(native);
       const inserted = this.repo.insertCandles(valid);
       log.info(
-        { pair, timeframe, fetched: native.length, valid: valid.length, rejected: rejected.length, stored: inserted },
+        { pair, timeframe, mode, fetched: native.length, valid: valid.length, rejected: rejected.length, stored: inserted },
         'Native candles stored',
       );
     } catch (error) {
@@ -309,6 +347,7 @@ export class DataPipeline {
           pair,
           timeframe,
           granularity,
+          mode,
           error: error instanceof Error ? error.message : String(error),
         },
         'Native fetch failed -- preserving existing stored data',

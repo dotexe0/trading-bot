@@ -74,13 +74,15 @@ const DAY_CANDLES = Array.from({ length: 30 }, (_, i) =>
 
 interface FetchCall {
   granularity: CandleGranularity;
+  startMs: number;
+  endMs: number;
 }
 
 function makeMockFetcher(): { fetcher: CandleFetcher; calls: FetchCall[] } {
   const calls: FetchCall[] = [];
   const fetcher: CandleFetcher = {
-    async fetchCandles(_pair, _startMs, _endMs, granularity = 'ONE_MINUTE') {
-      calls.push({ granularity });
+    async fetchCandles(_pair, startMs, endMs, granularity = 'ONE_MINUTE') {
+      calls.push({ granularity, startMs, endMs });
       if (granularity === 'ONE_HOUR') return HOUR_CANDLES;
       if (granularity === 'ONE_DAY') return DAY_CANDLES;
       return MINUTE_CANDLES;
@@ -128,5 +130,38 @@ describe('DataPipeline.runFull native higher-timeframe wiring', () => {
 
   it('derives 4h from the stored native 1h', () => {
     expect(repo.getCandleCount('BTC-USD', '4h')).toBe(25);
+  });
+});
+
+describe('DataPipeline.runFull backfills deep native history over shallow data', () => {
+  // Reproduces the real-run bug: a DB pre-populated with only ~recent 1h candles
+  // (e.g. the old 1m-aggregation era) must still trigger a BACKWARD fetch toward
+  // the nativeHistoryDays target — not just a forward incremental top-up.
+  it('requests native history back to ~nativeHistoryDays even when recent 1h exists', async () => {
+    const { db, sqlite } = createDatabase(':memory:');
+    initializeSchema(sqlite);
+    const repo = new CandleRepository(db);
+
+    // Pre-seed shallow 1h/1D history: earliest is only ~100 days old, far short
+    // of the 1095-day target. Forward-only resume would never reach back further.
+    const now = Date.now();
+    const shallowStart = Math.floor((now - 100 * DAY) / HOUR) * HOUR;
+    const shallowHourly = Array.from({ length: 200 }, (_, i) =>
+      candle('BTC-USD', '1h', shallowStart + i * HOUR),
+    );
+    repo.insertCandles(shallowHourly);
+    repo.insertCandles([candle('BTC-USD', '1D', Math.floor((now - 100 * DAY) / DAY) * DAY)]);
+
+    const mock = makeMockFetcher();
+    const pipeline = new DataPipeline(makeConfig(), repo, mock.fetcher);
+    await pipeline.runFull('BTC-USD');
+
+    const hourlyStarts = mock.calls
+      .filter((c) => c.granularity === 'ONE_HOUR')
+      .map((c) => c.startMs);
+
+    // A backfill request must reach far past the 100-day shallow data toward the
+    // ~1095-day native target (threshold has margin to avoid ms-level Date.now skew).
+    expect(Math.min(...hourlyStarts)).toBeLessThanOrEqual(now - 1000 * DAY);
   });
 });
