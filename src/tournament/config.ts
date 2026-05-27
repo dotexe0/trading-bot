@@ -40,6 +40,13 @@ export const tournamentConfigSchema = z
      */
     minOosSharpe: z.number().default(0),
     /**
+     * Minimum aggregate out-of-sample trade count a strategy must have to be
+     * deployable. A Sharpe computed on a handful of trades is statistical noise
+     * (one trade can swing a window from +2.8 to −2.9), so a positive OOS Sharpe
+     * on too few trades is not a trustworthy edge — hold cash instead. Default 30.
+     */
+    minOosTrades: z.number().int().min(0).default(30),
+    /**
      * Whether short entries are allowed in evaluation. Spot (Coinbase) cannot
      * short, so spot tournaments must set this false to match live execution.
      * Perp can short — default true.

@@ -212,11 +212,19 @@ export class TournamentRunner {
     //    disqualify on robustnessRatio < 0: that flag fires for IS-negative/
     //    OOS-positive strategies, which are desirable, not flukes.
     const minOosSharpe = config.minOosSharpe ?? 0;
+    const minOosTrades = config.minOosTrades ?? 30;
     for (const entry of entries) {
       const oosSharpe = entry.oosMetrics.sharpeRatio;
-      if (entry.oosMetrics.totalTrades === 0) {
+      const oosTrades = entry.oosMetrics.totalTrades;
+      if (oosTrades === 0) {
         entry.disqualified = true;
         entry.disqualifyReason = 'No OOS trades — strategy never traded';
+      } else if (oosTrades < minOosTrades) {
+        // Too few out-of-sample trades for the Sharpe to be trustworthy — a
+        // positive number here is small-sample noise, not a demonstrated edge.
+        entry.disqualified = true;
+        entry.disqualifyReason =
+          `Only ${oosTrades} OOS trades < ${minOosTrades} minimum — sample too small to trust`;
       } else if (oosSharpe <= minOosSharpe) {
         entry.disqualified = true;
         entry.disqualifyReason =

@@ -65,6 +65,7 @@ function makeConfig(): TournamentConfig {
     topN: 3,
     activationMode: 'none',
     minOosSharpe: 0,
+    minOosTrades: 30,
     allowShorts: true,
   };
 }

@@ -28,7 +28,7 @@ function makeMetrics(overrides: Partial<PerformanceMetrics> = {}): PerformanceMe
     maxDrawdownPct: d('0.01'),
     winRate: d('0.6'),
     profitFactor: d('1.5'),
-    totalTrades: 10,
+    totalTrades: 50, // healthy default — above the deployability minOosTrades gate
     totalFees: d('5'),
     fundingCost: ZERO,
     avgTradeReturn: d('0.01'),
@@ -81,6 +81,7 @@ function makeTournamentConfig(overrides: Partial<TournamentConfig> = {}): Tourna
     topN: 3,
     activationMode: 'none',
     minOosSharpe: 0,
+    minOosTrades: 30,
     allowShorts: true,
     ...overrides,
   };
@@ -469,6 +470,47 @@ describe('TournamentRunner regime leaderboards', () => {
       expect(result.leaderboard[1].disqualified).toBe(true);
       expect(result.leaderboard[1].disqualifyReason).toMatch(/No OOS trades/);
       expect(result.leaderboard[1].rank).toBe(2);
+    });
+
+    it('disqualifies a positive-OOS strategy with too few OOS trades (untrustworthy Sharpe)', async () => {
+      // 18 OOS trades over the windows with a positive Sharpe — exactly the
+      // bollinger-on-4h trap: a "positive edge" computed on a handful of trades.
+      const fewTradesResult = makeWfResult(0.9, [0.8]);
+      fewTradesResult.aggregateValidateMetrics.totalTrades = 18;
+      mockWfRunner.run.mockReturnValue(fewTradesResult);
+      mockRegistry.list.mockReturnValue(['few-trades-strat']);
+
+      const config = makeTournamentConfig(); // default minOosTrades (30)
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(true);
+      expect(result.leaderboard[0].disqualifyReason).toMatch(/trades|sample/i);
+      expect(selectDeployableEntries(result.leaderboard)).toHaveLength(0);
+    });
+
+    it('keeps a positive-OOS strategy with enough OOS trades', async () => {
+      const enoughTradesResult = makeWfResult(0.9, [0.8]);
+      enoughTradesResult.aggregateValidateMetrics.totalTrades = 120;
+      mockWfRunner.run.mockReturnValue(enoughTradesResult);
+      mockRegistry.list.mockReturnValue(['active-strat']);
+
+      const result = await runner.run(makeTournamentConfig(), dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(false);
+      expect(result.leaderboard[0].disqualifyReason).toBeNull();
+    });
+
+    it('respects a custom minOosTrades threshold', async () => {
+      const wf = makeWfResult(0.9, [0.8]);
+      wf.aggregateValidateMetrics.totalTrades = 40; // passes default 30, fails custom 50
+      mockWfRunner.run.mockReturnValue(wf);
+      mockRegistry.list.mockReturnValue(['mid-freq-strat']);
+
+      const config = makeTournamentConfig({ minOosTrades: 50 } as Partial<TournamentConfig>);
+      const result = await runner.run(config, dummyCandles);
+
+      expect(result.leaderboard[0].disqualified).toBe(true);
+      expect(result.leaderboard[0].disqualifyReason).toMatch(/trades|sample/i);
     });
 
     it('does NOT fall back to a deployable winner when every strategy has non-positive OOS (hold cash)', async () => {
